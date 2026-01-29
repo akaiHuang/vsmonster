@@ -1,0 +1,26 @@
+{
+  "name": "vsmolt-monorepo",
+  "version": "0.0.1",
+  "private": true,
+  "description": "vsMolt - 將社群軟體連接到 VS Code Copilot",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm --filter @vsmolt/gateway dev",
+    "start": "pnpm --filter @vsmolt/gateway start",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "extension:build": "pnpm --filter vsmolt build",
+    "extension:watch": "pnpm --filter vsmolt watch"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "typescript": "^5.x"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.15.0"
+}

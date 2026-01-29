@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - VSMOLT_PORT=3000
+      # LINE
+      - LINE_CHANNEL_ACCESS_TOKEN=${LINE_CHANNEL_ACCESS_TOKEN}
+      - LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
+      # Telegram
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      # ngrok (可選)
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+      - NGROK_ENABLED=${NGROK_ENABLED:-false}
+    volumes:
+      - ./configs:/app/configs:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
