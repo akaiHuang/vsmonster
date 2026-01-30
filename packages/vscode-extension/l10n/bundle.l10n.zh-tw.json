@@ -29,6 +29,11 @@
   "Select language": "選擇語言",
   "English": "English",
   "Traditional Chinese": "繁體中文",
+  "Simplified Chinese": "简体中文",
+  "Japanese": "日本語",
+  "German": "Deutsch",
+  "French": "Français",
+  "Russian": "Русский",
   "Reload": "重新載入",
   "Cancel": "取消"
 }

@@ -28,7 +28,12 @@
   "Language changed. Please reload VS Code.": "Language changed. Please reload VS Code.",
   "Select language": "Select language",
   "English": "English",
-  "Traditional Chinese": "Traditional Chinese",
+  "Traditional Chinese": "繁體中文",
+  "Simplified Chinese": "简体中文",
+  "Japanese": "日本語",
+  "German": "Deutsch",
+  "French": "Français",
+  "Russian": "Русский",
   "Reload": "Reload",
   "Cancel": "Cancel"
 }
