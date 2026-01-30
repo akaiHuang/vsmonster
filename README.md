@@ -1,4 +1,4 @@
-# <img src="packages/vscode-extension/resources/bluemonster.svg" height="28"> VSMONSTER
+# <img src="packages/vscode-extension/resources/bluemonster.svg" height="32" align="absmiddle"> VSMONSTER
 
 > 把 LINE / Telegram / Discord 的訊息帶進 VS Code Copilot 的本地橋接平台
 
