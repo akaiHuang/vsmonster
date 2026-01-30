@@ -36,7 +36,7 @@ ${c.monsterBlue}${c.bright}
 ${c.reset}
   ${c.bright}VSMONSTER${c.reset} - 將社群軟體連接到 VS Code Copilot
   
-  ${c.cyan}Powered by 🦞 Moltbot${c.reset} - https://github.com/moltbot/moltbot
+  ${c.cyan}Inspired by 🦞 Moltbot${c.reset} - https://github.com/moltbot/moltbot
   ${c.yellow}感謝 Moltbot 團隊的開源貢獻！${c.reset}
 `);
 }

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="packages/vscode-extension/resources/banner.svg" alt="VSMONSTER Banner" width="600">
+</p>
+
 # 👾 VSMONSTER
 
 > 把 LINE / Telegram / Discord 的訊息帶進 VS Code Copilot 的本地橋接平台
