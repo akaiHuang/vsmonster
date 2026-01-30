@@ -12,29 +12,34 @@ let statusBarItem: vscode.StatusBarItem;
 
 const FIRST_RUN_KEY = 'vsmonster.hasCompletedSetup';
 
+// Localization helper
+function t(key: string): string {
+  return vscode.l10n.t(key);
+}
+
 export async function activate(context: vscode.ExtensionContext) {
   console.log('VSMONSTER extension is now active');
 
-  // 建立狀態列項目
+  // Create status bar item
   statusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
     100
   );
   statusBarItem.text = '$(plug) VSMONSTER';
-  statusBarItem.tooltip = 'VSMONSTER: 未連接';
+  statusBarItem.tooltip = `VSMONSTER: ${t('Disconnected')}`;
   statusBarItem.command = 'vsmonster.showStatus';
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
 
-  // 初始化服務
+  // Initialize services
   terminalManager = new TerminalManager();
   copilotBridge = new CopilotBridge(context);
   
-  // 註冊任務視圖
+  // Register task view
   const taskView = new TaskView();
   vscode.window.registerTreeDataProvider('vsmonsterTasks', taskView);
 
-  // 註冊命令
+  // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand('vsmonster.connect', () => connectToGateway(context, taskView)),
     vscode.commands.registerCommand('vsmonster.disconnect', disconnectFromGateway),
@@ -45,16 +50,17 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('vsmonster.refreshTasks', () => taskView.refresh()),
     vscode.commands.registerCommand('vsmonster.runSetupWizard', () => runSetupWizard(context)),
     vscode.commands.registerCommand('vsmonster.openQuickStart', openQuickStart),
+    vscode.commands.registerCommand('vsmonster.switchLanguage', switchLanguage),
   );
 
-  // 檢查是否首次啟動
+  // Check if first run
   const hasCompletedSetup = context.globalState.get<boolean>(FIRST_RUN_KEY);
   
   if (!hasCompletedSetup) {
-    // 首次啟動，執行設定向導
+    // First run, show setup wizard
     await showWelcomeMessage(context, taskView);
   } else {
-    // 自動連接 (如果配置了)
+    // Auto-connect if configured
     const config = vscode.workspace.getConfiguration('vsmonster');
     if (config.get('autoConnect')) {
       await connectToGateway(context, taskView);
@@ -63,99 +69,170 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 /**
- * 顯示歡迎訊息和設定引導
+ * Switch language command
+ */
+async function switchLanguage() {
+  const selection = await vscode.window.showQuickPick(
+    [
+      { label: 'English', value: 'en' },
+      { label: '繁體中文', value: 'zh-TW' },
+    ],
+    {
+      placeHolder: t('Select language'),
+      title: 'VSMONSTER - Language / 語言',
+    }
+  );
+
+  if (selection) {
+    const config = vscode.workspace.getConfiguration('vsmonster');
+    await config.update('language', selection.value, vscode.ConfigurationTarget.Global);
+    
+    const reload = await vscode.window.showInformationMessage(
+      t('Language changed. Please reload VS Code.'),
+      t('Reload'),
+      t('Cancel')
+    );
+    
+    if (reload === t('Reload')) {
+      await vscode.commands.executeCommand('workbench.action.reloadWindow');
+    }
+  }
+}
+
+/**
+ * Show welcome message and setup guide
  */
 async function showWelcomeMessage(context: vscode.ExtensionContext, taskView: TaskView) {
+  // Detect language for welcome message
+  const vscodeLocale = vscode.env.language;
+  const isChineseLocale = vscodeLocale.startsWith('zh');
+  
+  const welcomeMsg = isChineseLocale 
+    ? '🦞 歡迎使用 VSMONSTER！透過 LINE/Telegram/Discord 遠端操控 VS Code Copilot'
+    : '🦞 Welcome to VSMONSTER! Control VS Code Copilot remotely via LINE/Telegram/Discord';
+  
+  const startSetup = isChineseLocale ? '開始設定' : 'Start Setup';
+  const viewTutorial = isChineseLocale ? '查看教學' : 'View Tutorial';
+  const later = isChineseLocale ? '稍後設定' : 'Later';
+  
   const selection = await vscode.window.showInformationMessage(
-    '🦞 歡迎使用 VSMONSTER！透過 LINE/Telegram/Discord 遠端操控 VS Code Copilot',
-    '開始設定',
-    '查看教學',
-    '稍後設定'
+    welcomeMsg,
+    startSetup,
+    viewTutorial,
+    later
   );
 
   switch (selection) {
+    case startSetup:
     case '開始設定':
       await runSetupWizard(context);
       break;
+    case viewTutorial:
     case '查看教學':
       await openQuickStart();
       break;
+    case later:
     case '稍後設定':
-      vscode.window.showInformationMessage(
-        '你可以隨時透過命令面板執行 "VSMONSTER: 執行設定向導" 開始設定'
-      );
+      const laterMsg = isChineseLocale
+        ? '你可以隨時透過命令面板執行 "VSMONSTER: 執行設定向導" 開始設定'
+        : 'You can run "VSMONSTER: Run Setup Wizard" from the command palette anytime';
+      vscode.window.showInformationMessage(laterMsg);
       break;
   }
 }
 
 /**
- * 執行設定向導
+ * Run setup wizard
  */
 async function runSetupWizard(context: vscode.ExtensionContext) {
-  // Step 1: 檢查 Copilot
+  const vscodeLocale = vscode.env.language;
+  const isChineseLocale = vscodeLocale.startsWith('zh');
+  
+  // Step 1: Check Copilot
   const hasCopilot = await checkCopilotExtension();
   
   if (!hasCopilot) {
+    const copilotMsg = isChineseLocale
+      ? 'VSMONSTER 需要 GitHub Copilot 擴展才能運作'
+      : 'VSMONSTER requires GitHub Copilot extension to work';
+    const installBtn = isChineseLocale ? '安裝 GitHub Copilot' : 'Install GitHub Copilot';
+    const continueBtn = isChineseLocale ? '繼續（不安裝）' : 'Continue (without installing)';
+    
     const installCopilot = await vscode.window.showWarningMessage(
-      'VSMONSTER 需要 GitHub Copilot 擴展才能運作',
-      '安裝 GitHub Copilot',
-      '繼續（不安裝）'
+      copilotMsg,
+      installBtn,
+      continueBtn
     );
 
-    if (installCopilot === '安裝 GitHub Copilot') {
+    if (installCopilot === installBtn || installCopilot === '安裝 GitHub Copilot') {
       await vscode.commands.executeCommand(
         'workbench.extensions.search',
         'GitHub.copilot'
       );
-      return; // 等用戶安裝後重新啟動
+      return; // Wait for user to install and restart
     }
   }
 
-  // Step 2: 選擇社群平台
+  // Step 2: Select messaging platform
+  const telegramDesc = isChineseLocale ? '設定最簡單，推薦新手' : 'Easiest setup, recommended for beginners';
+  const lineDesc = isChineseLocale ? '適合台灣、日本用戶' : 'Best for Taiwan/Japan users';
+  const discordDesc = isChineseLocale ? '適合團隊協作' : 'Best for team collaboration';
+  const skipDesc = isChineseLocale ? '跳過頻道設定' : 'Skip channel setup';
+  const skipLabel = isChineseLocale ? '稍後設定' : 'Skip for now';
+  const placeholder = isChineseLocale ? '選擇要綁定的社群平台' : 'Select a messaging platform to connect';
+  const stepTitle = isChineseLocale ? 'VSMONSTER 設定向導 - 步驟 1/3' : 'VSMONSTER Setup Wizard - Step 1/3';
+  
   const channel = await vscode.window.showQuickPick(
     [
-      { label: '$(comment-discussion) Telegram', value: 'telegram', description: '設定最簡單，推薦新手' },
-      { label: '$(comment) LINE', value: 'line', description: '適合台灣、日本用戶' },
-      { label: '$(organization) Discord', value: 'discord', description: '適合團隊協作' },
-      { label: '$(clock) 稍後設定', value: 'skip', description: '跳過頻道設定' },
+      { label: '$(comment-discussion) Telegram', value: 'telegram', description: telegramDesc },
+      { label: '$(comment) LINE', value: 'line', description: lineDesc },
+      { label: '$(organization) Discord', value: 'discord', description: discordDesc },
+      { label: `$(clock) ${skipLabel}`, value: 'skip', description: skipDesc },
     ],
     {
-      placeHolder: '選擇要綁定的社群平台',
-      title: 'VSMONSTER 設定向導 - 步驟 1/3',
+      placeHolder: placeholder,
+      title: stepTitle,
     }
   );
 
   if (!channel) return;
 
   if (channel.value !== 'skip') {
-    // 顯示設定教學
+    // Show setup guide
     await showChannelSetupGuide(channel.value);
   }
 
-  // Step 3: 啟動 Gateway
+  // Step 3: Start Gateway
+  const startMsg = isChineseLocale
+    ? '設定完成！是否現在啟動 Gateway 服務？'
+    : 'Setup complete! Would you like to start the Gateway service now?';
+  const startBtn = isChineseLocale ? '啟動 Gateway' : 'Start Gateway';
+  const laterBtn = isChineseLocale ? '稍後啟動' : 'Start Later';
+  
   const startNow = await vscode.window.showInformationMessage(
-    '設定完成！是否現在啟動 Gateway 服務？',
-    '啟動 Gateway',
-    '稍後啟動'
+    startMsg,
+    startBtn,
+    laterBtn
   );
 
-  if (startNow === '啟動 Gateway') {
+  if (startNow === startBtn || startNow === '啟動 Gateway') {
     await startGateway();
     
-    // 等待 Gateway 啟動
+    // Wait for Gateway to start
     await new Promise(resolve => setTimeout(resolve, 3000));
     
-    // 嘗試連接
+    // Try to connect
     const taskView = new TaskView();
     await connectToGateway(context, taskView);
   }
 
-  // 標記設定完成
+  // Mark setup complete
   await context.globalState.update(FIRST_RUN_KEY, true);
 
-  vscode.window.showInformationMessage(
-    '🎉 VSMONSTER 設定完成！你現在可以透過社群軟體控制 VS Code Copilot 了'
-  );
+  const completeMsg = isChineseLocale
+    ? '🎉 VSMONSTER 設定完成！你現在可以透過社群軟體控制 VS Code Copilot 了'
+    : '🎉 VSMONSTER setup complete! You can now control VS Code Copilot via messaging apps';
+  vscode.window.showInformationMessage(completeMsg);
 }
 
 /**

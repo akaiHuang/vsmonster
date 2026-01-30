@@ -1,7 +1,7 @@
 {
   "name": "vsmonster",
-  "displayName": "VSMONSTER - Copilot 社群整合",
-  "description": "將 LINE、Telegram、Discord 等社群軟體連接到 VS Code Copilot，實現跨平台任務管理",
+  "displayName": "%displayName%",
+  "description": "%description%",
   "version": "0.0.1",
   "publisher": "vsmonster",
   "icon": "resources/icon.png",
@@ -37,52 +37,58 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
+  "l10n": "./l10n",
   "contributes": {
     "commands": [
       {
         "command": "vsmonster.connect",
-        "title": "連接 Gateway",
+        "title": "%command.connect%",
         "category": "VSMONSTER"
       },
       {
         "command": "vsmonster.disconnect",
-        "title": "斷開連接",
+        "title": "%command.disconnect%",
         "category": "VSMONSTER"
       },
       {
         "command": "vsmonster.showStatus",
-        "title": "顯示狀態",
+        "title": "%command.showStatus%",
         "category": "VSMONSTER"
       },
       {
         "command": "vsmonster.startGateway",
-        "title": "啟動 Gateway",
+        "title": "%command.startGateway%",
         "category": "VSMONSTER"
       },
       {
         "command": "vsmonster.openSettings",
-        "title": "開啟設定",
+        "title": "%command.openSettings%",
         "category": "VSMONSTER"
       },
       {
         "command": "vsmonster.sendToChannel",
-        "title": "發送訊息到頻道",
+        "title": "%command.sendToChannel%",
         "category": "VSMONSTER"
       },
       {
         "command": "vsmonster.refreshTasks",
-        "title": "刷新任務列表",
+        "title": "%command.refreshTasks%",
         "category": "VSMONSTER",
         "icon": "$(refresh)"
       },
       {
         "command": "vsmonster.runSetupWizard",
-        "title": "執行設定向導",
+        "title": "%command.runSetupWizard%",
         "category": "VSMONSTER"
       },
       {
         "command": "vsmonster.openQuickStart",
-        "title": "開啟快速開始指南",
+        "title": "%command.openQuickStart%",
+        "category": "VSMONSTER"
+      },
+      {
+        "command": "vsmonster.switchLanguage",
+        "title": "%command.switchLanguage%",
         "category": "VSMONSTER"
       }
     ],
@@ -99,18 +105,18 @@
       "vsmonster": [
         {
           "id": "vsmonsterTasks",
-          "name": "任務列表",
-          "contextualTitle": "VSMONSTER 任務"
+          "name": "%view.tasks%",
+          "contextualTitle": "%view.tasks.context%"
         },
         {
           "id": "vsmonsterChannels",
-          "name": "頻道狀態",
-          "contextualTitle": "社群頻道"
+          "name": "%view.channels%",
+          "contextualTitle": "%view.channels.context%"
         },
         {
           "id": "vsmonsterMCP",
-          "name": "MCP 服務",
-          "contextualTitle": "MCP 服務器"
+          "name": "%view.mcp%",
+          "contextualTitle": "%view.mcp.context%"
         }
       ]
     },
@@ -129,17 +135,17 @@
         "vsmonster.gatewayUrl": {
           "type": "string",
           "default": "ws://localhost:3000",
-          "description": "Gateway WebSocket URL"
+          "description": "%config.gatewayUrl%"
         },
         "vsmonster.autoConnect": {
           "type": "boolean",
           "default": true,
-          "description": "VS Code 啟動時自動連接 Gateway"
+          "description": "%config.autoConnect%"
         },
         "vsmonster.showNotifications": {
           "type": "boolean",
           "default": true,
-          "description": "顯示任務通知"
+          "description": "%config.showNotifications%"
         },
         "vsmonster.defaultModel": {
           "type": "string",
@@ -151,7 +157,22 @@
             "claude-3-opus",
             "claude-3-sonnet"
           ],
-          "description": "預設 AI 模型"
+          "description": "%config.defaultModel%"
+        },
+        "vsmonster.language": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "en",
+            "zh-TW"
+          ],
+          "enumDescriptions": [
+            "Auto-detect from VS Code language",
+            "English",
+            "繁體中文"
+          ],
+          "description": "%config.language.description%"
         }
       }
     }
