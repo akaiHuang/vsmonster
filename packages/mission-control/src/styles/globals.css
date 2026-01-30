@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --monster-primary: #8b5cf6;
+  --monster-secondary: #06b6d4;
+}
+
+body {
+  @apply bg-dark-bg text-white antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-dark-bg;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-dark-border rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-600;
+}
+
+/* Task card styles */
+.task-card {
+  @apply bg-dark-card border border-dark-border rounded-lg p-4 cursor-grab transition-all duration-200;
+}
+
+.task-card:hover {
+  @apply border-monster-500/50 shadow-lg shadow-monster-500/10;
+}
+
+.task-card.dragging {
+  @apply cursor-grabbing opacity-50 scale-105;
+}
+
+/* Status indicator */
+.status-dot {
+  @apply w-2 h-2 rounded-full;
+}
+
+.status-dot.backlog { @apply bg-status-backlog; }
+.status-dot.planned { @apply bg-status-planned; }
+.status-dot.progress { @apply bg-status-progress; }
+.status-dot.review { @apply bg-status-review; }
+.status-dot.done { @apply bg-status-done; }
+.status-dot.blocked { @apply bg-status-blocked; }
+
+/* Kanban column */
+.kanban-column {
+  @apply flex flex-col min-h-[calc(100vh-200px)] w-72 flex-shrink-0;
+}
+
+.kanban-column-header {
+  @apply flex items-center gap-2 px-3 py-2 sticky top-0 bg-dark-bg z-10;
+}
+
+.kanban-column-content {
+  @apply flex-1 space-y-3 p-2 overflow-y-auto;
+}
+
+/* Button styles */
+.btn-primary {
+  @apply bg-monster-500 hover:bg-monster-600 text-white px-4 py-2 rounded-lg font-medium transition-colors;
+}
+
+.btn-secondary {
+  @apply bg-dark-card hover:bg-dark-hover border border-dark-border text-white px-4 py-2 rounded-lg font-medium transition-colors;
+}
+
+/* Modal backdrop */
+.modal-backdrop {
+  @apply fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50;
+}
+
+.modal-content {
+  @apply bg-dark-card border border-dark-border rounded-xl shadow-2xl max-w-lg w-full mx-4 animate-slide-up;
+}
+
+/* Input styles */
+.input {
+  @apply bg-dark-bg border border-dark-border rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-monster-500 focus:ring-1 focus:ring-monster-500 transition-colors;
+}
+
+.textarea {
+  @apply bg-dark-bg border border-dark-border rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-monster-500 focus:ring-1 focus:ring-monster-500 transition-colors resize-none;
+}
+
+/* Badge styles */
+.badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+}
+
+.badge-purple {
+  @apply bg-monster-500/20 text-monster-400;
+}
+
+.badge-cyan {
+  @apply bg-cyan-500/20 text-cyan-400;
+}
+
+.badge-amber {
+  @apply bg-amber-500/20 text-amber-400;
+}
+
+.badge-green {
+  @apply bg-green-500/20 text-green-400;
+}
+
+.badge-gray {
+  @apply bg-gray-500/20 text-gray-400;
+}

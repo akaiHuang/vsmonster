@@ -1,12 +1,16 @@
 {
   "name": "vsmonster",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "VSMONSTER 👾 - 將社群軟體連接到 VS Code Copilot (Powered by 🦞 Moltbot)",
   "scripts": {
     "build": "pnpm -r build",
-    "dev": "pnpm --filter @vsmonster/gateway dev",
+    "dev": "pnpm run dev:all",
+    "dev:gateway": "pnpm --filter @vsmonster/gateway dev",
+    "dev:mission": "pnpm --filter @vsmonster/mission-control dev",
+    "dev:all": "concurrently \"pnpm dev:gateway\" \"pnpm dev:mission\"",
     "start": "pnpm --filter @vsmonster/gateway start",
+    "start:mission": "pnpm --filter @vsmonster/mission-control start",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "extension:build": "pnpm --filter vsmonster build",
@@ -17,6 +21,7 @@
     "packages/*"
   ],
   "devDependencies": {
+    "concurrently": "^8.2.2",
     "typescript": "^5.x"
   },
   "engines": {
