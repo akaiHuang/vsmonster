@@ -1,5 +1,5 @@
 {
-  "displayName": "👾 VSMonster with Copilot",
+  "displayName": "VSMonster - Copilot 連携",
   "description": "LINE、Telegram、Discord などのメッセージングプラットフォームを VS Code Copilot に接続し、クロスプラットフォームのタスク管理を実現",
   "command.connect": "Gateway に接続",
   "command.disconnect": "切断",

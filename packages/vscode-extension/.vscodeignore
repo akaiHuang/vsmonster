@@ -1,11 +1,34 @@
-# Whitelist mode - ignore everything, then allow specific files
-*
+# Source files
+.vscode/**
+src/**
+**/*.ts
+!**/*.d.ts
+**/tsconfig.json
+esbuild.js
 
-# Required files
-!package.json
-!README.md
-!CHANGELOG.md
-!LICENSE
-!dist/extension.js
-!resources/**
+# Dependencies and build artifacts
+node_modules/**
+out/**
+*.vsix
 
+# Git
+.git/**
+.gitignore
+
+# Config and other
+**/.env*
+*.log
+**/.DS_Store
+
+# Tests
+test/**
+**/*.test.js
+
+# Dist unnecessary files
+dist/**/*.map
+dist/**/*.d.ts
+dist/**/*.d.ts.map
+dist/src/**
+
+# Scripts
+scripts/**

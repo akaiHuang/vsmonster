@@ -1,5 +1,5 @@
 {
-  "displayName": "👾 VSMonster with Copilot",
+  "displayName": "VSMonster - Интеграция с Copilot",
   "description": "Подключите LINE, Telegram, Discord и другие мессенджеры к VS Code Copilot для кроссплатформенного управления задачами",
   "command.connect": "Подключиться к Gateway",
   "command.disconnect": "Отключиться",

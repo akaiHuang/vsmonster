@@ -1,6 +1,6 @@
 {
-  "displayName": "👾 VSMonster with Copilot",
-  "description": "將 LINE、Telegram、Discord 等社群軟體連接到 VS Code Copilot，實現跨平台任務管理",
+  "displayName": "VSMonster",
+  "description": "將 LINE、Telegram、Discord 等社群軟體連接到 VS Code，實現跨平台任務管理",
   "command.connect": "連接 Gateway",
   "command.disconnect": "斷開連接",
   "command.showStatus": "顯示狀態",

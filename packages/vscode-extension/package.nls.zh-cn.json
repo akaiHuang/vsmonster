@@ -1,5 +1,5 @@
 {
-  "displayName": "👾 VSMonster with Copilot",
+  "displayName": "VSMonster - Copilot 社群整合",
   "description": "将 LINE、Telegram、Discord 等社交软件连接到 VS Code Copilot，实现跨平台任务管理",
   "command.connect": "连接 Gateway",
   "command.disconnect": "断开连接",

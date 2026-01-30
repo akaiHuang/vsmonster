@@ -1,6 +1,6 @@
-# ![VSMONSTER](resources/icon.png) VSMONSTER - Copilot 社群整合
+# VSMONSTER
 
-> 將 LINE、Telegram、Discord 的訊息帶進 VS Code Copilot！
+> 將 LINE、Telegram、Discord 的訊息帶進 VS Code！
 
 ![Version](https://img.shields.io/badge/version-0.0.1-blue)
 ![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-green)
@@ -8,7 +8,7 @@
 ## ✨ 功能特色
 
 - **🔗 社群連接**：LINE / Telegram / Discord 訊息即時同步
-- **🤖 Copilot 整合**：社群訊息自動轉為 Copilot 任務
+- **🤖 AI 整合**：社群訊息自動轉為開發任務
 - **📋 任務追蹤**：視覺化任務列表與進度
 - **🔌 MCP 支援**：擴充 AI 能力（Email、Browser、File 等）
 - **🏠 本地運行**：資料不離開你的電腦
@@ -93,4 +93,4 @@ MIT
 
 ---
 
-**![VSMONSTER](resources/icon.png) VSMONSTER** + **🦞 Moltbot** = ❤️
+**VSMONSTER** + **Moltbot** = ❤️
