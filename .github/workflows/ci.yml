@@ -1,11 +1,12 @@
-# 🤖 VSMONSTER CI/CD Pipeline
+# 🤖 VSMONSTER CI Pipeline (本機軟體，不需要部署)
 # 
 # 每次 push 或 PR 自動執行：
 # 1. 安裝依賴
 # 2. 類型檢查
 # 3. 建構所有套件
 # 4. 執行測試
-# 5. 截圖/錄影保存 (Playwright)
+#
+# 注意：此軟體是本機運行，不需要雲端部署
 
 name: CI
 
@@ -119,46 +120,6 @@ jobs:
             packages/mission-control/test-results/
             packages/mission-control/playwright-report/
           retention-days: 30
-
-  # ============================================
-  # 🚀 自動部署 (僅 main 分支)
-  # ============================================
-  deploy:
-    name: Deploy
-    runs-on: ubuntu-latest
-    needs: [build, e2e]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
-
-      - name: 🔧 Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: 🟢 Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-
-      - name: 📦 Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: 🏗️ Build for production
-        run: pnpm build
-
-      # Vercel 部署 (如果有設定)
-      - name: 🔺 Deploy to Vercel
-        if: env.VERCEL_TOKEN != ''
-        uses: amondnet/vercel-action@v25
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          working-directory: packages/mission-control
 
   # ============================================
   # 🏷️ 發布新版本 (當 push tag 時)

@@ -1,0 +1,124 @@
+#
+# 🐳 VSMONSTER Docker 乾淨安裝測試環境
+#
+# 用途：在全新的 Docker 容器中測試安裝流程
+# 每次測試完會自動刪除容器，確保環境乾淨
+#
+# 使用方式：
+#   docker-compose -f docker-compose.test.yml up --build
+#   docker-compose -f docker-compose.test.yml down -v  # 刪除
+#
+
+version: '3.8'
+
+services:
+  # ============================================
+  # 🧪 安裝測試容器
+  # ============================================
+  install-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: vsmonster-install-test
+    volumes:
+      # 掛載測試結果到本機
+      - ./dev-test-results:/app/dev-test-results
+      # 不掛載 node_modules，確保乾淨安裝
+    environment:
+      - NODE_ENV=development
+      - CI=true
+    command: /bin/bash -c "./scripts/dev-test.sh 2>&1 | tee /app/dev-test-results/docker-test.log"
+    # 測試完自動停止
+    restart: "no"
+
+  # ============================================
+  # 🎯 Gateway 測試
+  # ============================================
+  gateway-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: vsmonster-gateway-test
+    ports:
+      - "3333:3333"
+    volumes:
+      - ./dev-test-results:/app/dev-test-results
+    environment:
+      - NODE_ENV=development
+    command: |
+      /bin/bash -c "
+        pnpm install &&
+        pnpm --filter @vsmonster/gateway build &&
+        echo '✅ Gateway 建構成功' > /app/dev-test-results/gateway-test.log &&
+        pnpm --filter @vsmonster/gateway dev
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: "no"
+
+  # ============================================
+  # 🖥️ Mission Control 測試
+  # ============================================
+  mission-control-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: vsmonster-mission-test
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./dev-test-results:/app/dev-test-results
+    environment:
+      - NODE_ENV=development
+    command: |
+      /bin/bash -c "
+        pnpm install &&
+        pnpm --filter @vsmonster/mission-control build &&
+        echo '✅ Mission Control 建構成功' > /app/dev-test-results/mission-test.log &&
+        pnpm --filter @vsmonster/mission-control start
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      - gateway-test
+    restart: "no"
+
+  # ============================================
+  # 📸 E2E 截圖測試
+  # ============================================
+  e2e-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: vsmonster-e2e-test
+    volumes:
+      - ./dev-test-results:/app/dev-test-results
+    environment:
+      - NODE_ENV=development
+      - PLAYWRIGHT_VIDEO=on
+      - PLAYWRIGHT_SCREENSHOT=on
+    command: |
+      /bin/bash -c "
+        pnpm install &&
+        pnpm exec playwright install chromium --with-deps &&
+        pnpm --filter @vsmonster/mission-control build &&
+        pnpm --filter @vsmonster/mission-control test:e2e || true &&
+        cp -r packages/mission-control/test-results/* /app/dev-test-results/ 2>/dev/null || true &&
+        cp -r packages/mission-control/playwright-report /app/dev-test-results/ 2>/dev/null || true &&
+        echo '✅ E2E 測試完成'
+      "
+    depends_on:
+      mission-control-test:
+        condition: service_healthy
+    restart: "no"
+
+# ============================================
+# 🗂️ 測試完不保留 volumes
+# ============================================
+# 使用 docker-compose down -v 清除所有數據

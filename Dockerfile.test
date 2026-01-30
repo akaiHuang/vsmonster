@@ -1,0 +1,43 @@
+#
+# 🐳 VSMONSTER 測試專用 Dockerfile
+#
+# 用途：乾淨的 Node.js 環境用於測試安裝流程
+#
+
+FROM node:20-slim
+
+# 安裝必要工具
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    bc \
+    # Playwright 依賴
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安裝 pnpm
+RUN npm install -g pnpm@8
+
+# 設定工作目錄
+WORKDIR /app
+
+# 複製專案檔案
+COPY . .
+
+# 給腳本執行權限
+RUN chmod +x scripts/*.sh 2>/dev/null || true
+
+# 預設執行測試
+CMD ["./scripts/dev-test.sh"]
