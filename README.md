@@ -50,53 +50,81 @@ VSMONSTER 讓你在社群軟體中下指令、追蹤任務進度，所有執行�
 
 ### Step 2️⃣ 安裝 VSMONSTER VS Code 擴充功能
 
-目前擴展尚未發布到 Marketplace，請手動安裝：
-
-```bash
-# 先完成 Step 3 的安裝，再執行此指令
-pnpm extension:build
-```
-
-在 VS Code 中：
-1. `Cmd+Shift+P` / `Ctrl+Shift+P`
-2. 選擇 **Install from VSIX**
-3. 選取 `packages/vscode-extension/vsmonster-*.vsix`
+目前擴展尚未發布到 Marketplace，請在完成 Step 3 後手動安裝。
 
 ---
 
-### Step 3️⃣ 安裝 VSMONSTER Gateway
+### Step 3️⃣ 安裝 👾 VSMONSTER 👾 Gateway
+
+#### 🤖 使用 Copilot 一鍵安裝（推薦）
+
+在 VS Code 中開啟 Copilot Chat，輸入：
+
+```
+幫我安裝 👾 VSMONSTER 👾
+https://github.com/akaiHuang/vsmonster.git
+```
+
+Copilot 會自動：
+1. Clone 專案到指定目錄
+2. 執行 `pnpm install`
+3. 複製 `.env.example` 為 `.env`
+4. 引導你進行後續設定
+
+#### 📦 手動安裝
 
 ```bash
-# 1. 複製專案
 git clone https://github.com/akaiHuang/vsmonster.git
 cd vsmonster
-
-# 2. 安裝依賴
 pnpm install
-
-# 3. 複製環境變數範本
 cp .env.example .env
+```
 
-# 4. 啟動 Gateway
+#### 🌐 Domain 與隧道設定
+
+VSMONSTER 會引導你設定對外連線，**避免暴露你的真實 IP**：
+
+| 方案 | 安全性 | 難度 | 說明 |
+|------|--------|------|------|
+| ☁️ **Cloudflare Tunnel** | ⭐⭐⭐ | ⭐⭐ | **推薦**：完全隱藏 IP，免費 |
+| 🌐 **GoDaddy + Cloudflare** | ⭐⭐⭐ | ⭐⭐⭐ | 專業網址 + 隱藏 IP |
+| 🚇 **ngrok** | ⭐⭐ | ⭐ | 最簡單，但 IP 會變動 |
+
+> 🔒 **IP 安全說明**：
+> - 使用 **Cloudflare Tunnel** 時，外界只能看到 Cloudflare 的 IP，你的真實 IP 完全隱藏
+> - 使用 **ngrok** 時，ngrok 會提供臨時網址，但 ngrok 伺服器知道你的 IP
+> - **絕不建議**直接暴露你的家用 IP 給社群平台
+
+設定方式會在安裝過程中引導，或參考：
+- [Cloudflare Tunnel 設定指南](docs/setup-cloudflare-tunnel.md)
+- [ngrok 設定指南](docs/setup-ngrok.md)
+
+#### 🔌 啟動 Gateway
+
+```bash
 pnpm dev
 ```
 
-啟動後可驗證狀態：
-```
-http://localhost:3000/health
-```
+驗證狀態：`http://localhost:3000/health`
 
 ---
 
-### Step 4️⃣ 設定社群平台（擇一）
+### Step 4️⃣ ⚠️ 人類設定通訊平台 ⚠️
 
-> ⚠️ **安全警告**：以下取得的 Token 是高度敏感資料，請：
-> - ❌ **絕對不要**分享給任何人
-> - ❌ **絕對不要**上傳到 GitHub
-> - ❌ **絕對不要**截圖傳到群組
-> - ✅ 只存放在本機的 `.env` 檔案中
+> 🛡️ **為什麼需要人類操作？**
+> 
+> Token 和 Secret Key 是**極度敏感**的資料，相當於你帳號的密碼。
+> 為了安全，這個步驟必須由**人類手動完成**，不經過 AI。
 
-#### 選擇你的平台：
+#### 🔐 安全設定流程
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  ⚠️  以下操作請由人類親自完成，不要讓 AI 看到你的 Token！    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**第一步：選擇平台並取得 Token**
 
 | 平台 | 難易度 | 適合對象 | 設定教學 |
 |------|--------|----------|----------|
@@ -104,17 +132,18 @@ http://localhost:3000/health
 | 🔵 **Telegram** | ⭐ | 最簡單，推薦新手 | [📖 docs/setup-telegram.md](docs/setup-telegram.md) |
 | 🟣 **Discord** | ⭐⭐⭐ | 團隊協作 | [📖 docs/setup-discord.md](docs/setup-discord.md) |
 
-#### 設定方式
-
-1. 依照上方教學取得你的平台 Token
-2. 編輯 `.env` 檔案，填入對應的 Token：
+**第二步：人類手動編輯 `.env` 檔案**
 
 ```bash
-# 編輯環境變數
-nano .env   # 或用你喜歡的編輯器
+# 用你喜歡的編輯器開啟 .env
+nano .env
+# 或
+code .env
 ```
 
 ```env
+# ⚠️ 以下 Token 由人類手動貼上，不要給 AI 看！
+
 # 💚 LINE（擇一填寫）
 LINE_CHANNEL_ACCESS_TOKEN=你的_LINE_Token
 LINE_CHANNEL_SECRET=你的_LINE_Secret
@@ -127,10 +156,32 @@ DISCORD_BOT_TOKEN=你的_Discord_Token
 DISCORD_APPLICATION_ID=你的_Application_ID
 ```
 
-3. 重新啟動 Gateway：
-```bash
-pnpm dev
+**第三步：告訴 Copilot 設定完成**
+
+在 VS Code Copilot Chat 中輸入：
+
 ```
+我已經設定好 .env，幫我設定通訊軟體
+```
+
+Copilot 會：
+1. ✅ 驗證 `.env` 檔案存在（不讀取內容）
+2. ✅ 測試與社群平台的連線
+3. ✅ 引導你完成 Webhook 設定
+4. ✅ 發送測試訊息確認連線成功
+
+> 🔒 **安全保證**：Copilot **不會讀取**你的 Token 內容，只會檢查連線狀態。
+
+#### 🛡️ 安全強化措施
+
+設定完成後，VSMONSTER 會自動：
+
+| 措施 | 說明 |
+|------|------|
+| 🔐 **檔案權限** | 將 `.env` 設為 `600`（只有你能讀取） |
+| 🚫 **Git 忽略** | `.env` 已加入 `.gitignore` |
+| 🔍 **Token 檢測** | 防止意外將 Token 貼到聊天中 |
+| 📝 **操作日誌** | 記錄所有敏感操作（不含 Token） |
 
 ---
 
