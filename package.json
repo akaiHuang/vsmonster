@@ -13,9 +13,13 @@
     "start:mission": "pnpm --filter @vsmonster/mission-control start",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @vsmonster/mission-control test:e2e",
+    "test:e2e:ui": "pnpm --filter @vsmonster/mission-control test:e2e:ui",
+    "typecheck": "pnpm -r type-check",
     "extension:build": "pnpm --filter vsmonster build",
     "extension:watch": "pnpm --filter vsmonster watch",
-    "postinstall": "node scripts/post-install.js"
+    "postinstall": "node scripts/post-install.js",
+    "ci": "pnpm install && pnpm typecheck && pnpm build && pnpm test"
   },
   "workspaces": [
     "packages/*"
