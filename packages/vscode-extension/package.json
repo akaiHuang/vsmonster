@@ -1,9 +1,9 @@
 {
-  "name": "vsmolt",
-  "displayName": "vsMolt - Copilot 社群整合",
+  "name": "vsmonster",
+  "displayName": "VSMONSTER - Copilot 社群整合",
   "description": "將 LINE、Telegram 等社群軟體連接到 VS Code Copilot",
   "version": "0.0.1",
-  "publisher": "vsmolt",
+  "publisher": "vsmonster",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -28,65 +28,75 @@
   "contributes": {
     "commands": [
       {
-        "command": "vsmolt.connect",
+        "command": "vsmonster.connect",
         "title": "連接 Gateway",
-        "category": "vsMolt"
+        "category": "VSMONSTER"
       },
       {
-        "command": "vsmolt.disconnect",
+        "command": "vsmonster.disconnect",
         "title": "斷開連接",
-        "category": "vsMolt"
+        "category": "VSMONSTER"
       },
       {
-        "command": "vsmolt.showStatus",
+        "command": "vsmonster.showStatus",
         "title": "顯示狀態",
-        "category": "vsMolt"
+        "category": "VSMONSTER"
       },
       {
-        "command": "vsmolt.startGateway",
+        "command": "vsmonster.startGateway",
         "title": "啟動 Gateway",
-        "category": "vsMolt"
+        "category": "VSMONSTER"
       },
       {
-        "command": "vsmolt.openSettings",
+        "command": "vsmonster.openSettings",
         "title": "開啟設定",
-        "category": "vsMolt"
+        "category": "VSMONSTER"
       },
       {
-        "command": "vsmolt.sendToChannel",
+        "command": "vsmonster.sendToChannel",
         "title": "發送訊息到頻道",
-        "category": "vsMolt"
+        "category": "VSMONSTER"
       },
       {
-        "command": "vsmolt.refreshTasks",
+        "command": "vsmonster.refreshTasks",
         "title": "刷新任務列表",
-        "category": "vsMolt",
+        "category": "VSMONSTER",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "vsmonster.runSetupWizard",
+        "title": "執行設定向導",
+        "category": "VSMONSTER"
+      },
+      {
+        "command": "vsmonster.openQuickStart",
+        "title": "開啟快速開始指南",
+        "category": "VSMONSTER"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "vsmolt",
-          "title": "vsMolt",
+          "id": "vsmonster",
+          "title": "VSMONSTER",
           "icon": "resources/icon.svg"
         }
       ]
     },
     "views": {
-      "vsmolt": [
+      "vsmonster": [
         {
-          "id": "vsmoltTasks",
+          "id": "vsmonsterTasks",
           "name": "任務列表",
-          "contextualTitle": "vsMolt 任務"
+          "contextualTitle": "VSMONSTER 任務"
         },
         {
-          "id": "vsmoltChannels",
+          "id": "vsmonsterChannels",
           "name": "頻道狀態",
           "contextualTitle": "社群頻道"
         },
         {
-          "id": "vsmoltMCP",
+          "id": "vsmonsterMCP",
           "name": "MCP 服務",
           "contextualTitle": "MCP 服務器"
         }
@@ -95,31 +105,31 @@
     "menus": {
       "view/title": [
         {
-          "command": "vsmolt.refreshTasks",
-          "when": "view == vsmoltTasks",
+          "command": "vsmonster.refreshTasks",
+          "when": "view == vsmonsterTasks",
           "group": "navigation"
         }
       ]
     },
     "configuration": {
-      "title": "vsMolt",
+      "title": "VSMONSTER",
       "properties": {
-        "vsmolt.gatewayUrl": {
+        "vsmonster.gatewayUrl": {
           "type": "string",
           "default": "ws://localhost:3000",
           "description": "Gateway WebSocket URL"
         },
-        "vsmolt.autoConnect": {
+        "vsmonster.autoConnect": {
           "type": "boolean",
           "default": true,
           "description": "VS Code 啟動時自動連接 Gateway"
         },
-        "vsmolt.showNotifications": {
+        "vsmonster.showNotifications": {
           "type": "boolean",
           "default": true,
           "description": "顯示任務通知"
         },
-        "vsmolt.defaultModel": {
+        "vsmonster.defaultModel": {
           "type": "string",
           "default": "gpt-4",
           "enum": [

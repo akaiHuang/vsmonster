@@ -1,16 +1,17 @@
 {
-  "name": "vsmolt-monorepo",
-  "version": "0.0.1",
+  "name": "vsmonster",
+  "version": "0.1.0",
   "private": true,
-  "description": "vsMolt - 將社群軟體連接到 VS Code Copilot",
+  "description": "VSMONSTER 👾 - 將社群軟體連接到 VS Code Copilot (Powered by 🦞 Moltbot)",
   "scripts": {
     "build": "pnpm -r build",
-    "dev": "pnpm --filter @vsmolt/gateway dev",
-    "start": "pnpm --filter @vsmolt/gateway start",
+    "dev": "pnpm --filter @vsmonster/gateway dev",
+    "start": "pnpm --filter @vsmonster/gateway start",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
-    "extension:build": "pnpm --filter vsmolt build",
-    "extension:watch": "pnpm --filter vsmolt watch"
+    "extension:build": "pnpm --filter vsmonster build",
+    "extension:watch": "pnpm --filter vsmonster watch",
+    "postinstall": "node scripts/post-install.js"
   },
   "workspaces": [
     "packages/*"

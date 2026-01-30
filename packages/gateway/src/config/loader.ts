@@ -4,14 +4,14 @@ import { ChannelsConfig } from '../channels/base';
 import { TunnelConfig } from '../tunnel/service';
 import { MCPConfig } from '../mcp/controller';
 
-export interface VsMoltConfig {
+export interface VSMONSTERConfig {
   port: number;
   channels: ChannelsConfig;
   tunnel?: TunnelConfig;
   mcp?: MCPConfig;
 }
 
-const DEFAULT_CONFIG: VsMoltConfig = {
+const DEFAULT_CONFIG: VSMONSTERConfig = {
   port: 3000,
   channels: {},
 };
@@ -19,11 +19,11 @@ const DEFAULT_CONFIG: VsMoltConfig = {
 /**
  * 載入配置文件
  */
-export function loadConfig(): VsMoltConfig {
+export function loadConfig(): VSMONSTERConfig {
   const configPaths = [
     path.join(process.cwd(), 'configs', 'config.json'),
     path.join(process.cwd(), 'config.json'),
-    path.join(process.env.HOME || '', '.vsmolt', 'config.json'),
+    path.join(process.env.HOME || '', '.vsmonster', 'config.json'),
   ];
 
   for (const configPath of configPaths) {
@@ -45,12 +45,12 @@ export function loadConfig(): VsMoltConfig {
 /**
  * 從環境變數載入配置
  */
-function loadConfigFromEnv(): VsMoltConfig {
-  const config: VsMoltConfig = { ...DEFAULT_CONFIG };
+function loadConfigFromEnv(): VSMONSTERConfig {
+  const config: VSMONSTERConfig = { ...DEFAULT_CONFIG };
 
   // Port
-  if (process.env.VSMOLT_PORT) {
-    config.port = parseInt(process.env.VSMOLT_PORT, 10);
+  if (process.env.VSMONSTER_PORT) {
+    config.port = parseInt(process.env.VSMONSTER_PORT, 10);
   }
 
   // LINE
@@ -93,7 +93,7 @@ function loadConfigFromEnv(): VsMoltConfig {
 /**
  * 合併配置
  */
-function mergeConfig(base: VsMoltConfig, override: Partial<VsMoltConfig>): VsMoltConfig {
+function mergeConfig(base: VSMONSTERConfig, override: Partial<VSMONSTERConfig>): VSMONSTERConfig {
   return {
     ...base,
     ...override,
@@ -109,7 +109,7 @@ function mergeConfig(base: VsMoltConfig, override: Partial<VsMoltConfig>): VsMol
 /**
  * 驗證配置
  */
-export function validateConfig(config: VsMoltConfig): string[] {
+export function validateConfig(config: VSMONSTERConfig): string[] {
   const errors: string[] = [];
 
   // 至少需要一個頻道

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "vsMolt Configuration",
-  "description": "vsMolt 配置文件格式",
+  "title": "VSMONSTER Configuration",
+  "description": "VSMONSTER 配置文件格式",
   "type": "object",
   "properties": {
     "port": {

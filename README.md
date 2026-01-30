@@ -1,272 +1,200 @@
-# vsMolt - VS Code Copilot 社群整合平台
+# 👾 VSMONSTER
 
-> 將 LINE、Telegram、Discord 等社群軟體直接串接到 VS Code Copilot，讓你隨時隨地透過手機指揮 AI 編程
+> 把 LINE / Telegram / Discord 的訊息帶進 VS Code Copilot 的本地橋接平台
 
-## 🎯 專案願景
+**Version**: 0.0.1 (Preview)
 
-**痛點**: moltbot 功能強大但設定繁瑣，權限和接口太多
-**解決方案**: 專注於 VS Code Copilot 整合，簡化配置，一鍵部署
+VSMONSTER 讓你在社群軟體中下指令、追蹤任務進度，所有執行都在你的 VS Code 本機環境完成。
+專案以 🦞 Moltbot 作為社群連接層，VSMONSTER 專注於 Copilot 與任務流程。
 
-## 🏗️ 系統架構
+---
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         社群軟體層 (Channels)                        │
-├───────────┬───────────┬───────────┬───────────┬───────────────────┤
-│   LINE    │ Telegram  │  Discord  │  Slack    │    WeChat等       │
-└─────┬─────┴─────┬─────┴─────┬─────┴─────┬─────┴─────────┬─────────┘
-      │           │           │           │               │
-      └───────────┴───────────┴───────────┴───────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      vsMolt Gateway (Node.js)                        │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌────────────┐ │
-│  │   Webhook   │  │   Message   │  │    Task     │  │   Tunnel   │ │
-│  │   Handler   │  │   Router    │  │   Manager   │  │  (ngrok)   │ │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬─────┘ │
-│         └────────────────┼────────────────┼────────────────┘       │
-│                          ▼                ▼                         │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │                   VS Code Extension API                      │   │
-│  │  • Copilot Chat Integration                                  │   │
-│  │  • Terminal Control                                          │   │
-│  │  • File System Access                                        │   │
-│  │  • MCP Server Management                                     │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      VS Code Workspace                               │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌────────────┐ │
-│  │   Copilot   │  │   Terminal  │  │    MCP      │  │   Tasks    │ │
-│  │    Chat     │  │   Manager   │  │   Servers   │  │   Output   │ │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └────────────┘ │
-└─────────────────────────────────────────────────────────────────────┘
-```
+## ✨ 核心特色
 
-## 📁 專案結構
+- **Local-first**：Gateway 與任務執行都在本機，資料不離開你的電腦
+- **多平台整合**：LINE / Telegram / Discord 三選一，統一指令介面
+- **VS Code 視覺化**：任務列表、頻道狀態、MCP 服務一目了然
+- **任務分解與回報**：支援 `/task` 指令、任務拆分與進度回報
+- **MCP 擴充**：可選的 MCP 服務整合（Email / Browser / File 等）
+- **隧道支援**：可用 ngrok 產生公開預覽連結
+
+## 📣 支援平台
+
+| 平台 | 說明 | 設定指南 |
+|------|------|----------|
+| LINE | 適合台灣/日本用戶 | `docs/setup-line.md` |
+| Telegram | 設定最簡單 | `docs/setup-telegram.md` |
+| Discord | 團隊協作首選 | `docs/setup-discord.md` |
+
+## 🧠 工作原理
 
 ```
-vsMolt/
-├── packages/
-│   ├── gateway/                    # 核心 Gateway 服務
-│   │   ├── src/
-│   │   │   ├── server.ts          # Express + WebSocket 服務器
-│   │   │   ├── channels/          # 社群頻道適配器
-│   │   │   │   ├── line/          # LINE Messaging API
-│   │   │   │   ├── telegram/      # Telegram Bot API
-│   │   │   │   ├── discord/       # Discord Bot
-│   │   │   │   └── base.ts        # 基礎頻道接口
-│   │   │   ├── task/              # 任務管理
-│   │   │   │   ├── manager.ts     # 任務拆分與調度
-│   │   │   │   ├── progress.ts    # 進度追蹤
-│   │   │   │   └── types.ts       # 任務類型定義
-│   │   │   ├── tunnel/            # ngrok 隧道管理
-│   │   │   ├── copilot/           # Copilot 指令橋接
-│   │   │   └── mcp/               # MCP 服務器控制
-│   │   ├── config/                # 配置文件
-│   │   └── package.json
-│   │
-│   ├── vscode-extension/          # VS Code 擴展
-│   │   ├── src/
-│   │   │   ├── extension.ts       # 擴展入口
-│   │   │   ├── gateway-client.ts  # Gateway 客戶端
-│   │   │   ├── copilot-bridge.ts  # Copilot 橋接
-│   │   │   ├── terminal-manager.ts# 終端管理
-│   │   │   └── task-view.ts       # 任務視圖
-│   │   └── package.json
-│   │
-│   └── shared/                    # 共享類型和工具
-│       ├── types/
-│       │   ├── message.ts         # 訊息類型
-│       │   ├── task.ts            # 任務類型
-│       │   └── channel.ts         # 頻道類型
-│       └── utils/
-│
-├── configs/                       # 全局配置
-│   ├── channels.json             # 頻道配置 (簡化版)
-│   └── mcp-servers.json          # MCP 服務器配置
-│
-├── docs/                          # 文檔
-│   ├── setup-line.md             # LINE 設定指南
-│   ├── setup-telegram.md         # Telegram 設定指南
-│   └── mcp-usage.md              # MCP 使用指南
-│
-├── docker-compose.yml            # Docker 部署
-├── package.json                  # Monorepo 配置
-└── README.md
+User → 社群平台 → Moltbot → VSMONSTER Gateway → VS Code Extension → Copilot Chat
+   ↘ 任務更新 / 進度回報 / 預覽連結 ←───────────────────────────────────────────↗
 ```
 
-## 🔧 核心功能
+VSMONSTER 將社群訊息轉成任務，交給 VS Code Copilot 執行，並回傳進度與結果到原平台。
 
-### 1. 簡化的頻道配置 (對比 moltbot)
+---
+
+## 🚀 快速開始（本地開發）
+
+### 1) 複製專案與安裝依賴
+
+```bash
+git clone https://github.com/your-username/vsmonster.git
+cd vsmonster
+pnpm install
+```
+
+### 2) 設定社群平台
+
+- **推薦方式**：使用 Moltbot 設定向導
+  ```bash
+  moltbot onboard
+  ```
+
+- **或手動建立設定檔**：放在 `configs/config.json`
+
+### 3) 啟動 Gateway
+
+```bash
+pnpm dev
+```
+
+啟動後可用以下 API 驗證狀態：
+
+```
+http://localhost:3000/health
+```
+
+### 4) 安裝 VS Code Extension
+
+目前擴展尚未發布到 Marketplace，請手動安裝：
+
+```bash
+pnpm extension:build
+```
+
+在 VS Code 中：
+1. `Cmd+Shift+P` / `Ctrl+Shift+P`
+2. 選擇 **Install from VSIX**
+3. 選取 `packages/vscode-extension/vsmonster-*.vsix`
+
+---
+
+## ⚙️ 設定檔與環境變數
+
+VSMONSTER 會依序搜尋以下位置：
+
+1. `configs/config.json`
+2. `./config.json`
+3. `~/.vsmonster/config.json`
+
+### 範例設定檔
 
 ```json
-// vsMolt 簡化配置 (configs/channels.json)
 {
-  "activeChannel": "line",
+  "port": 3000,
   "channels": {
-    "line": {
-      "channelAccessToken": "YOUR_TOKEN",
-      "channelSecret": "YOUR_SECRET"
-    },
     "telegram": {
       "botToken": "YOUR_BOT_TOKEN"
     }
+  },
+  "tunnel": {
+    "enabled": false,
+    "authtoken": "YOUR_NGROK_TOKEN",
+    "region": "ap"
   }
 }
 ```
 
-### 2. 社群訊息 → Copilot 指令流程
+### 環境變數
 
-```
-用戶 (LINE): "幫我建立一個 React 專案，要有登入功能"
-     ↓
-[vsMolt Gateway]
-     ↓ 解析指令
-[Task Manager] 拆分任務:
-  1. 建立 React 專案結構
-  2. 安裝依賴 (react-router, axios)
-  3. 建立登入頁面組件
-  4. 建立 API 服務層
-  5. 設定路由
-     ↓
-[VS Code Extension]
-     ↓ 透過 Copilot API 執行
-[Copilot Chat] 逐一完成任務
-     ↓
-[進度回報] → LINE 顯示進度
-     ↓
-[ngrok URL] → 提供預覽連結
-```
+- `VSMONSTER_PORT`
+- `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`
+- `DISCORD_BOT_TOKEN`, `DISCORD_APPLICATION_ID`, `DISCORD_PUBLIC_KEY`
+- `NGROK_AUTHTOKEN`, `NGROK_ENABLED`, `NGROK_REGION`
 
-### 3. MCP 服務器整合
+---
 
-```typescript
-// 支援的 MCP 功能
-const mcpCapabilities = {
-  email: {
-    name: "@mcp/email",
-    actions: ["send", "receive", "search"]
-  },
-  browser: {
-    name: "@mcp/puppeteer", 
-    actions: ["navigate", "screenshot", "scrape"]
-  },
-  filesystem: {
-    name: "@mcp/filesystem",
-    actions: ["read", "write", "search"]
-  },
-  shopping: {
-    name: "@mcp/shopping",
-    actions: ["search", "compare", "checkout"]
-  }
-};
-```
+## 💬 社群指令
 
-## 🚀 快速開始
+VSMONSTER 支援指令與自然語句：
 
-### 1. 一鍵安裝
+| 指令 | 說明 | 範例 |
+|------|------|------|
+| `/task` | 建立任務 | `/task 建立登入頁面` |
+| `/status` | 查看任務狀態 | `/status` 或 `/status task-001` |
+| `/model` | 切換模型 | `/model gpt-4` |
+| `/preview` | 取得預覽連結 | `/preview` |
+| `/cancel` | 取消任務 | `/cancel task-001` |
+| `/help` | 顯示指令說明 | `/help` |
+| `/mcp` | 觸發 MCP 服務 | `/mcp email send ...` |
 
-```bash
-# 安裝 vsMolt
-npm install -g vsmolt
+> 非指令訊息會被視為新任務，直接交給 Copilot 處理。
 
-# 初始化配置 (互動式)
-vsmolt init
+---
 
-# 啟動 Gateway
-vsmolt start
-```
+## 🧩 VS Code Extension 功能
 
-### 2. VS Code 擴展
+- Gateway 連線狀態顯示
+- 任務列表與進度
+- 頻道狀態檢視
+- MCP 服務管理
 
-在 VS Code 中搜尋並安裝 `vsMolt` 擴展
+VS Code 設定：
 
-### 3. 連接社群軟體
+- `vsmonster.gatewayUrl`（預設：`ws://localhost:3000`）
+- `vsmonster.autoConnect`
+- `vsmonster.showNotifications`
+- `vsmonster.defaultModel`
 
-```bash
-# LINE 設定
-vsmolt channel add line
+---
 
-# Telegram 設定
-vsmolt channel add telegram
-```
+## 📚 文件
 
-## 💬 使用方式
+- 快速開始：`docs/quick-start.md`
+- 平台設定：`docs/setup-line.md` / `docs/setup-telegram.md` / `docs/setup-discord.md`
+- Moltbot 整合：`docs/moltbot-integration.md`
+- 企業應用案例：`docs/enterprise-use-cases.md`（Apple 案例）
+- 多品牌節流案例：`docs/enterprise-cases-brands.md`（效率提升、成本降低）
+- 多品牌開源案例：`docs/enterprise-cases-revenue.md`（營收增長、新商業模式）
+- **🛠️ 實作指南**：`docs/enterprise-implementation-guide.md`（詳細設定與程式碼）
+- VSMONSTER vs Moltbot：`docs/vsmonster-vs-moltbot-analysis.md`
 
-### LINE 指令範例
+---
 
-| 指令 | 說明 |
-|------|------|
-| `/task 建立登入頁面` | 建立新任務 |
-| `/model claude-4` | 切換模型 |
-| `/image [圖片]` | 上傳圖片讓 Copilot 分析 |
-| `/mcp email send` | 使用 MCP 發送郵件 |
-| `/status` | 查看當前任務狀態 |
-| `/preview` | 獲取 ngrok 預覽連結 |
+## 🤝 VSMONSTER × Moltbot
 
-### 進階指令
+VSMONSTER 專注於 **VS Code + Copilot + 任務流程**，
+社群平台連接能力由 **🦞 Moltbot** 提供支援。
 
-```
-/task 建立電商網站
-├── 前端: React + TailwindCSS
-├── 後端: Node.js + Express
-├── 資料庫: PostgreSQL
-└── 部署: Docker
-```
+如果你要深入了解 Moltbot 或自行擴充頻道連接器，請參考：
+`docs/moltbot-integration.md`
 
-系統會自動拆分為多個子任務並逐一執行
+---
 
-## 📊 任務狀態追蹤
+## 🔐 安全與隱私
 
-```
-📋 任務: 建立電商網站
-├── ✅ [1/5] 初始化專案結構
-├── ✅ [2/5] 設定前端框架
-├── 🔄 [3/5] 建立商品列表頁面 (進行中...)
-├── ⏳ [4/5] 建立購物車功能
-└── ⏳ [5/5] 設定資料庫連接
+- 全程本地執行，不依賴雲端
+- Token 不上傳，僅保留在本機設定檔或環境變數中
+- 可透過權限與指令規範限制可用功能
 
-預估完成時間: 15 分鐘
-```
-
-## 🔐 安全特性
-
-- **本地運行**: Gateway 運行在你的電腦上
-- **Token 加密**: 所有 API Token 本地加密存儲
-- **權限控制**: 可設定允許的操作類型
-- **審計日誌**: 所有操作都有記錄
-
-## 🛠️ 技術棧
-
-- **Gateway**: Node.js + TypeScript + Express + WebSocket
-- **VS Code Extension**: VS Code Extension API
-- **社群 SDK**: 
-  - LINE: @line/bot-sdk
-  - Telegram: grammy
-  - Discord: discord.js
-- **隧道**: ngrok
-- **MCP**: Model Context Protocol
-
-## 🤝 vs moltbot 對比
-
-| 功能 | moltbot | vsMolt |
-|------|---------|--------|
-| 配置複雜度 | 高 (多層配置) | 低 (單一配置檔) |
-| 安裝步驟 | 繁瑣 | 一鍵安裝 |
-| VS Code 整合 | 無 | 原生整合 |
-| Copilot 支援 | 無 | 完整支援 |
-| MCP 控制 | 部分 | 完整 |
-| 任務拆分 | 無 | 自動拆分 |
-| 預覽功能 | 無 | ngrok 自動部署 |
+---
 
 ## 📝 License
 
-MIT License
+MIT
+
+---
 
 ## 🦞 致謝
 
-本專案受 [moltbot](https://github.com/moltbot/moltbot) 啟發，感謝他們的開源貢獻。
+特別感謝 Moltbot 的開源貢獻，
+讓 VSMONSTER 能專注於 VS Code Copilot 整合與任務流程。
+
+```
+👾 VSMONSTER + 🦞 Moltbot = ❤️
+```

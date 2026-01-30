@@ -1,6 +1,6 @@
 # LINE 頻道設定指南
 
-本指南將協助你設定 LINE Messaging API 並連接到 vsMolt。
+本指南將協助你設定 LINE Messaging API 並連接到 VSMONSTER。
 
 ## 前置需求
 
@@ -45,7 +45,7 @@
 
 ### 本地開發 (使用 ngrok)
 
-1. 啟動 vsMolt Gateway:
+1. 啟動 VSMONSTER Gateway:
    ```bash
    pnpm dev
    ```
@@ -71,7 +71,7 @@
    - 啟用 **Use webhook**
 4. 點擊 **Verify** 確認連線成功
 
-## 步驟 5: 配置 vsMolt
+## 步驟 5: 配置 VSMONSTER
 
 編輯 `configs/config.json`:
 
@@ -90,7 +90,7 @@
 
 1. 在 LINE 中加入你的 Bot 好友 (透過 QR Code 或搜尋 Bot ID)
 2. 發送測試訊息
-3. 確認 vsMolt 收到訊息
+3. 確認 VSMONSTER 收到訊息
 
 ## 常見問題
 
@@ -118,7 +118,7 @@
 
 1. **不要公開你的 Token**: 將敏感資訊存放在環境變數
 2. **使用 HTTPS**: 生產環境務必使用 SSL
-3. **驗證簽名**: vsMolt 會自動驗證 LINE 的請求簽名
+3. **驗證簽名**: VSMONSTER 會自動驗證 LINE 的請求簽名
 
 ## 參考連結
 

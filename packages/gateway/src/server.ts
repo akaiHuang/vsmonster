@@ -1,7 +1,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
-import { loadConfig, VsMoltConfig } from './config/loader';
+import { loadConfig, VSMONSTERConfig } from './config/loader';
 import { ChannelManager } from './channels/manager';
 import { TaskManager } from './task/manager';
 import { TunnelService } from './tunnel/service';
@@ -9,11 +9,11 @@ import { CopilotBridge } from './copilot/bridge';
 import { MCPController } from './mcp/controller';
 import { logger } from './utils/logger';
 
-export class VsMoltGateway {
+export class VSMONSTERGateway {
   private app: express.Application;
   private server: ReturnType<typeof createServer>;
   private wss: WebSocketServer;
-  private config: VsMoltConfig;
+  private config: VSMONSTERConfig;
   
   private channelManager: ChannelManager;
   private taskManager: TaskManager;
@@ -289,7 +289,7 @@ export class VsMoltGateway {
         
       case 'help':
         await this.sendToChannel(channel, userId, `
-📖 vsMolt 指令說明:
+📖 VSMONSTER 指令說明:
 
 /task <指令> - 建立新任務
 /status - 查看任務狀態
@@ -343,7 +343,7 @@ export class VsMoltGateway {
     
     // 啟動服務器
     this.server.listen(port, () => {
-      logger.info(`🚀 vsMolt Gateway running on port ${port}`);
+      logger.info(`🚀 VSMONSTER Gateway running on port ${port}`);
       logger.info(`📡 Active channels: ${this.channelManager.getActiveChannels().join(', ')}`);
       
       if (this.tunnelService.getStatus().active) {
@@ -356,13 +356,13 @@ export class VsMoltGateway {
     await this.tunnelService.stop();
     await this.mcpController.shutdown();
     this.server.close();
-    logger.info('vsMolt Gateway stopped');
+    logger.info('VSMONSTER Gateway stopped');
   }
 }
 
 // 主入口
 if (require.main === module) {
-  const gateway = new VsMoltGateway();
+  const gateway = new VSMONSTERGateway();
   
   gateway.start().catch(err => {
     logger.error('Failed to start gateway:', err);

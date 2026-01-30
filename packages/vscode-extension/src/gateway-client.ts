@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 
 /**
  * Gateway 客戶端
- * 負責與 vsMolt Gateway 的 WebSocket 通訊
+ * 負責與 VSMONSTER Gateway 的 WebSocket 通訊
  */
 export class GatewayClient extends EventEmitter {
   private ws: WebSocket | null = null;

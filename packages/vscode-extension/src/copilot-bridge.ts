@@ -131,11 +131,11 @@ ${subtask.description}
     
     // 如果是可執行的語言，嘗試執行
     if (language === 'javascript' || language === 'typescript') {
-      const terminal = vscode.window.createTerminal('vsMolt Execution');
+      const terminal = vscode.window.createTerminal('VSMONSTER Execution');
       terminal.show();
       
       // 儲存到暫時檔案並執行
-      const tempFile = `/tmp/vsmolt_exec.${language === 'typescript' ? 'ts' : 'js'}`;
+      const tempFile = `/tmp/vsmonster_exec.${language === 'typescript' ? 'ts' : 'js'}`;
       const fs = await import('fs').then(m => m.promises);
       await fs.writeFile(tempFile, code);
       
@@ -180,7 +180,7 @@ ${subtask.description}
    * 在終端機執行命令
    */
   async runCommand(command: string): Promise<void> {
-    const terminal = vscode.window.createTerminal('vsMolt');
+    const terminal = vscode.window.createTerminal('VSMONSTER');
     terminal.show();
     terminal.sendText(command);
   }

@@ -1,6 +1,7 @@
 import { ChannelAdapter, ChannelsConfig, IncomingMessage, OutgoingMessage } from './base';
 import { LineChannel } from './line';
 import { TelegramChannel } from './telegram';
+import { DiscordChannel } from './discord';
 import { logger } from '../utils/logger';
 
 /**
@@ -11,9 +12,17 @@ export class ChannelManager {
   private channels: Map<string, ChannelAdapter> = new Map();
   private config: ChannelsConfig;
   private userChannelMap: Map<string, { channel: string; chatId?: string }> = new Map();
+  private messageHandler?: (message: IncomingMessage) => void;
 
   constructor(config: ChannelsConfig) {
     this.config = config;
+  }
+
+  /**
+   * 設定訊息處理器
+   */
+  setMessageHandler(handler: (message: IncomingMessage) => void): void {
+    this.messageHandler = handler;
   }
 
   /**
@@ -44,10 +53,19 @@ export class ChannelManager {
       );
     }
 
-    // Discord (待實現)
+    // Discord
     if (this.config.discord) {
-      logger.info('Discord channel configured but not yet implemented');
-      // TODO: Implement Discord channel
+      const discordChannel = new DiscordChannel(this.config.discord);
+      // 設定 Discord 訊息處理器
+      if (this.messageHandler) {
+        discordChannel.setMessageHandler(this.messageHandler);
+      }
+      this.channels.set('discord', discordChannel);
+      initPromises.push(
+        discordChannel.initialize().catch(err => {
+          logger.error('Failed to initialize Discord channel:', err);
+        })
+      );
     }
 
     // Slack (待實現)

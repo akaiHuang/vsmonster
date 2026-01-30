@@ -1,6 +1,6 @@
 # Telegram 頻道設定指南
 
-本指南將協助你設定 Telegram Bot 並連接到 vsMolt。
+本指南將協助你設定 Telegram Bot 並連接到 VSMONSTER。
 
 ## 前置需求
 
@@ -15,8 +15,8 @@
 2. 開始對話，發送 `/start`
 3. 發送 `/newbot` 建立新 Bot
 4. 依照指示:
-   - 輸入 Bot 的顯示名稱 (例如: "My vsMolt Bot")
-   - 輸入 Bot 的用戶名 (必須以 `bot` 結尾，例如: "my_vsmolt_bot")
+   - 輸入 Bot 的顯示名稱 (例如: "My VSMONSTER Bot")
+   - 輸入 Bot 的用戶名 (必須以 `bot` 結尾，例如: "my_vsmonster_bot")
 5. BotFather 會回覆你的 **Bot Token**，格式類似:
    ```
    123456789:ABCdefGHIjklMNOpqrsTUVwxyz
@@ -53,7 +53,7 @@ help - 顯示說明
 2. 選擇你的 Bot
 3. 選擇 **Disable** (這樣 Bot 可以讀取群組中的所有訊息)
 
-## 步驟 3: 配置 vsMolt
+## 步驟 3: 配置 VSMONSTER
 
 ### 方法 1: Polling 模式 (推薦用於開發)
 
@@ -104,7 +104,7 @@ pnpm start
 
 1. 在 Telegram 中找到你的 Bot
 2. 發送 `/start` 或任意訊息
-3. 確認 vsMolt 收到訊息
+3. 確認 VSMONSTER 收到訊息
 
 ## 功能說明
 
