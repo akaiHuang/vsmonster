@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * VSMONSTER 👾 Post-Install Script
+ * VSMONSTER Post-Install Script
  * 
  * 1. 顯示歡迎訊息
  * 2. 檢查並安裝 moltbot
@@ -17,6 +17,7 @@ const colors = {
   green: '\x1b[32m',
   yellow: '\x1b[33m',
   blue: '\x1b[34m',
+  monsterBlue: '\x1b[38;2;28;75;180m',
   magenta: '\x1b[35m',
   cyan: '\x1b[36m',
 };
@@ -25,7 +26,7 @@ const c = colors;
 
 function printBanner() {
   console.log(`
-${c.magenta}${c.bright}
+${c.monsterBlue}${c.bright}
   ██╗   ██╗███████╗███╗   ███╗ ██████╗ ███╗   ██╗███████╗████████╗███████╗██████╗ 
   ██║   ██║██╔════╝████╗ ████║██╔═══██╗████╗  ██║██╔════╝╚══██╔══╝██╔════╝██╔══██╗
   ██║   ██║███████╗██╔████╔██║██║   ██║██╔██╗ ██║███████╗   ██║   █████╗  ██████╔╝
@@ -33,7 +34,7 @@ ${c.magenta}${c.bright}
    ╚████╔╝ ███████║██║ ╚═╝ ██║╚██████╔╝██║ ╚████║███████║   ██║   ███████╗██║  ██║
     ╚═══╝  ╚══════╝╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝
 ${c.reset}
-  ${c.bright}👾 VSMONSTER${c.reset} - 將社群軟體連接到 VS Code Copilot
+  ${c.bright}VSMONSTER${c.reset} - 將社群軟體連接到 VS Code Copilot
   
   ${c.cyan}Powered by 🦞 Moltbot${c.reset} - https://github.com/moltbot/moltbot
   ${c.yellow}感謝 Moltbot 團隊的開源貢獻！${c.reset}
@@ -126,7 +127,7 @@ ${c.bright}下一步：${c.reset}
 
 ${c.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${c.reset}
 
-${c.magenta}👾 VSMONSTER${c.reset} + ${c.cyan}🦞 Moltbot${c.reset} = ${c.green}❤️${c.reset}
+${c.monsterBlue}VSMONSTER${c.reset} + ${c.cyan}🦞 Moltbot${c.reset} = ${c.green}❤️${c.reset}
 
 ${c.bright}文件：${c.reset} https://github.com/your-username/vsmonster
 ${c.bright}Moltbot：${c.reset} https://github.com/moltbot/moltbot

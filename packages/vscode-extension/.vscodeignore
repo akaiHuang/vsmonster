@@ -1,0 +1,11 @@
+# Whitelist mode - ignore everything, then allow specific files
+*
+
+# Required files
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+!dist/extension.js
+!resources/**
+

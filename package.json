@@ -2,7 +2,7 @@
   "name": "vsmonster",
   "version": "0.2.0",
   "private": true,
-  "description": "VSMONSTER 👾 - 將社群軟體連接到 VS Code Copilot (Powered by 🦞 Moltbot)",
+  "description": "VSMONSTER - 將社群軟體連接到 VS Code Copilot (Powered by 🦞 Moltbot)",
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm run dev:all",

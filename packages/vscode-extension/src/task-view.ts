@@ -81,7 +81,7 @@ export class TaskView implements vscode.TreeDataProvider<TaskItem> {
     } else if (element.task.subtasks && element.task.subtasks.length > 0) {
       // 任務的子任務
       return Promise.resolve(
-        element.task.subtasks.map(subtask => new SubTaskItem(subtask, element.task.id))
+        element.task.subtasks.map(subtask => new SubTaskItem(subtask, element.task.id) as any)
       );
     }
     

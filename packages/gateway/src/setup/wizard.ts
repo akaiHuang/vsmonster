@@ -154,7 +154,7 @@ export class SetupWizard {
     console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║   👾  VSMONSTER - VS Code Copilot 社群整合平台                   ║
+║      VSMONSTER - VS Code Copilot 社群整合平台                   ║
 ║                                                               ║
 ║   讓你透過 LINE、Telegram、Discord 遠端操控 VS Code Copilot   ║
 ║                                                               ║

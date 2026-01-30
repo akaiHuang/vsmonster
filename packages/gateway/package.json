@@ -1,7 +1,7 @@
 {
   "name": "@vsmonster/gateway",
   "version": "0.1.0",
-  "description": "VSMONSTER 👾 Gateway - 社群軟體到 VS Code Copilot 的橋接服務 (Powered by 🦞 Moltbot)",
+  "description": "VSMONSTER Gateway - 社群軟體到 VS Code Copilot 的橋接服務 (Powered by 🦞 Moltbot)",
   "main": "dist/server.js",
   "bin": {
     "vsmonster": "./bin/cli.js"
@@ -25,7 +25,6 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "moltbot": "^2026.1.24",
     "express": "^4.18.2",
     "ws": "^8.16.0",
     "uuid": "^9.0.0",

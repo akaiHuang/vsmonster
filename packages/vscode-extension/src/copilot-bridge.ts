@@ -1,5 +1,13 @@
 import * as vscode from 'vscode';
-import { SubTask } from '../../shared/types/task';
+
+// 本地定義 SubTask 類型，避免跨 package 引用問題
+interface SubTask {
+  id: string;
+  title: string;
+  description?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  result?: string;
+}
 
 /**
  * Copilot 橋接器

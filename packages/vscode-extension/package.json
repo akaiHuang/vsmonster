@@ -1,9 +1,19 @@
 {
   "name": "vsmonster",
   "displayName": "VSMONSTER - Copilot 社群整合",
-  "description": "將 LINE、Telegram 等社群軟體連接到 VS Code Copilot",
+  "description": "將 LINE、Telegram、Discord 等社群軟體連接到 VS Code Copilot，實現跨平台任務管理",
   "version": "0.0.1",
   "publisher": "vsmonster",
+  "icon": "resources/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/akaiHuang/vsmonster"
+  },
+  "homepage": "https://github.com/akaiHuang/vsmonster#readme",
+  "bugs": {
+    "url": "https://github.com/akaiHuang/vsmonster/issues"
+  },
+  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -19,7 +29,9 @@
     "discord",
     "chat",
     "ai",
-    "mcp"
+    "mcp",
+    "task",
+    "automation"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -79,7 +91,7 @@
         {
           "id": "vsmonster",
           "title": "VSMONSTER",
-          "icon": "resources/icon.svg"
+          "icon": "resources/icon.png"
         }
       ]
     },
@@ -145,9 +157,10 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run package",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js"
@@ -158,10 +171,11 @@
     "@types/ws": "^8.5.10",
     "@typescript-eslint/eslint-plugin": "^6.x",
     "@typescript-eslint/parser": "^6.x",
+    "esbuild": "^0.20.0",
     "eslint": "^8.x",
     "typescript": "^5.x"
   },
   "dependencies": {
-    "ws": "^8.16.0"
+    "ws": "8.19.0"
   }
 }

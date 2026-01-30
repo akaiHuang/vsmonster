@@ -1,4 +1,4 @@
-# 👾 VSMONSTER
+# ![VSMONSTER](packages/vscode-extension/resources/bluemonster.svg) VSMONSTER
 
 > 把 LINE / Telegram / Discord 的訊息帶進 VS Code Copilot 的本地橋接平台
 
@@ -26,7 +26,15 @@ VSMONSTER 讓你在社群軟體中下指令、追蹤任務進度，所有執行�
 
 #### 下載 VS Code
 
-前往 [code.visualstudio.com](https://code.visualstudio.com/) 下載並安裝。
+前往官網下載並安裝：
+
+| 平台 | 下載連結 |
+|------|----------|
+| 🍎 **macOS** | [下載 VS Code for Mac](https://code.visualstudio.com/sha/download?build=stable&os=darwin-universal) |
+| 🪟 **Windows** | [下載 VS Code for Windows](https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user) |
+| 🐧 **Linux** | [下載 VS Code for Linux](https://code.visualstudio.com/sha/download?build=stable&os=linux-x64) |
+
+> 或前往 [code.visualstudio.com](https://code.visualstudio.com/) 選擇其他版本。
 
 #### 設定 GitHub Copilot
 
@@ -50,7 +58,15 @@ VSMONSTER 讓你在社群軟體中下指令、追蹤任務進度，所有執行�
 
 ### Step 2️⃣ 安裝 VSMONSTER VS Code 擴充功能
 
-目前擴展尚未發布到 Marketplace，請在完成 Step 3 後手動安裝。
+在 VS Code 中安裝 **VSMONSTER** 擴充功能：
+
+1. 開啟 Extensions（`Cmd+Shift+X` / `Ctrl+Shift+X`）
+2. 搜尋 "VSMONSTER"
+3. 點擊 Install
+
+或直接點擊：[在 VS Code 中安裝 VSMONSTER](vscode:extension/vsmonster.vsmonster)
+
+> 📦 **Marketplace 連結**：[marketplace.visualstudio.com/items?itemName=vsmonster.vsmonster](https://marketplace.visualstudio.com/items?itemName=vsmonster.vsmonster)
 
 ---
 
@@ -310,5 +326,5 @@ MIT
 讓 VSMONSTER 能專注於 VS Code Copilot 整合與任務流程。
 
 ```
-👾 VSMONSTER + 🦞 Moltbot = ❤️
+![VSMONSTER](packages/vscode-extension/resources/bluemonster.svg) VSMONSTER + 🦞 Moltbot = ❤️
 ```

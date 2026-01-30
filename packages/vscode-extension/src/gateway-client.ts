@@ -140,7 +140,7 @@ export class GatewayClient extends EventEmitter {
    */
   private stopPingInterval(): void {
     if (this.pingInterval) {
-      clearInterval(this.pingInterval);
+      clearInterval(this.pingInterval as any);
       this.pingInterval = null;
     }
   }
