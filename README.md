@@ -2,7 +2,7 @@
 
 > 把 LINE / Telegram / Discord 的訊息帶進 VS Code Copilot 的本地橋接平台
 
-**Version**: 0.0.1 (Preview)
+**Version**: 0.2.0 | [CHANGELOG](CHANGELOG.md)
 
 VSMONSTER 讓你在社群軟體中下指令、追蹤任務進度，所有執行都在你的 VS Code 本機環境完成。
 專案以 🦞 Moltbot 作為社群連接層，VSMONSTER 專注於 Copilot 與任務流程。
@@ -18,13 +18,131 @@ VSMONSTER 讓你在社群軟體中下指令、追蹤任務進度，所有執行�
 - **MCP 擴充**：可選的 MCP 服務整合（Email / Browser / File 等）
 - **隧道支援**：可用 ngrok 產生公開預覽連結
 
+---
+
+## 🚀 快速開始
+
+### Step 1️⃣ 安裝 VS Code 與設定 GitHub Copilot
+
+#### 下載 VS Code
+
+前往 [code.visualstudio.com](https://code.visualstudio.com/) 下載並安裝。
+
+#### 設定 GitHub Copilot
+
+在 VS Code 中安裝 **GitHub Copilot** 擴充功能：
+1. 開啟 Extensions（`Cmd+Shift+X` / `Ctrl+Shift+X`）
+2. 搜尋 "GitHub Copilot"
+3. 點擊 Install
+
+#### 💰 免費 vs 付費方案
+
+| 方案 | 價格 | 模型 | 適合對象 |
+|------|------|------|----------|
+| **Free** | $0 | GPT-4o mini, Claude 3.5 Sonnet | 學生、輕度使用者 |
+| **Pro** | $10/月 | GPT-4o, Claude 3.5 Sonnet | 一般開發者 |
+| **Pro+** | $39/月 | **Claude Opus 4.5**, **GPT-5.2 Codex** | 專業開發者 ⭐ |
+| **Business** | $19/用戶/月 | 同 Pro，含管理功能 | 團隊 |
+
+> 💡 **作者推薦**：我個人使用 **$39 Pro+** 方案，因為 **Claude Opus 4.5** 和 **GPT-5.2 Codex** 是目前最能勝任複雜編程任務的模型組合。在處理大型專案重構、跨文件修改、架構設計時，這兩個模型的表現遠超其他選項。
+
+---
+
+### Step 2️⃣ 安裝 VSMONSTER VS Code 擴充功能
+
+目前擴展尚未發布到 Marketplace，請手動安裝：
+
+```bash
+# 先完成 Step 3 的安裝，再執行此指令
+pnpm extension:build
+```
+
+在 VS Code 中：
+1. `Cmd+Shift+P` / `Ctrl+Shift+P`
+2. 選擇 **Install from VSIX**
+3. 選取 `packages/vscode-extension/vsmonster-*.vsix`
+
+---
+
+### Step 3️⃣ 安裝 VSMONSTER Gateway
+
+```bash
+# 1. 複製專案
+git clone https://github.com/akaiHuang/vsmonster.git
+cd vsmonster
+
+# 2. 安裝依賴
+pnpm install
+
+# 3. 複製環境變數範本
+cp .env.example .env
+
+# 4. 啟動 Gateway
+pnpm dev
+```
+
+啟動後可驗證狀態：
+```
+http://localhost:3000/health
+```
+
+---
+
+### Step 4️⃣ 設定社群平台（擇一）
+
+> ⚠️ **安全警告**：以下取得的 Token 是高度敏感資料，請：
+> - ❌ **絕對不要**分享給任何人
+> - ❌ **絕對不要**上傳到 GitHub
+> - ❌ **絕對不要**截圖傳到群組
+> - ✅ 只存放在本機的 `.env` 檔案中
+
+#### 選擇你的平台：
+
+| 平台 | 難易度 | 適合對象 | 設定教學 |
+|------|--------|----------|----------|
+| 💚 **LINE** | ⭐⭐ | 台灣/日本用戶 | [📖 docs/setup-line.md](docs/setup-line.md) |
+| 🔵 **Telegram** | ⭐ | 最簡單，推薦新手 | [📖 docs/setup-telegram.md](docs/setup-telegram.md) |
+| 🟣 **Discord** | ⭐⭐⭐ | 團隊協作 | [📖 docs/setup-discord.md](docs/setup-discord.md) |
+
+#### 設定方式
+
+1. 依照上方教學取得你的平台 Token
+2. 編輯 `.env` 檔案，填入對應的 Token：
+
+```bash
+# 編輯環境變數
+nano .env   # 或用你喜歡的編輯器
+```
+
+```env
+# 💚 LINE（擇一填寫）
+LINE_CHANNEL_ACCESS_TOKEN=你的_LINE_Token
+LINE_CHANNEL_SECRET=你的_LINE_Secret
+
+# 🔵 Telegram（擇一填寫）
+TELEGRAM_BOT_TOKEN=你的_Telegram_Token
+
+# 🟣 Discord（擇一填寫）
+DISCORD_BOT_TOKEN=你的_Discord_Token
+DISCORD_APPLICATION_ID=你的_Application_ID
+```
+
+3. 重新啟動 Gateway：
+```bash
+pnpm dev
+```
+
+---
+
 ## 📣 支援平台
 
 | 平台 | 說明 | 設定指南 |
 |------|------|----------|
-| LINE | 適合台灣/日本用戶 | `docs/setup-line.md` |
-| Telegram | 設定最簡單 | `docs/setup-telegram.md` |
-| Discord | 團隊協作首選 | `docs/setup-discord.md` |
+| 💚 LINE | 適合台灣/日本用戶 | [docs/setup-line.md](docs/setup-line.md) |
+| 🔵 Telegram | 設定最簡單 | [docs/setup-telegram.md](docs/setup-telegram.md) |
+| 🟣 Discord | 團隊協作首選 | [docs/setup-discord.md](docs/setup-discord.md) |
+
+---
 
 ## 🧠 工作原理
 
@@ -37,85 +155,30 @@ VSMONSTER 將社群訊息轉成任務，交給 VS Code Copilot 執行，並回�
 
 ---
 
-## 🚀 快速開始（本地開發）
+## ⚙️ 環境變數設定
 
-### 1) 複製專案與安裝依賴
+所有敏感設定都放在 `.env` 檔案中（已加入 `.gitignore`，不會上傳）。
 
-```bash
-git clone https://github.com/your-username/vsmonster.git
-cd vsmonster
-pnpm install
-```
-
-### 2) 設定社群平台
-
-- **推薦方式**：使用 Moltbot 設定向導
-  ```bash
-  moltbot onboard
-  ```
-
-- **或手動建立設定檔**：放在 `configs/config.json`
-
-### 3) 啟動 Gateway
+### 快速設定
 
 ```bash
-pnpm dev
+cp .env.example .env   # 複製範本
+nano .env              # 編輯並填入你的 Token
 ```
 
-啟動後可用以下 API 驗證狀態：
+### 環境變數說明
 
-```
-http://localhost:3000/health
-```
+| 變數 | 說明 | 必填 |
+|------|------|------|
+| `VSMONSTER_PORT` | Gateway 埠號（預設 3000） | ❌ |
+| `LINE_CHANNEL_ACCESS_TOKEN` | LINE Bot Token | LINE 用戶 |
+| `LINE_CHANNEL_SECRET` | LINE Channel Secret | LINE 用戶 |
+| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token | Telegram 用戶 |
+| `DISCORD_BOT_TOKEN` | Discord Bot Token | Discord 用戶 |
+| `DISCORD_APPLICATION_ID` | Discord App ID | Discord 用戶 |
+| `NGROK_AUTHTOKEN` | ngrok 認證 Token | ❌ 可選 |
 
-### 4) 安裝 VS Code Extension
-
-目前擴展尚未發布到 Marketplace，請手動安裝：
-
-```bash
-pnpm extension:build
-```
-
-在 VS Code 中：
-1. `Cmd+Shift+P` / `Ctrl+Shift+P`
-2. 選擇 **Install from VSIX**
-3. 選取 `packages/vscode-extension/vsmonster-*.vsix`
-
----
-
-## ⚙️ 設定檔與環境變數
-
-VSMONSTER 會依序搜尋以下位置：
-
-1. `configs/config.json`
-2. `./config.json`
-3. `~/.vsmonster/config.json`
-
-### 範例設定檔
-
-```json
-{
-  "port": 3000,
-  "channels": {
-    "telegram": {
-      "botToken": "YOUR_BOT_TOKEN"
-    }
-  },
-  "tunnel": {
-    "enabled": false,
-    "authtoken": "YOUR_NGROK_TOKEN",
-    "region": "ap"
-  }
-}
-```
-
-### 環境變數
-
-- `VSMONSTER_PORT`
-- `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`
-- `DISCORD_BOT_TOKEN`, `DISCORD_APPLICATION_ID`, `DISCORD_PUBLIC_KEY`
-- `NGROK_AUTHTOKEN`, `NGROK_ENABLED`, `NGROK_REGION`
+> 💡 詳細範本請參考 [.env.example](.env.example)
 
 ---
 
