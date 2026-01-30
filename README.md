@@ -1,4 +1,4 @@
-# ![VSMONSTER](packages/vscode-extension/resources/bluemonster.svg) VSMONSTER
+# <img src="packages/vscode-extension/resources/bluemonster.svg" height="28"> VSMONSTER
 
 > 把 LINE / Telegram / Discord 的訊息帶進 VS Code Copilot 的本地橋接平台
 
@@ -325,6 +325,4 @@ MIT
 特別感謝 Moltbot 的開源貢獻，
 讓 VSMONSTER 能專注於 VS Code Copilot 整合與任務流程。
 
-```
-![VSMONSTER](packages/vscode-extension/resources/bluemonster.svg) VSMONSTER + 🦞 Moltbot = ❤️
-```
+<img src="packages/vscode-extension/resources/bluemonster.svg" height="20"> VSMONSTER + 🦞 Moltbot = ❤️
