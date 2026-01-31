@@ -11,6 +11,7 @@
   "command.runSetupWizard": "Run Setup Wizard",
   "command.openQuickStart": "Open Quick Start Guide",
   "command.switchLanguage": "Switch Language",
+  "command.selectModel": "Select AI Model",
   "view.tasks": "Task List",
   "view.tasks.context": "VSMONSTER Tasks",
   "view.channels": "Channel Status",
@@ -21,6 +22,7 @@
   "config.autoConnect": "Auto-connect to Gateway when VS Code starts",
   "config.showNotifications": "Show task notifications",
   "config.defaultModel": "Default AI model",
+  "config.defaultModel.description": "Default AI model ID. Use 'VSMONSTER: Select AI Model' command to choose from available Copilot models. Leave empty to use the first available model.",
   "config.language": "Extension language",
   "config.language.description": "Display language for the extension (requires reload)"
 }

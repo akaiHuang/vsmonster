@@ -10,15 +10,71 @@ interface SubTask {
 }
 
 /**
+ * 可用模型資訊
+ */
+export interface AvailableModel {
+  id: string;
+  name: string;
+  family: string;
+  vendor: string;
+  version: string;
+  maxInputTokens: number;
+}
+
+/**
  * Copilot 橋接器
  * 負責將社群訊息轉換為 Copilot 指令並執行
  */
 export class CopilotBridge {
   private context: vscode.ExtensionContext;
   private currentModel: string = 'gpt-4';
+  private availableModels: AvailableModel[] = [];
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
+    // 初始化時獲取可用模型
+    this.refreshAvailableModels();
+  }
+
+  /**
+   * 獲取所有可用的 Copilot 模型
+   */
+  async refreshAvailableModels(): Promise<AvailableModel[]> {
+    try {
+      // 獲取所有 Copilot 提供的模型
+      const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+      
+      this.availableModels = models.map(model => ({
+        id: model.id,
+        name: model.name,
+        family: model.family,
+        vendor: model.vendor,
+        version: model.version,
+        maxInputTokens: model.maxInputTokens
+      }));
+
+      console.log(`[VSMONSTER] Found ${this.availableModels.length} available Copilot models:`, 
+        this.availableModels.map(m => m.name).join(', '));
+
+      return this.availableModels;
+    } catch (error) {
+      console.error('[VSMONSTER] Failed to get available models:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 獲取可用模型列表
+   */
+  getAvailableModels(): AvailableModel[] {
+    return this.availableModels;
+  }
+
+  /**
+   * 獲取可用模型 ID 列表（用於設定選項）
+   */
+  getAvailableModelIds(): string[] {
+    return this.availableModels.map(m => m.id);
   }
 
   /**
@@ -71,17 +127,34 @@ ${subtask.description}
       throw new Error('Copilot Chat extension not found');
     }
 
-    // 使用 VS Code 內建的聊天 API
-    const chatModels = await vscode.lm.selectChatModels({
+    // 優先使用設定的模型 ID 直接匹配
+    let chatModels = await vscode.lm.selectChatModels({
       vendor: 'copilot',
-      family: this.currentModel.includes('gpt-4') ? 'gpt-4' : 'gpt-3.5-turbo'
+      id: this.currentModel
     });
+
+    // 如果找不到，嘗試用 family 匹配
+    if (chatModels.length === 0) {
+      chatModels = await vscode.lm.selectChatModels({
+        vendor: 'copilot',
+        family: this.currentModel.includes('gpt-4') ? 'gpt-4' : 
+                this.currentModel.includes('gpt-3.5') ? 'gpt-3.5-turbo' :
+                this.currentModel.includes('claude') ? 'claude-3.5-sonnet' : undefined
+      });
+    }
+
+    // 還是找不到，獲取所有可用模型並使用第一個
+    if (chatModels.length === 0) {
+      chatModels = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+    }
 
     if (chatModels.length === 0) {
       throw new Error('No chat models available');
     }
 
     const model = chatModels[0];
+    console.log(`[VSMONSTER] Using model: ${model.name} (${model.id})`);
+    
     const messages = [
       vscode.LanguageModelChatMessage.User(prompt)
     ];

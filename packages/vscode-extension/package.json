@@ -89,6 +89,11 @@
         "command": "vsmonster.switchLanguage",
         "title": "%command.switchLanguage%",
         "category": "VSMONSTER"
+      },
+      {
+        "command": "vsmonster.selectModel",
+        "title": "%command.selectModel%",
+        "category": "VSMONSTER"
       }
     ],
     "viewsContainers": {
@@ -148,14 +153,8 @@
         },
         "vsmonster.defaultModel": {
           "type": "string",
-          "default": "gpt-4",
-          "enum": [
-            "gpt-4",
-            "gpt-4-turbo",
-            "gpt-3.5-turbo",
-            "claude-3-opus",
-            "claude-3-sonnet"
-          ],
+          "default": "",
+          "markdownDescription": "%config.defaultModel.description%",
           "description": "%config.defaultModel%"
         },
         "vsmonster.language": {

@@ -51,6 +51,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('vsmonster.runSetupWizard', () => runSetupWizard(context)),
     vscode.commands.registerCommand('vsmonster.openQuickStart', openQuickStart),
     vscode.commands.registerCommand('vsmonster.switchLanguage', switchLanguage),
+    vscode.commands.registerCommand('vsmonster.selectModel', () => selectModel(copilotBridge)),
   );
 
   // Check if first run
@@ -96,6 +97,46 @@ async function switchLanguage() {
     if (reload === t('Reload')) {
       await vscode.commands.executeCommand('workbench.action.reloadWindow');
     }
+  }
+}
+
+/**
+ * Select AI model command - dynamically fetches available Copilot models
+ */
+async function selectModel(bridge: CopilotBridge | undefined) {
+  if (!bridge) {
+    vscode.window.showErrorMessage(t('CopilotBridge not initialized'));
+    return;
+  }
+
+  // Refresh available models
+  const models = await bridge.refreshAvailableModels();
+
+  if (models.length === 0) {
+    vscode.window.showWarningMessage(
+      t('No Copilot models available. Please make sure you have GitHub Copilot installed and are signed in.')
+    );
+    return;
+  }
+
+  // Create quick pick items from available models
+  const items = models.map(model => ({
+    label: model.name,
+    description: `${model.family} (${model.vendor})`,
+    detail: `Max tokens: ${model.maxInputTokens.toLocaleString()}`,
+    value: model.id
+  }));
+
+  const selection = await vscode.window.showQuickPick(items, {
+    placeHolder: t('Select AI model'),
+    title: 'VSMONSTER - Select Copilot Model',
+  });
+
+  if (selection) {
+    const config = vscode.workspace.getConfiguration('vsmonster');
+    await config.update('defaultModel', selection.value, vscode.ConfigurationTarget.Global);
+    await bridge.switchModel(selection.value);
+    vscode.window.showInformationMessage(t('Model switched to: ') + selection.label);
   }
 }
 
