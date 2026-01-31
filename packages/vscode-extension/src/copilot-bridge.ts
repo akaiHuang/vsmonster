@@ -41,7 +41,24 @@ export class CopilotBridge {
    */
   async refreshAvailableModels(): Promise<AvailableModel[]> {
     try {
-      // 獲取所有 Copilot 提供的模型
+      console.log('[VSMONSTER] Fetching available Copilot models...');
+      
+      // 檢查 API 是否可用
+      if (!vscode.lm || !vscode.lm.selectChatModels) {
+        console.error('[VSMONSTER] vscode.lm API is not available');
+        vscode.window.showErrorMessage('Language Model API 不可用，請確認 VS Code 版本 >= 1.90');
+        return [];
+      }
+
+      // 先嘗試獲取所有模型（不限 vendor）
+      const allModels = await vscode.lm.selectChatModels();
+      console.log(`[VSMONSTER] Total models available: ${allModels.length}`);
+      
+      if (allModels.length > 0) {
+        console.log('[VSMONSTER] All models:', allModels.map(m => `${m.name} (${m.vendor})`).join(', '));
+      }
+
+      // 獲取 Copilot 提供的模型
       const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
       
       this.availableModels = models.map(model => ({
@@ -53,12 +70,26 @@ export class CopilotBridge {
         maxInputTokens: model.maxInputTokens
       }));
 
-      console.log(`[VSMONSTER] Found ${this.availableModels.length} available Copilot models:`, 
+      console.log(`[VSMONSTER] Found ${this.availableModels.length} Copilot models:`, 
         this.availableModels.map(m => m.name).join(', '));
+
+      // 如果沒有 Copilot 模型但有其他模型，使用所有模型
+      if (this.availableModels.length === 0 && allModels.length > 0) {
+        console.log('[VSMONSTER] No Copilot models, using all available models');
+        this.availableModels = allModels.map(model => ({
+          id: model.id,
+          name: model.name,
+          family: model.family,
+          vendor: model.vendor,
+          version: model.version,
+          maxInputTokens: model.maxInputTokens
+        }));
+      }
 
       return this.availableModels;
     } catch (error) {
       console.error('[VSMONSTER] Failed to get available models:', error);
+      vscode.window.showErrorMessage(`獲取模型失敗: ${error}`);
       return [];
     }
   }

@@ -104,6 +104,8 @@ async function switchLanguage() {
  * Select AI model command - dynamically fetches available Copilot models
  */
 async function selectModel(bridge: CopilotBridge | undefined) {
+  console.log('[VSMONSTER] selectModel command triggered');
+  
   if (!bridge) {
     vscode.window.showErrorMessage(t('CopilotBridge not initialized'));
     return;
@@ -607,9 +609,10 @@ async function startGateway() {
 }
 
 function openSettings() {
+  console.log('[VSMONSTER] Opening settings...');
   vscode.commands.executeCommand(
     'workbench.action.openSettings',
-    'vsmonster'
+    '@ext:vsmonster.vsmonster'
   );
 }
 

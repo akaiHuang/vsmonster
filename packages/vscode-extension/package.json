@@ -62,7 +62,8 @@
       {
         "command": "vsmonster.openSettings",
         "title": "%command.openSettings%",
-        "category": "VSMONSTER"
+        "category": "VSMONSTER",
+        "icon": "$(gear)"
       },
       {
         "command": "vsmonster.sendToChannel",
@@ -93,7 +94,8 @@
       {
         "command": "vsmonster.selectModel",
         "title": "%command.selectModel%",
-        "category": "VSMONSTER"
+        "category": "VSMONSTER",
+        "icon": "$(hubot)"
       }
     ],
     "viewsContainers": {
@@ -128,6 +130,16 @@
       "view/title": [
         {
           "command": "vsmonster.refreshTasks",
+          "when": "view == vsmonsterTasks",
+          "group": "navigation"
+        },
+        {
+          "command": "vsmonster.selectModel",
+          "when": "view == vsmonsterTasks",
+          "group": "navigation"
+        },
+        {
+          "command": "vsmonster.openSettings",
           "when": "view == vsmonsterTasks",
           "group": "navigation"
         }
