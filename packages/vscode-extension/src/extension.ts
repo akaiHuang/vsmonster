@@ -111,8 +111,17 @@ async function selectModel(bridge: CopilotBridge | undefined) {
     return;
   }
 
-  // Refresh available models
-  const models = await bridge.refreshAvailableModels();
+  // 顯示載入中提示
+  const models = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: t('Loading available AI models...'),
+      cancellable: false
+    },
+    async () => {
+      return await bridge.refreshAvailableModels();
+    }
+  );
 
   if (models.length === 0) {
     vscode.window.showWarningMessage(
