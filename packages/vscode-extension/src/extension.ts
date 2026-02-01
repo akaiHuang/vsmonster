@@ -4,21 +4,106 @@ import { GatewayClient } from './gateway-client';
 import { CopilotBridge } from './copilot-bridge';
 import { TerminalManager } from './terminal-manager';
 import { TaskView } from './task-view';
+import { ChannelsView } from './channels-view';
+import { MCPView } from './mcp-view';
+import { ChatTreeView } from './chat-tree-view';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 let gatewayClient: GatewayClient | undefined;
 let copilotBridge: CopilotBridge | undefined;
 let terminalManager: TerminalManager | undefined;
+let chatTreeView: ChatTreeView | undefined;
 let statusBarItem: vscode.StatusBarItem;
 
 const FIRST_RUN_KEY = 'vsmonster.hasCompletedSetup';
+const INSTANCE_LOCK_FILE = path.join(os.tmpdir(), 'vsmonster-instance.lock');
 
 // Localization helper
 function t(key: string): string {
   return vscode.l10n.t(key);
 }
 
+/**
+ * 檢查是否有其他 VSCode 實例正在運行 VSMONSTER
+ */
+function checkSingleInstance(context: vscode.ExtensionContext): boolean {
+  try {
+    if (fs.existsSync(INSTANCE_LOCK_FILE)) {
+      const lockContent = fs.readFileSync(INSTANCE_LOCK_FILE, 'utf-8');
+      const lockData = JSON.parse(lockContent);
+      
+      // 檢查鎖文件的 PID 是否還在運行
+      const isProcessRunning = (pid: number) => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      
+      if (lockData.pid && isProcessRunning(lockData.pid)) {
+        // 另一個實例正在運行
+        console.warn(`Another VSMONSTER instance is running (PID: ${lockData.pid})`);
+        return false;
+      } else {
+        // 鎖文件無效，刪除它
+        fs.unlinkSync(INSTANCE_LOCK_FILE);
+      }
+    }
+    
+    // 創建新的鎖文件
+    fs.writeFileSync(INSTANCE_LOCK_FILE, JSON.stringify({
+      pid: process.pid,
+      workspaceFolder: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      timestamp: Date.now()
+    }));
+    
+    // 清理函數
+    context.subscriptions.push({
+      dispose: () => {
+        try {
+          if (fs.existsSync(INSTANCE_LOCK_FILE)) {
+            fs.unlinkSync(INSTANCE_LOCK_FILE);
+          }
+        } catch (err) {
+          console.error('Failed to clean up lock file:', err);
+        }
+      }
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error checking single instance:', error);
+    return true; // 發生錯誤時仍然允許啟動
+  }
+}
+
 export async function activate(context: vscode.ExtensionContext) {
   console.log('VSMONSTER extension is now active');
+  
+  // 檢查單一實例
+  if (!checkSingleInstance(context)) {
+    const msg = vscode.env.language.startsWith('zh') 
+      ? 'VSMONSTER 已在另一個 VS Code 視窗中運行。為避免衝突，此視窗的 VSMONSTER 已停用。'
+      : 'VSMONSTER is already running in another VS Code window. This instance has been disabled to avoid conflicts.';
+    
+    vscode.window.showWarningMessage(msg);
+    
+    // 創建停用狀態的狀態欄
+    statusBarItem = vscode.window.createStatusBarItem(
+      vscode.StatusBarAlignment.Right,
+      100
+    );
+    statusBarItem.text = '$(error) VSMONSTER (Disabled)';
+    statusBarItem.tooltip = msg;
+    statusBarItem.show();
+    context.subscriptions.push(statusBarItem);
+    
+    return; // 停止啟動
+  }
 
   // Create status bar item
   statusBarItem = vscode.window.createStatusBarItem(
@@ -38,20 +123,51 @@ export async function activate(context: vscode.ExtensionContext) {
   // Register task view
   const taskView = new TaskView();
   vscode.window.registerTreeDataProvider('vsmonsterTasks', taskView);
+  
+  // Register channels view
+  const channelsView = new ChannelsView();
+  vscode.window.registerTreeDataProvider('vsmonsterChannels', channelsView);
+  
+  // Register MCP view
+  const mcpView = new MCPView();
+  vscode.window.registerTreeDataProvider('vsmonsterMCP', mcpView);
+
+  // Register chat view (純原生 TreeView，最快！)
+  chatTreeView = new ChatTreeView();
+  vscode.window.registerTreeDataProvider('vsmonsterChat', chatTreeView);
+
+  // 設定初始連接狀態
+  vscode.commands.executeCommand('setContext', 'vsmonster.connected', false);
 
   // Register commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('vsmonster.connect', () => connectToGateway(context, taskView)),
-    vscode.commands.registerCommand('vsmonster.disconnect', disconnectFromGateway),
+    vscode.commands.registerCommand('vsmonster.connect', () => connectToGateway(context, taskView, channelsView, mcpView)),
+    vscode.commands.registerCommand('vsmonster.disconnect', () => disconnectFromGateway(channelsView, mcpView)),
     vscode.commands.registerCommand('vsmonster.showStatus', showStatus),
     vscode.commands.registerCommand('vsmonster.startGateway', startGateway),
     vscode.commands.registerCommand('vsmonster.openSettings', openSettings),
     vscode.commands.registerCommand('vsmonster.sendToChannel', sendToChannel),
     vscode.commands.registerCommand('vsmonster.refreshTasks', () => taskView.refresh()),
+    vscode.commands.registerCommand('vsmonster.refreshChannels', () => channelsView.refresh()),
+    vscode.commands.registerCommand('vsmonster.refreshMCP', () => mcpView.refresh()),
+    vscode.commands.registerCommand('vsmonster.clearTasks', () => {
+      taskView.clearTasks();
+      vscode.window.showInformationMessage('已清除所有任務');
+    }),
     vscode.commands.registerCommand('vsmonster.runSetupWizard', () => runSetupWizard(context)),
     vscode.commands.registerCommand('vsmonster.openQuickStart', openQuickStart),
     vscode.commands.registerCommand('vsmonster.switchLanguage', switchLanguage),
     vscode.commands.registerCommand('vsmonster.selectModel', () => selectModel(copilotBridge)),
+    vscode.commands.registerCommand('vsmonster.refreshChat', () => chatTreeView?.refresh()),
+    vscode.commands.registerCommand('vsmonster.clearChat', () => chatTreeView?.clear()),
+    vscode.commands.registerCommand('vsmonster.copyMessage', (content: string) => {
+      vscode.env.clipboard.writeText(content);
+      vscode.window.showInformationMessage('已複製訊息');
+    }),
+    vscode.commands.registerCommand('vsmonster.sendToCopilot', () => sendToCopilot()),
+    vscode.commands.registerCommand('vsmonster.sendToLine', () => sendToChannelQuick('line')),
+    vscode.commands.registerCommand('vsmonster.sendToTelegram', () => sendToChannelQuick('telegram')),
+    vscode.commands.registerCommand('vsmonster.sendToDiscord', () => sendToChannelQuick('discord')),
   );
 
   // Check if first run
@@ -59,12 +175,16 @@ export async function activate(context: vscode.ExtensionContext) {
   
   if (!hasCompletedSetup) {
     // First run, show setup wizard
-    await showWelcomeMessage(context, taskView);
+    void showWelcomeMessage(context, taskView).catch(error => {
+      console.error('[VSMONSTER] Failed to show welcome message:', error);
+    });
   } else {
     // Auto-connect if configured
     const config = vscode.workspace.getConfiguration('vsmonster');
     if (config.get('autoConnect')) {
-      await connectToGateway(context, taskView);
+      void connectToGateway(context, taskView, channelsView, mcpView).catch(error => {
+        console.error('[VSMONSTER] Auto-connect failed:', error);
+      });
     }
   }
 }
@@ -111,17 +231,26 @@ async function selectModel(bridge: CopilotBridge | undefined) {
     return;
   }
 
-  // 顯示載入中提示
-  const models = await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: t('Loading available AI models...'),
-      cancellable: false
-    },
-    async () => {
-      return await bridge.refreshAvailableModels();
-    }
-  );
+  let models = bridge.getAvailableModels();
+
+  if (models.length === 0) {
+    // 顯示載入中提示（僅在無快取時）
+    models = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: t('Loading available AI models...'),
+        cancellable: false
+      },
+      async () => {
+        return await bridge.refreshAvailableModels();
+      }
+    );
+  } else {
+    // 背景更新模型列表，避免阻塞 UI
+    void bridge.refreshAvailableModels().catch(error => {
+      console.error('[VSMONSTER] Failed to refresh models in background:', error);
+    });
+  }
 
   if (models.length === 0) {
     vscode.window.showWarningMessage(
@@ -275,7 +404,9 @@ async function runSetupWizard(context: vscode.ExtensionContext) {
     
     // Try to connect
     const taskView = new TaskView();
-    await connectToGateway(context, taskView);
+    const channelsView = new ChannelsView();
+    const mcpView = new MCPView();
+    await connectToGateway(context, taskView, channelsView, mcpView);
   }
 
   // Mark setup complete
@@ -467,7 +598,12 @@ async function openQuickStart() {
   );
 }
 
-async function connectToGateway(context: vscode.ExtensionContext, taskView: TaskView) {
+async function connectToGateway(
+  context: vscode.ExtensionContext, 
+  taskView: TaskView,
+  channelsView: ChannelsView,
+  mcpView: MCPView
+) {
   const config = vscode.workspace.getConfiguration('vsmonster');
   const gatewayUrl = config.get<string>('gatewayUrl') || 'ws://localhost:3000';
 
@@ -478,15 +614,52 @@ async function connectToGateway(context: vscode.ExtensionContext, taskView: Task
       statusBarItem.text = '$(check) VSMONSTER';
       statusBarItem.tooltip = 'VSMONSTER: 已連接';
       vscode.window.showInformationMessage('已連接到 VSMONSTER Gateway');
+      
+      // 更新連接狀態 context（用於工具列按鈕顯示）
+      vscode.commands.executeCommand('setContext', 'vsmonster.connected', true);
+      
+      // 請求初始狀態
+      gatewayClient?.send({ type: 'get_status' });
     });
 
     gatewayClient.on('disconnected', () => {
       statusBarItem.text = '$(plug) VSMONSTER';
       statusBarItem.tooltip = 'VSMONSTER: 未連接';
+      
+      // 更新連接狀態 context
+      vscode.commands.executeCommand('setContext', 'vsmonster.connected', false);
+      
+      // 清空視圖
+      channelsView.setChannels([]);
+      mcpView.setServers([]);
+    });
+    
+    // 處理初始狀態
+    gatewayClient.on('init', (data: any) => {
+      if (data.channels) {
+        channelsView.setChannels(data.channels);
+      }
+      if (data.mcpServers) {
+        mcpView.setServers(data.mcpServers);
+      }
+    });
+    
+    // 處理頻道更新
+    gatewayClient.on('channel_update', (data: any) => {
+      channelsView.updateChannel(data.name, data);
+    });
+    
+    // 處理 MCP 更新
+    gatewayClient.on('mcp_update', (data: any) => {
+      mcpView.updateServer(data.name, data);
     });
 
     gatewayClient.on('new_task', async (data: any) => {
       await handleNewTask(data, taskView);
+    });
+    
+    gatewayClient.on('chat_message', async (data: any) => {
+      await handleChatMessage(data);
     });
 
     gatewayClient.on('switch_model', async (data: any) => {
@@ -499,13 +672,20 @@ async function connectToGateway(context: vscode.ExtensionContext, taskView: Task
   }
 }
 
-function disconnectFromGateway() {
+function disconnectFromGateway(channelsView: ChannelsView, mcpView: MCPView) {
   if (gatewayClient) {
     gatewayClient.disconnect();
     gatewayClient = undefined;
     statusBarItem.text = '$(plug) VSMONSTER';
     statusBarItem.tooltip = 'VSMONSTER: 未連接';
     vscode.window.showInformationMessage('已斷開 VSMONSTER Gateway 連接');
+    
+    // 更新連接狀態 context
+    vscode.commands.executeCommand('setContext', 'vsmonster.connected', false);
+    
+    // 清空視圖
+    channelsView.setChannels([]);
+    mcpView.setServers([]);
   }
 }
 
@@ -565,6 +745,55 @@ async function handleNewTask(data: any, taskView: TaskView) {
         error: String(error),
       });
     }
+  }
+}
+
+/**
+ * 處理一般聊天訊息（不創建任務）
+ */
+async function handleChatMessage(data: any) {
+  const { channel, userId, userName, message, media } = data;
+  
+  // 在聊天視圖中顯示收到的訊息
+  chatTreeView?.addIncomingMessage(
+    channel,
+    userName || userId,
+    message
+  );
+  
+  if (!copilotBridge) {
+    console.warn('CopilotBridge not initialized');
+    return;
+  }
+
+  try {
+    // 使用 Copilot 進行對話
+    const response = await copilotBridge.chat(message, userId);
+    
+    // 在聊天視圖中顯示 AI 回覆
+    chatTreeView?.addAIResponse(response, channel);
+    
+    // 回傳回應到 Gateway
+    gatewayClient?.send({
+      type: 'copilot_response',
+      channel,
+      userId,
+      content: response,
+    });
+  } catch (error) {
+    console.error('Failed to handle chat message:', error);
+    
+    const errorMsg = `抱歉，處理訊息時發生錯誤: ${error}`;
+    
+    // 在聊天視圖中顯示錯誤
+    chatTreeView?.addAIResponse(errorMsg, channel);
+    
+    gatewayClient?.send({
+      type: 'copilot_response',
+      channel,
+      userId,
+      content: errorMsg,
+    });
   }
 }
 
@@ -644,6 +873,68 @@ async function sendToChannel() {
   }
 }
 
+/**
+ * 發送訊息到 Copilot（原生 InputBox，超快）
+ */
+async function sendToCopilot() {
+  const message = await vscode.window.showInputBox({
+    prompt: '輸入要發送給 Copilot 的訊息',
+    placeHolder: '例如: 幫我寫一個函數...',
+  });
+
+  if (!message) return;
+
+  // 顯示發送的訊息
+  chatTreeView?.addOutgoingMessage('copilot', message);
+
+  if (!copilotBridge) {
+    vscode.window.showWarningMessage('Copilot 未初始化');
+    return;
+  }
+
+  try {
+    const response = await copilotBridge.chat(message);
+    chatTreeView?.addAIResponse(response);
+  } catch (error) {
+    vscode.window.showErrorMessage(`Copilot 錯誤: ${error}`);
+  }
+}
+
+/**
+ * 快速發送訊息到指定頻道（原生 InputBox，超快）
+ */
+async function sendToChannelQuick(channel: string) {
+  if (!gatewayClient?.isConnected()) {
+    vscode.window.showWarningMessage('請先連接到 Gateway');
+    return;
+  }
+
+  const channelNames: Record<string, string> = {
+    line: 'LINE',
+    telegram: 'Telegram',
+    discord: 'Discord'
+  };
+
+  const message = await vscode.window.showInputBox({
+    prompt: `輸入要發送到 ${channelNames[channel] || channel} 的訊息`,
+    placeHolder: '輸入訊息內容...',
+  });
+
+  if (!message) return;
+
+  // 顯示發送的訊息
+  chatTreeView?.addOutgoingMessage(channel, message);
+
+  gatewayClient.send({
+    type: 'send_to_channel',
+    channel,
+    content: message,
+  });
+}
+
 export function deactivate() {
-  disconnectFromGateway();
+  if (gatewayClient) {
+    gatewayClient.disconnect();
+    gatewayClient = undefined;
+  }
 }

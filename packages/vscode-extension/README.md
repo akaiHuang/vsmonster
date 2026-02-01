@@ -2,7 +2,7 @@
 
 > 將 LINE、Telegram、Discord 的訊息帶進 VS Code！
 
-![Version](https://img.shields.io/badge/version-0.0.1-blue)
+![Version](https://img.shields.io/badge/version-0.0.2-blue)
 ![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-green)
 
 ## ✨ 功能特色
@@ -15,7 +15,29 @@
 
 ## 🚀 快速開始
 
-### 1. 安裝 VSMONSTER Gateway
+### 1. 安裝擴充功能
+
+**Marketplace（最簡單）**
+- 在 VS Code Extensions 搜尋「VSMONSTER」並安裝
+
+**VSIX（不透過 Marketplace）**
+- GitHub Releases: https://github.com/akaiHuang/vsmonster/releases/latest
+- VS Code：Extensions → `...` → Install from VSIX...
+- CLI：`code --install-extension /path/to/vsmonster-*.vsix`
+
+Windows 一行安裝（PowerShell）：
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install-extension.ps1
+```
+
+macOS/Linux 一行安裝（從原始碼打包）：
+```bash
+bash scripts/install-extension.sh
+```
+
+---
+
+### 2. 安裝 VSMONSTER Gateway
 
 ```bash
 git clone https://github.com/akaiHuang/vsmonster.git
@@ -23,7 +45,7 @@ cd vsmonster
 pnpm install
 ```
 
-### 2. 設定社群平台
+### 3. 設定社群平台
 
 編輯 `.env` 檔案，填入你的 Bot Token：
 
@@ -36,13 +58,13 @@ LINE_CHANNEL_ACCESS_TOKEN=your_token
 DISCORD_BOT_TOKEN=your_token
 ```
 
-### 3. 啟動 Gateway
+### 4. 啟動 Gateway
 
 ```bash
 pnpm dev
 ```
 
-### 4. 連接擴充功能
+### 5. 連接擴充功能
 
 擴充功能會自動連接到 `ws://localhost:3000`。
 

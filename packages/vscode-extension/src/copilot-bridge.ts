@@ -29,17 +29,29 @@ export class CopilotBridge {
   private context: vscode.ExtensionContext;
   private currentModel: string = 'gpt-4';
   private availableModels: AvailableModel[] = [];
+  private refreshPromise?: Promise<AvailableModel[]>;
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
-    // 初始化時獲取可用模型
-    this.refreshAvailableModels();
   }
 
   /**
    * 獲取所有可用的 Copilot 模型
    */
   async refreshAvailableModels(): Promise<AvailableModel[]> {
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = this.fetchAvailableModels();
+    try {
+      return await this.refreshPromise;
+    } finally {
+      this.refreshPromise = undefined;
+    }
+  }
+
+  private async fetchAvailableModels(): Promise<AvailableModel[]> {
     try {
       console.log('[VSMONSTER] Fetching available Copilot models...');
       
@@ -50,7 +62,24 @@ export class CopilotBridge {
         return [];
       }
 
-      // 先嘗試獲取所有模型（不限 vendor）
+      // 優先獲取 Copilot 提供的模型
+      const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+      
+      if (models.length > 0) {
+        this.availableModels = models.map(model => ({
+          id: model.id,
+          name: model.name,
+          family: model.family,
+          vendor: model.vendor,
+          version: model.version,
+          maxInputTokens: model.maxInputTokens
+        }));
+        console.log(`[VSMONSTER] Found ${this.availableModels.length} Copilot models:`, 
+          this.availableModels.map(m => m.name).join(', '));
+        return this.availableModels;
+      }
+
+      // 如果沒有 Copilot 模型，獲取所有模型作為退路
       const allModels = await vscode.lm.selectChatModels();
       console.log(`[VSMONSTER] Total models available: ${allModels.length}`);
       
@@ -58,10 +87,7 @@ export class CopilotBridge {
         console.log('[VSMONSTER] All models:', allModels.map(m => `${m.name} (${m.vendor})`).join(', '));
       }
 
-      // 獲取 Copilot 提供的模型
-      const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-      
-      this.availableModels = models.map(model => ({
+      this.availableModels = allModels.map(model => ({
         id: model.id,
         name: model.name,
         family: model.family,
@@ -70,20 +96,8 @@ export class CopilotBridge {
         maxInputTokens: model.maxInputTokens
       }));
 
-      console.log(`[VSMONSTER] Found ${this.availableModels.length} Copilot models:`, 
-        this.availableModels.map(m => m.name).join(', '));
-
-      // 如果沒有 Copilot 模型但有其他模型，使用所有模型
-      if (this.availableModels.length === 0 && allModels.length > 0) {
+      if (this.availableModels.length > 0) {
         console.log('[VSMONSTER] No Copilot models, using all available models');
-        this.availableModels = allModels.map(model => ({
-          id: model.id,
-          name: model.name,
-          family: model.family,
-          vendor: model.vendor,
-          version: model.version,
-          maxInputTokens: model.maxInputTokens
-        }));
       }
 
       return this.availableModels;
@@ -106,6 +120,21 @@ export class CopilotBridge {
    */
   getAvailableModelIds(): string[] {
     return this.availableModels.map(m => m.id);
+  }
+
+  /**
+   * 進行一般對話（不創建任務）
+   * @param message 用戶的訊息
+   * @param userId 用戶 ID（可選，用於追蹤對話）
+   */
+  async chat(message: string, userId?: string): Promise<string> {
+    try {
+      const result = await this.sendToCopilotChat(message);
+      return result.response || '抱歉，我無法處理這個訊息。';
+    } catch (error) {
+      console.error('[VSMONSTER] Chat error:', error);
+      throw error;
+    }
   }
 
   /**

@@ -24,6 +24,7 @@ cp "$EXT_DIR/tsconfig.json" "$TMP_DIR/"
 cp "$EXT_DIR/README.md" "$TMP_DIR/"
 cp "$EXT_DIR/CHANGELOG.md" "$TMP_DIR/"
 cp "$EXT_DIR/LICENSE" "$TMP_DIR/"
+cp "$EXT_DIR/esbuild.js" "$TMP_DIR/"
 
 # 如果有 .vscodeignore 也複製
 if [ -f "$EXT_DIR/.vscodeignore" ]; then

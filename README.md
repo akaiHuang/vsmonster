@@ -26,6 +26,15 @@ The project uses 🦞 Moltbot as the messaging layer, while VSMONSTER focuses on
 
 ## 🚀 Quick Start
 
+### Step 0️⃣ Prerequisites (One-time)
+
+- **VS Code** (see Step 1 below)
+- **Git** (for cloning the repo)
+- **Node.js 20+** and **pnpm 8+** (for running the Gateway)
+- Optional: **VS Code CLI** (`code` or `code-insiders`) for one-line VSIX install
+
+> If you only want to install the extension (no Gateway), you can skip Node.js/pnpm.
+
 ### Step 1️⃣ Install VS Code & Set Up GitHub Copilot
 
 #### Download VS Code
@@ -71,6 +80,34 @@ Install the **VSMONSTER** extension in VS Code:
 Or click directly: [Install VSMONSTER in VS Code](vscode:extension/vsmonster.vsmonster)
 
 > 📦 **Marketplace Link**: [marketplace.visualstudio.com/items?itemName=vsmonster.vsmonster](https://marketplace.visualstudio.com/items?itemName=vsmonster.vsmonster)
+
+#### 🧩 Option B: Install via VSIX (No Marketplace)
+
+If you can't use Marketplace, install from a VSIX:
+
+**Download (no pnpm required):**
+- GitHub Releases: [github.com/akaiHuang/vsmonster/releases/latest](https://github.com/akaiHuang/vsmonster/releases/latest)
+- Install via **Extensions → ... → Install from VSIX...**  
+  or CLI: `code --install-extension /path/to/vsmonster-*.vsix`
+
+**One-line (Windows, PowerShell):**
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install-extension.ps1
+```
+
+**One-line (macOS/Linux, build from source):**
+```bash
+bash scripts/install-extension.sh
+```
+
+**Manual build from source:**
+```bash
+bash packages/vscode-extension/scripts/package.sh
+code --install-extension packages/vscode-extension/vsmonster-0.0.2.vsix
+```
+
+> If `code` is not found, open VS Code and run: **"Shell Command: Install 'code' command in PATH"**  
+> The PowerShell script will download the latest VSIX from GitHub Releases if no local VSIX is found.
 
 ---
 

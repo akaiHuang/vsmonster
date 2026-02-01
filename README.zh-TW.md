@@ -26,6 +26,15 @@ VSMONSTER 讓你在社群軟體中下指令、追蹤任務進度，所有執行�
 
 ## 🚀 快速開始
 
+### Step 0️⃣ 事前準備（一次性）
+
+- **VS Code**（見下方 Step 1）
+- **Git**（用於 clone 專案）
+- **Node.js 20+** 與 **pnpm 8+**（用於啟動 Gateway）
+- 可選：**VS Code CLI**（`code` 或 `code-insiders`）用於一行安裝 VSIX
+
+> 若你只需要安裝擴充套件（不跑 Gateway），可以略過 Node.js/pnpm。
+
 ### Step 1️⃣ 安裝 VS Code 與設定 GitHub Copilot
 
 #### 下載 VS Code
@@ -71,6 +80,34 @@ VSMONSTER 讓你在社群軟體中下指令、追蹤任務進度，所有執行�
 或直接點擊：[在 VS Code 中安裝 VSMONSTER](vscode:extension/vsmonster.vsmonster)
 
 > 📦 **Marketplace 連結**：[marketplace.visualstudio.com/items?itemName=vsmonster.vsmonster](https://marketplace.visualstudio.com/items?itemName=vsmonster.vsmonster)
+
+#### 🧩 方案 B：透過 VSIX 安裝（不使用 Marketplace）
+
+如果無法使用 Marketplace，可改用 VSIX 安裝：
+
+**下載（不需要 pnpm）：**
+- GitHub Releases: [github.com/akaiHuang/vsmonster/releases/latest](https://github.com/akaiHuang/vsmonster/releases/latest)
+- 透過 **Extensions → ... → Install from VSIX...** 安裝  
+  或 CLI：`code --install-extension /path/to/vsmonster-*.vsix`
+
+**一行指令（Windows, PowerShell）：**
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install-extension.ps1
+```
+
+**一行指令（macOS/Linux，從原始碼打包）：**
+```bash
+bash scripts/install-extension.sh
+```
+
+**手動從原始碼打包：**
+```bash
+bash packages/vscode-extension/scripts/package.sh
+code --install-extension packages/vscode-extension/vsmonster-0.0.2.vsix
+```
+
+> 若找不到 `code` 指令，請在 VS Code 執行：**"Shell Command: Install 'code' command in PATH"**  
+> PowerShell 腳本在本機找不到 VSIX 時，會自動從 GitHub Releases 下載最新版本。
 
 ---
 
