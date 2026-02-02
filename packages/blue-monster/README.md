@@ -26,6 +26,37 @@
 - Automatic file change notifications
 - Side-by-side file preview
 
+### 🔄 Multi-Task Parallel Execution
+- Run multiple tasks simultaneously in the background
+- Switch between tasks without interrupting execution
+- Each task has independent state and chat history
+- Visual status indicators in task list
+
+## 🏷️ Task Status Tags
+
+BlueMonster 使用狀態標籤幫助你追蹤任務狀態：
+
+| 標籤 | 顏色 | 說明 |
+|------|------|------|
+| **#LIVE** | - | 任務編號標籤，表示在記憶體中的活動任務 |
+| **🔄 執行中** | 🔵 藍色閃爍 | AI 正在處理回應或執行工具 |
+| **⏳ 等待中** | 🟠 橘色閃爍 | 等待用戶確認操作（如執行危險命令） |
+| **● 活動中** | 🟢 綠色 | 任務在記憶體中保持活動，可隨時繼續 |
+| **📁 歷史** | ⚪ 灰色 | 已存檔的歷史任務 |
+
+### 任務狀態流程
+
+```
+新任務 → 活動中 → 執行中 ←→ 等待中
+           ↓
+         歷史（關閉 VS Code 後）
+```
+
+- **活動中**：任務在記憶體中，可隨時切換回來繼續對話
+- **執行中**：AI 正在生成回應，即使切換到其他任務也會在背景繼續執行
+- **等待中**：AI 需要你的確認才能繼續（例如執行刪除檔案的命令）
+- **歷史**：任務已保存到硬碟，點擊後會載入到新的活動任務
+
 ## 🚀 Quick Start
 
 1. **Open BlueMonster**: Click the BlueMonster icon in the Activity Bar (sidebar)

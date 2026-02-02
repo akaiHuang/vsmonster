@@ -980,6 +980,7 @@ body {
   border-radius: 4px;
   margin-left: auto;
   flex-shrink: 0;
+  font-weight: 500;
 }
 .history-item-status.active {
   color: #4caf50;
@@ -989,6 +990,16 @@ body {
   color: #2196f3;
   background: rgba(33, 150, 243, 0.15);
   animation: pulse 1.5s ease-in-out infinite;
+}
+.history-item-status.waiting {
+  color: #ff9800;
+  background: rgba(255, 152, 0, 0.15);
+  animation: pulse 2s ease-in-out infinite;
+}
+.history-item-status.archived {
+  color: var(--vscode-descriptionForeground);
+  background: rgba(128, 128, 128, 0.1);
+  opacity: 0.7;
 }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
@@ -1001,6 +1012,10 @@ body {
 .history-item.busy {
   border-left: 2px solid #2196f3;
   background: rgba(33, 150, 243, 0.05);
+}
+.history-item.waiting {
+  border-left: 2px solid #ff9800;
+  background: rgba(255, 152, 0, 0.05);
 }
 .history-item-title {
   font-size: 12px;

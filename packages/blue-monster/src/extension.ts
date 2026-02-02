@@ -261,6 +261,7 @@ class BlueMonsterSession {
   private get busy(): boolean { return this.currentTask.busy; }
   private set busy(value: boolean) { this.currentTask.busy = value; }
   private get thinkingLog(): string[] { return this.currentTask.thinkingLog; }
+  private set thinkingLog(value: string[]) { this.currentTask.thinkingLog = value; }
   private get pendingConfirmations() { return this.currentTask.pendingConfirmations; }
   private get pendingConfirmationDetails() { return this.currentTask.pendingConfirmationDetails; }
   private get pendingChoices() { return this.currentTask.pendingChoices; }
@@ -2455,7 +2456,8 @@ class BlueMonsterSession {
         messageCount: task.messages.length,
         preview: '',
         isActive: true,
-        isBusy: task.busy
+        isBusy: task.busy,
+        isWaiting: task.pendingConfirmations.size > 0 || task.pendingChoices.size > 0
       });
     }
     
@@ -2475,7 +2477,8 @@ class BlueMonsterSession {
         messageCount: entry.messageCount,
         preview: entry.preview || '',
         isActive: false,
-        isBusy: false
+        isBusy: false,
+        isWaiting: false
       }));
       return [...activeTasks, ...historyItems];
     }
@@ -2514,6 +2517,7 @@ class BlueMonsterSession {
       preview: entry.preview || '',
       isActive: false,
       isBusy: false,
+      isWaiting: false,
       matchCount
     }));
     
