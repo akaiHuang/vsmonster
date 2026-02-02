@@ -921,7 +921,7 @@ body {
   border-radius: 6px;
   margin: 2px 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   width: 100%;
 }
@@ -934,6 +934,17 @@ body {
   border-radius: 6px;
   flex-shrink: 0;
   object-fit: cover;
+}
+.history-item-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  background: var(--vscode-button-secondaryBackground);
 }
 .history-item-content {
   flex: 1;
@@ -957,13 +968,20 @@ body {
   border-radius: 4px;
   font-weight: 500;
 }
-.history-item-title {
+.history-item-agent {
   font-size: 13px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  flex-shrink: 0;
+}
+.history-item-title {
+  font-size: 12px;
   font-weight: 400;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+  opacity: 0.8;
 }
 .history-item-meta {
   display: none;

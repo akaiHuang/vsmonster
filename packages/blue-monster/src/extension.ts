@@ -27,6 +27,7 @@ import {
   // Cache
   getCachedSearchResults, setCachedSearchResults, invalidateSearchCache
 } from './utils';
+import { generateRandomName, getNameEmoji } from './utils/names';
 import type {
   TerminalConfirmationMode, SafeModeSettings, McpServerConfig,
   RunInTerminalInput, VsCodeCommandInput, ReadFileInput, WriteFileInput, OpenFileInput
@@ -95,6 +96,8 @@ interface ChatResult {
 interface ChatHistoryEntry {
   id: string;
   taskId: string;  // 任務 ID，格式: #0001
+  agentName: string; // BlueMonster 的名稱，例如: Apple, Berry, Mochi
+  agentEmoji?: string; // BlueMonster 的 emoji
   title: string;
   date: string;
   messageCount: number;
@@ -154,6 +157,8 @@ class BlueMonsterSession {
   private pendingChoices = new Map<string, (result: ChoiceResult) => void>();
   private currentChatId = this.createChatId();
   private currentChatCreatedAt = Date.now();
+  private currentAgentName = '';  // BlueMonster 的名稱
+  private currentAgentEmoji = ''; // BlueMonster 的 emoji
   private hasUnsavedChanges = false;
   private currentCancellation?: vscode.CancellationTokenSource;
   private cliProcess?: ChildProcess;
@@ -173,6 +178,14 @@ class BlueMonsterSession {
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
     BlueMonsterSession.instance = this;
+    // 初始化第一個任務的 BlueMonster 名稱
+    this.initializeAgentName();
+  }
+
+  private initializeAgentName(): void {
+    const usedNames = this.getUsedAgentNames();
+    this.currentAgentName = generateRandomName(usedNames);
+    this.currentAgentEmoji = getNameEmoji(this.currentAgentName);
   }
 
   static getInstance(): BlueMonsterSession | undefined {
@@ -193,10 +206,19 @@ class BlueMonsterSession {
     return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
+  private getUsedAgentNames(): Set<string> {
+    const history = this.context.globalState.get<ChatHistoryEntry[]>('chatHistories') || [];
+    return new Set(history.map(h => h.agentName).filter(Boolean));
+  }
+
   private resetCurrentChat(): void {
     this.currentChatId = this.createChatId();
     this.currentChatCreatedAt = Date.now();
     this.hasUnsavedChanges = false;
+    // 為新任務生成隨機 BlueMonster 名稱
+    const usedNames = this.getUsedAgentNames();
+    this.currentAgentName = generateRandomName(usedNames);
+    this.currentAgentEmoji = getNameEmoji(this.currentAgentName);
     // 清空 session 記憶
     this.sessionAllowedCategories.clear();
   }
@@ -289,6 +311,12 @@ class BlueMonsterSession {
     webview.postMessage({ type: 'history', messages: this.messages });
     webview.postMessage({ type: 'model', label: this.currentModelLabel });
     webview.postMessage({ type: 'busy', value: this.busy });
+    // 發送當前 agent 資訊
+    webview.postMessage({ 
+      type: 'agentInfo', 
+      name: this.currentAgentName, 
+      emoji: this.currentAgentEmoji 
+    });
     if (this.thinkingLog.length > 0) {
       webview.postMessage({ type: 'thinking', reset: true, text: this.thinkingLog.join('\n') });
     }
@@ -1889,6 +1917,16 @@ class BlueMonsterSession {
           await this.saveCurrentChatToHistory();
         }
         this.clearHistory();
+        // 通知 UI 新的 agent 資訊
+        this.broadcast({ 
+          type: 'agentInfo', 
+          name: this.currentAgentName, 
+          emoji: this.currentAgentEmoji 
+        });
+        this.broadcast({ 
+          type: 'toast', 
+          text: `${this.currentAgentEmoji} ${this.currentAgentName} 準備好了！` 
+        });
         break;
       case 'getHistory':
         const query = typeof message?.query === 'string' ? message.query : '';
@@ -2181,9 +2219,13 @@ class BlueMonsterSession {
     
     // 生成任務 ID：找到現有最大的編號 +1（包含所有歷史記錄，確保全域唯一）
     let taskId: string;
+    let agentName: string;
+    let agentEmoji: string;
     if (existingIndex >= 0 && history[existingIndex].taskId) {
-      // 已存在的任務保留原有 ID
+      // 已存在的任務保留原有 ID 和名稱
       taskId = history[existingIndex].taskId;
+      agentName = history[existingIndex].agentName || this.currentAgentName || generateRandomName();
+      agentEmoji = history[existingIndex].agentEmoji || this.currentAgentEmoji || getNameEmoji(agentName);
     } else {
       // 新任務：從所有歷史記錄中找到最大 ID
       const existingIds = history
@@ -2196,6 +2238,9 @@ class BlueMonsterSession {
       const maxId = Math.max(storedMaxId, existingIds.length > 0 ? Math.max(...existingIds) : 0);
       const newId = maxId + 1;
       taskId = '#' + String(newId).padStart(4, '0');
+      // 使用當前 session 的名稱，或生成新名稱
+      agentName = this.currentAgentName || generateRandomName(this.getUsedAgentNames());
+      agentEmoji = this.currentAgentEmoji || getNameEmoji(agentName);
       // 儲存新的最大 ID
       await this.context.globalState.update('maxTaskId', newId);
     }
@@ -2208,6 +2253,8 @@ class BlueMonsterSession {
     const entry: ChatHistoryEntry = {
       id: this.currentChatId,
       taskId,
+      agentName,
+      agentEmoji,
       title,
       date: dateStr,
       messageCount: clonedMessages.length,
@@ -2241,6 +2288,8 @@ class BlueMonsterSession {
       return history.map((entry) => ({
         id: entry.id,
         taskId: entry.taskId || '#????', // 正常情況不應走到這，taskId 應該在儲存時已生成
+        agentName: entry.agentName || '',
+        agentEmoji: entry.agentEmoji || '👾',
         title: entry.title,
         date: entry.date,
         messageCount: entry.messageCount,
@@ -2265,6 +2314,8 @@ class BlueMonsterSession {
     return results.map(({ entry, matchCount }) => ({
       id: entry.id,
       taskId: entry.taskId || '',
+      agentName: entry.agentName || '',
+      agentEmoji: entry.agentEmoji || '👾',
       title: entry.title,
       date: entry.date,
       messageCount: entry.messageCount,
@@ -2290,9 +2341,18 @@ class BlueMonsterSession {
       this.messages.push(...chat.messages);
       this.currentChatId = chat.id;
       this.currentChatCreatedAt = chat.createdAt;
+      // 恢復該任務的 agent 名稱
+      this.currentAgentName = chat.agentName || '';
+      this.currentAgentEmoji = chat.agentEmoji || '👾';
       this.hasUnsavedChanges = false;
       this.broadcast({ type: 'history', messages: this.messages });
-      this.broadcast({ type: 'toast', text: `📋 Loaded: ${chat.title}` });
+      // 顯示 agent 名稱
+      const agentDisplay = this.currentAgentEmoji && this.currentAgentName 
+        ? `${this.currentAgentEmoji} ${this.currentAgentName}` 
+        : chat.title;
+      this.broadcast({ type: 'toast', text: `📋 Loaded: ${agentDisplay}` });
+      // 通知 UI 當前的 agent 資訊
+      this.broadcast({ type: 'agentInfo', name: this.currentAgentName, emoji: this.currentAgentEmoji });
     }
   }
 
