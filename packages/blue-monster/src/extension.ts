@@ -3,6 +3,7 @@ import { exec as execCallback, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
 import { WEBVIEW_CSS, WEBVIEW_JS, WEBVIEW_HTML_TEMPLATE } from './webview';
+import { buildPrompt, detectModelType } from './prompts';
 import {
   // Constants
   STOP_WORDS, CONFIG_SECTION,
@@ -22,7 +23,9 @@ import {
   terminalToolDefinition, vsCodeCommandToolDefinition, readFileToolDefinition,
   writeFileToolDefinition, openFileToolDefinition, switchWindowToolDefinition, searchTasksToolDefinition,
   normalizeToolInput, normalizeVsCodeCommandInput, normalizeReadFileInput,
-  normalizeWriteFileInput, normalizeOpenFileInput, normalizeSearchTasksInput
+  normalizeWriteFileInput, normalizeOpenFileInput, normalizeSearchTasksInput,
+  // Cache
+  getCachedSearchResults, setCachedSearchResults, invalidateSearchCache
 } from './utils';
 import type {
   TerminalConfirmationMode, SafeModeSettings, McpServerConfig,
@@ -37,129 +40,6 @@ const MAX_HISTORY_ITEMS = 100;
 const MAX_HISTORY_TEXT_CHARS = 20000;
 const MAX_MEMORY_MATCHES = 3;
 const MAX_MEMORY_CONTEXT_CHARS = 1200;
-
-// System Prompt 模板 (Anthropic Prompt Engineering Best Practices)
-const SYSTEM_PROMPT_TEMPLATE = `<task_context>
-You are BlueMonster, an expert VS Code assistant specializing in file operations, terminal commands, and development tasks.
-Your goal is to help users complete their coding tasks accurately and reliably.
-You have access to powerful tools: terminal execution, file read/write, and VS Code commands.
-</task_context>
-
-<tone>
-Be concise, precise, and action-oriented. Explain what you are doing briefly.
-When errors occur, stay calm and methodically try alternatives.
-</tone>
-
-<rules>
-【CRITICAL RULES - MUST FOLLOW】
-
-1. THINK BEFORE ACTION:
-   Before executing ANY command, think step by step:
-   - What am I trying to achieve?
-   - What could go wrong?
-   - How will I verify success?
-
-2. VERIFY EVERY FILE OPERATION:
-   NEVER assume a file write succeeded. Always verify with a SEPARATE command:
-   <verification_methods>
-   - test -s <file> && echo "VERIFIED" || echo "FAILED"
-   - cat <file> | head -c 200
-   - wc -c <file>
-   - ls -la <file>
-   </verification_methods>
-
-3. AVOID HEREDOC (<<EOF):
-   Heredoc commands often fail silently in this environment.
-   <preferred_methods>
-   - printf '%s\\n' "line1" "line2" > file
-   - echo "content" | tee file > /dev/null
-   - python3 -c "open('file','w').write('content')"
-   </preferred_methods>
-
-4. ESCALATION STRATEGY:
-   If a method fails, try alternatives in order:
-   <escalation>
-   Step 1: Use printf with explicit content
-   Step 2: Use python3 for file write
-   Step 3: Use blueMonster_writeFile tool (if Danger Mode enabled)
-   Step 4: After 3 failures, STOP and ask user for guidance
-   </escalation>
-
-5. OUTPUT HONESTY:
-   - Report ACTUAL command output, never fabricate expected results
-   - If output is empty, say "Command produced no output"
-   - Distinguish between "no output" and "command failed"
-
-6. UNICODE/CHINESE CONTENT:
-   For non-ASCII content, always verify with:
-   python3 -c "print(repr(open('file').read()[:100]))"
-
-7. TERMINAL COMMAND FORMAT:
-   NEVER use shell comments (#) in terminal commands - they cause "command not found" errors in zsh.
-   NEVER send multi-line scripts - combine commands with && on a single line.
-   <bad_examples>
-   # This is a comment   ← WRONG: causes "zsh: command not found: #"
-   echo "line 1"
-   echo "line 2"        ← WRONG: multi-line causes parsing issues
-   </bad_examples>
-   <good_examples>
-   echo "line 1" && echo "line 2"   ← CORRECT: single line with &&
-   printf "%s\\n" "line 1" "line 2" ← CORRECT: use printf for multi-line output
-   </good_examples>
-
-8. STOP WHEN DONE:
-   Once a task is verified successful, STOP. Do not repeat the same verification multiple times.
-   If you see "VERIFIED" once, the task is complete.
-</rules>
-
-<examples>
-<example name="correct_file_write">
-User: Create a file hello.txt with "Hello World"
-Assistant thinking: I need to (1) write the file (2) verify it exists with content
-Action 1: printf '%s' "Hello World" > hello.txt
-Action 2: test -s hello.txt && cat hello.txt
-Result: VERIFIED - file contains "Hello World"
-</example>
-
-<example name="handling_failure">
-User: Write to /some/path/file.txt
-Action 1: printf '%s' "content" > /some/path/file.txt
-Result: No error but verification shows file is empty
-Analysis: Directory may not exist or no permission
-Action 2: mkdir -p /some/path && printf '%s' "content" > /some/path/file.txt
-Action 3: Verify again with test -s
-</example>
-</examples>
-
-<tools_available>
-- ${TOOL_NAME}: Execute shell commands in terminal
-</tools_available>
-
-<immediate_task>
-For each user request:
-1. First, understand what the user wants
-2. Plan your approach (which commands/tools to use)
-3. Execute with verification
-4. Report actual results honestly
-</immediate_task>
-
-<precognition>
-Before executing commands, think through your approach.
-After each action, evaluate: Did it work? How do I know?
-If uncertain, verify before proceeding.
-</precognition>`;
-
-const DANGER_MODE_PROMPT = `<danger_mode_tools>
-Danger Mode is ENABLED. You have access to additional powerful tools:
-- ${VS_COMMAND_TOOL_NAME}: Execute VS Code commands directly
-- ${READ_FILE_TOOL_NAME}: Read file contents
-- ${WRITE_FILE_TOOL_NAME}: Write content to files (MOST RELIABLE for file writes)
-- ${OPEN_FILE_TOOL_NAME}: Open files in editor
-- ${SWITCH_WINDOW_TOOL_NAME}: Switch between windows
-
-RECOMMENDATION: For file write operations, prefer blueMonster_writeFile over terminal commands.
-It bypasses shell escaping issues and is more reliable.
-</danger_mode_tools>`;
 
 async function fileExists(filePath: string): Promise<boolean> {
   try {
@@ -269,6 +149,7 @@ class BlueMonsterSession {
   private busy = false;
   private thinkingLog: string[] = [];
   private pendingConfirmations = new Map<string, (result: ConfirmationResult) => void>();
+  private pendingConfirmationDetails = new Map<string, { command: string; category: string; timestamp: number }>();
   private pendingChoices = new Map<string, (result: ChoiceResult) => void>();
   private currentChatId = this.createChatId();
   private currentChatCreatedAt = Date.now();
@@ -394,7 +275,7 @@ class BlueMonsterSession {
     }
   }
 
-  removeView(webview: vscode.Webview) {
+  async removeView(webview: vscode.Webview) {
     this.views.delete(webview);
     if (this.views.size === 0 && this.pendingConfirmations.size > 0) {
       for (const resolve of this.pendingConfirmations.values()) {
@@ -409,7 +290,7 @@ class BlueMonsterSession {
       this.pendingChoices.clear();
     }
     if (this.views.size === 0) {
-      void this.saveCurrentChatToHistory({ reason: 'close' });
+      await this.saveCurrentChatToHistory({ reason: 'close' });
     }
   }
 
@@ -622,8 +503,14 @@ class BlueMonsterSession {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const result = await new Promise<ConfirmationResult>((resolve) => {
       this.pendingConfirmations.set(id, resolve);
+      this.pendingConfirmationDetails.set(id, { 
+        command: command, 
+        category: category || dangerType || 'terminal',
+        timestamp: Date.now()
+      });
       this.broadcast({ type: 'confirm', id, command, cwd, dangerType, category });
     });
+    this.pendingConfirmationDetails.delete(id);
     this.broadcast({ type: 'confirmClear', id });
     if (result.remember) {
       await setTerminalConfirmationMode('off');
@@ -773,22 +660,90 @@ class BlueMonsterSession {
     }
   }
 
+  // BlueMonster 自我控制指令（安全模式下也允許，但需確認）
+  private readonly SELF_CONTROL_COMMANDS = new Set([
+    'blueMonster.selectModel',
+    'blueMonster.setModel',
+    'blueMonster.setMode',
+    'blueMonster.listModels',
+    'blueMonster.clearHistory', 
+    'blueMonster.openSettings',
+    'blueMonster.mcp.startAll',
+    'blueMonster.mcp.stopAll',
+    'blueMonster.openView',
+    'blueMonster.openPanel'
+  ]);
+
   async runVsCodeCommandWithResult(command: string, args?: unknown[]): Promise<string> {
-    if (!getDangerModeEnabled()) {
+    const isSelfControl = this.SELF_CONTROL_COMMANDS.has(command);
+    
+    // 非自我控制指令需要 Danger Mode
+    if (!isSelfControl && !getDangerModeEnabled()) {
       return 'Danger mode is disabled. Enable blueMonster.dangerMode to use this tool.';
     }
+    
+    // 安全模式下執行自我控制指令需要確認
+    if (isSelfControl && this.currentMode === 'agent' && !getDangerModeEnabled()) {
+      const argsStr = args && args.length > 0 ? ` (${args.join(', ')})` : '';
+      const confirmed = await this.confirmVsCodeCommand(command + argsStr);
+      if (!confirmed) {
+        return `VS Code command cancelled: ${command}`;
+      }
+    }
+    
     try {
+      // 特殊處理：setModel, listModels, setMode 需要回傳結果字串
+      if (command === 'blueMonster.setModel' && args && args.length > 0) {
+        return await this.setModel(String(args[0]));
+      }
+      if (command === 'blueMonster.listModels') {
+        return await this.listModels();
+      }
+      if (command === 'blueMonster.setMode' && args && args.length > 0) {
+        return this.setMode(String(args[0]));
+      }
+      
       const result = await vscode.commands.executeCommand(command, ...(args || []));
       if (result === undefined) {
         return `VS Code command executed: ${command}`;
       }
       if (typeof result === 'string') {
-        return `VS Code command result: ${result}`;
+        return result;
       }
       return `VS Code command result: ${JSON.stringify(result)}`;
     } catch (error) {
       return `VS Code command failed: ${String(error)}`;
     }
+  }
+
+  private async confirmVsCodeCommand(command: string): Promise<boolean> {
+    if (this.views.size === 0) {
+      const choice = await vscode.window.showWarningMessage(
+        `BlueMonster 要求執行: ${command}`,
+        { modal: true },
+        '允許'
+      );
+      return choice === '允許';
+    }
+    
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const result = await new Promise<ConfirmationResult>((resolve) => {
+      this.pendingConfirmations.set(id, resolve);
+      this.pendingConfirmationDetails.set(id, { 
+        command: `VS Code 指令: ${command}`,
+        category: 'blueMonster-self-control',
+        timestamp: Date.now()
+      });
+      this.broadcast({ 
+        type: 'confirm', 
+        id, 
+        command: `VS Code 指令: ${command}`,
+        dangerType: 'BlueMonster 自我控制'
+      });
+    });
+    this.pendingConfirmationDetails.delete(id);
+    this.broadcast({ type: 'confirmClear', id });
+    return result.approved;
   }
 
   async readFileWithResult(path: string): Promise<string> {
@@ -977,6 +932,229 @@ class BlueMonsterSession {
     vscode.window.showInformationMessage(`BlueMonster model set to: ${picked.model.name}`);
   }
 
+  /**
+   * 直接設定模型（透過模型 ID 或名稱）
+   * 支援的格式：
+   * - 完整 ID: "gpt-4o", "claude-3.5-sonnet"
+   * - 部分名稱: "gpt-4", "claude", "gemini"
+   * - 數字索引: "1", "2", "3" (從可用模型列表中選擇)
+   */
+  async setModel(modelIdOrIndex: string): Promise<string> {
+    if (!vscode.lm?.selectChatModels) {
+      return 'Language Model API is not available.';
+    }
+
+    const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+    if (models.length === 0) {
+      return 'No Copilot models available.';
+    }
+
+    let targetModel: vscode.LanguageModelChat | undefined;
+    const input = modelIdOrIndex.trim().toLowerCase();
+
+    // 嘗試數字索引 (1-based)
+    const index = parseInt(input, 10);
+    if (!isNaN(index) && index >= 1 && index <= models.length) {
+      targetModel = models[index - 1];
+    }
+
+    // 嘗試完全匹配 ID
+    if (!targetModel) {
+      targetModel = models.find(m => m.id.toLowerCase() === input);
+    }
+
+    // 嘗試部分匹配 ID 或名稱
+    if (!targetModel) {
+      targetModel = models.find(m => 
+        m.id.toLowerCase().includes(input) || 
+        m.name.toLowerCase().includes(input)
+      );
+    }
+
+    if (!targetModel) {
+      const availableModels = models.map((m, i) => `${i + 1}. ${m.name} (${m.id})`).join('\n');
+      return `Model not found: "${modelIdOrIndex}". Available models:\n${availableModels}`;
+    }
+
+    await vscode.workspace
+      .getConfiguration(CONFIG_SECTION)
+      .update('model', targetModel.id, vscode.ConfigurationTarget.Global);
+
+    this.setModelLabel(`Model: ${targetModel.name}`);
+    
+    // 更新 webview 的模型選擇器
+    const modelOptions = await this.getModelOptions();
+    this.broadcast({ type: 'modelOptions', ...modelOptions });
+    
+    return `Model switched to: ${targetModel.name} (${targetModel.id})`;
+  }
+
+  /**
+   * 列出所有可用模型
+   */
+  async listModels(): Promise<string> {
+    if (!vscode.lm?.selectChatModels) {
+      return 'Language Model API is not available.';
+    }
+
+    const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+    if (models.length === 0) {
+      return 'No Copilot models available.';
+    }
+
+    const currentId = getPreferredModelId();
+    const list = models.map((m, i) => {
+      const current = m.id === currentId ? ' ← current' : '';
+      return `${i + 1}. ${m.name} (${m.id})${current}`;
+    }).join('\n');
+
+    return `Available models:\n${list}\n\nUse blueMonster.setModel with number or name to switch.`;
+  }
+
+  /**
+   * 切換代理模式
+   * @param mode 模式: 'chat', 'agent', 'agent-full'
+   */
+  setMode(mode: string): string {
+    const validModes = ['chat', 'agent', 'agent-full'];
+    const input = mode.trim().toLowerCase();
+    
+    // 支援別名
+    const aliases: Record<string, string> = {
+      'plan': 'chat',
+      '計畫': 'chat',
+      'safe': 'agent',
+      '安全': 'agent',
+      '代理-安全': 'agent',
+      'danger': 'agent-full',
+      '危險': 'agent-full',
+      '代理-危險': 'agent-full',
+      'full': 'agent-full'
+    };
+    
+    const targetMode = aliases[input] || input;
+    
+    if (!validModes.includes(targetMode)) {
+      return `Invalid mode: "${mode}". Available modes: chat (計畫), agent (代理-安全), agent-full (代理-危險)`;
+    }
+    
+    this.currentMode = targetMode as 'chat' | 'agent' | 'agent-full';
+    
+    // 更新 webview 的模式選擇器
+    this.broadcast({ type: 'modeUpdate', mode: targetMode });
+    
+    const modeLabels: Record<string, string> = {
+      'chat': '計畫',
+      'agent': '代理-安全',
+      'agent-full': '代理-危險'
+    };
+    
+    return `Mode switched to: ${modeLabels[targetMode]} (${targetMode})`;
+  }
+
+  // ============================================================
+  // 外部 API：供 Gateway/LINE 等外部服務呼叫
+  // ============================================================
+
+  /**
+   * 取得所有待處理的確認請求
+   * 回傳格式：[{ id, command, category, timestamp, age }]
+   */
+  getPendingConfirmations(): Array<{ id: string; command: string; category: string; timestamp: number; age: number }> {
+    const now = Date.now();
+    const result: Array<{ id: string; command: string; category: string; timestamp: number; age: number }> = [];
+    
+    for (const [id, details] of this.pendingConfirmationDetails.entries()) {
+      result.push({
+        id,
+        command: details.command,
+        category: details.category,
+        timestamp: details.timestamp,
+        age: Math.round((now - details.timestamp) / 1000) // 秒數
+      });
+    }
+    
+    return result;
+  }
+
+  /**
+   * 回應確認請求
+   * @param id 確認請求 ID
+   * @param action 動作: 'run' | 'sessionAllow' | 'cancel' | 'custom'
+   * @param customText 自定義回應文字（當 action 為 'custom' 時）
+   * @returns 回應結果訊息
+   */
+  respondToConfirmation(id: string, action: 'run' | 'sessionAllow' | 'cancel' | 'custom', customText?: string): string {
+    const pending = this.pendingConfirmations.get(id);
+    const details = this.pendingConfirmationDetails.get(id);
+    
+    if (!pending) {
+      return `Confirmation not found: ${id}`;
+    }
+    
+    const category = details?.category || '';
+    this.pendingConfirmations.delete(id);
+    this.pendingConfirmationDetails.delete(id);
+    this.broadcast({ type: 'confirmClear', id });
+    
+    switch (action) {
+      case 'run':
+        pending({ approved: true });
+        return `Confirmation ${id} approved`;
+      case 'sessionAllow':
+        if (category) {
+          this.sessionAllowedCategories.add(category);
+          this.addMessage('system', `✅ 已在本次對話中允許「${category}」類操作`);
+        }
+        pending({ approved: true, sessionAllow: category });
+        return `Confirmation ${id} approved (session allow for ${category})`;
+      case 'cancel':
+        pending({ approved: false });
+        return `Confirmation ${id} cancelled`;
+      case 'custom':
+        this.addMessage('system', `💭 外部回饋：${customText || ''}`);
+        pending({ approved: false, customResponse: customText || '' });
+        return `Confirmation ${id} responded with custom text`;
+      default:
+        pending({ approved: false });
+        return `Confirmation ${id} cancelled (unknown action)`;
+    }
+  }
+
+  /**
+   * 取得當前狀態摘要（供外部監控）
+   */
+  getStatus(): { 
+    busy: boolean; 
+    mode: string; 
+    model: string; 
+    pendingConfirmations: number;
+    chatId: string;
+    messageCount: number;
+  } {
+    return {
+      busy: this.busy,
+      mode: this.currentMode,
+      model: this.currentModelLabel,
+      pendingConfirmations: this.pendingConfirmations.size,
+      chatId: this.currentChatId,
+      messageCount: this.messages.length
+    };
+  }
+
+  /**
+   * 發送使用者訊息（供外部服務呼叫）
+   * @param text 訊息內容
+   * @param mode 操作模式（可選）
+   */
+  async sendMessage(text: string, mode?: 'chat' | 'agent' | 'agent-full'): Promise<void> {
+    if (mode) {
+      this.currentMode = mode;
+      this.broadcast({ type: 'modeUpdate', mode });
+    }
+    await this.handleUserMessage(text, this.currentMode, [], []);
+  }
+
   private async resolveModel(): Promise<vscode.LanguageModelChat | undefined> {
     if (!vscode.lm?.selectChatModels) {
       return undefined;
@@ -1068,10 +1246,9 @@ class BlueMonsterSession {
       // 「計畫」模式下不提供工具，只能聊天
       let tools: vscode.LanguageModelChatTool[] = [];
       if (this.currentMode !== 'chat') {
-        tools = [terminalToolDefinition(), searchTasksToolDefinition()];
+        tools = [terminalToolDefinition(), searchTasksToolDefinition(), vsCodeCommandToolDefinition()];
         if (getDangerModeEnabled()) {
           tools.push(
-            vsCodeCommandToolDefinition(),
             readFileToolDefinition(),
             writeFileToolDefinition(),
             openFileToolDefinition(),
@@ -1235,15 +1412,13 @@ class BlueMonsterSession {
     // 檢查模型是否支援圖片輸入 (fallback 為 true)
     const supportsImages = (model as any).capabilities?.imageInput !== false;
 
-    // 組建 System Prompt
-    const systemPromptParts = [SYSTEM_PROMPT_TEMPLATE];
-    if (getDangerModeEnabled()) {
-      systemPromptParts.push(DANGER_MODE_PROMPT);
-    }
+    // 組建 System Prompt（根據模型類型自動選擇最佳化 prompt）
+    const modelType = detectModelType(model.name);
+    const dangerMode = getDangerModeEnabled();
+    let systemPrompt = buildPrompt(modelType, { dangerMode });
     if (memoryContext) {
-      systemPromptParts.push(`System: Long-term memory (previous chats, may be relevant):\n${memoryContext}`);
+      systemPrompt += `\nSystem: Long-term memory (previous chats, may be relevant):\n${memoryContext}`;
     }
-    const systemPrompt = systemPromptParts.join('\n');
 
     const messages: vscode.LanguageModelChatMessage[] = [vscode.LanguageModelChatMessage.User(systemPrompt)];
     for (const entry of this.messages) {
@@ -1974,25 +2149,37 @@ class BlueMonsterSession {
     const existingIndex = history.findIndex((entry) => entry.id === this.currentChatId);
     const createdAt = existingIndex >= 0 ? history[existingIndex].createdAt : this.currentChatCreatedAt;
     
-    // 生成任務 ID：找到現有最大的編號 +1
+    // 生成任務 ID：找到現有最大的編號 +1（包含所有歷史記錄，確保全域唯一）
     let taskId: string;
     if (existingIndex >= 0 && history[existingIndex].taskId) {
+      // 已存在的任務保留原有 ID
       taskId = history[existingIndex].taskId;
     } else {
+      // 新任務：從所有歷史記錄中找到最大 ID
       const existingIds = history
         .map(h => h.taskId)
         .filter(id => id && id.startsWith('#'))
         .map(id => parseInt(id.slice(1), 10))
         .filter(n => !isNaN(n));
-      const maxId = existingIds.length > 0 ? Math.max(...existingIds) : 0;
-      taskId = '#' + String(maxId + 1).padStart(4, '0');
+      // 同時考慮 globalState 中儲存的最大 ID 計數器
+      const storedMaxId = this.context.globalState.get<number>('maxTaskId') || 0;
+      const maxId = Math.max(storedMaxId, existingIds.length > 0 ? Math.max(...existingIds) : 0);
+      const newId = maxId + 1;
+      taskId = '#' + String(newId).padStart(4, '0');
+      // 儲存新的最大 ID
+      await this.context.globalState.update('maxTaskId', newId);
     }
+    
+    // 日期格式：YYYY/MM/DD HH:mm
+    const dateObj = new Date(now);
+    const dateStr = dateObj.toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }) + 
+      ' ' + dateObj.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
     
     const entry: ChatHistoryEntry = {
       id: this.currentChatId,
       taskId,
       title,
-      date: new Date(now).toLocaleDateString(),
+      date: dateStr,
       messageCount: clonedMessages.length,
       messages: clonedMessages,
       createdAt,
@@ -2020,11 +2207,10 @@ class BlueMonsterSession {
       this.context.globalState.get<ChatHistoryEntry[]>('chatHistories') || []
     );
     const trimmedQuery = typeof query === 'string' ? query.trim() : '';
-    const totalCount = history.length;
     if (!trimmedQuery) {
-      return history.map((entry, index) => ({
+      return history.map((entry) => ({
         id: entry.id,
-        taskId: entry.taskId || '#' + String(totalCount - index).padStart(4, '0'),
+        taskId: entry.taskId || '#????', // 正常情況不應走到這，taskId 應該在儲存時已生成
         title: entry.title,
         date: entry.date,
         messageCount: entry.messageCount,
@@ -2207,7 +2393,7 @@ class BlueMonsterViewProvider implements vscode.WebviewViewProvider {
     this.session.addView(view.webview);
 
     view.webview.onDidReceiveMessage((message) => this.session.handleMessage(message));
-    view.onDidDispose(() => this.session.removeView(view.webview));
+    view.onDidDispose(async () => await this.session.removeView(view.webview));
   }
 
 }
@@ -2235,8 +2421,8 @@ class BlueMonsterPanel {
     session.addView(panel.webview);
 
     panel.webview.onDidReceiveMessage((message) => session.handleMessage(message));
-    panel.onDidDispose(() => {
-      session.removeView(panel.webview);
+    panel.onDidDispose(async () => {
+      await session.removeView(panel.webview);
       BlueMonsterPanel.currentPanel = undefined;
     });
   }
@@ -2447,6 +2633,19 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('blueMonster.openPanel', () => BlueMonsterPanel.show(session, context)),
     vscode.commands.registerCommand('blueMonster.clearHistory', () => session.clearHistory()),
     vscode.commands.registerCommand('blueMonster.selectModel', () => session.selectModel()),
+    vscode.commands.registerCommand('blueMonster.setModel', (modelId: string) => session.setModel(modelId)),
+    vscode.commands.registerCommand('blueMonster.setMode', (mode: string) => session.setMode(mode)),
+    vscode.commands.registerCommand('blueMonster.listModels', () => session.listModels()),
+    // 外部 API 命令（供 Gateway/LINE 使用）
+    vscode.commands.registerCommand('blueMonster.getStatus', () => session.getStatus()),
+    vscode.commands.registerCommand('blueMonster.getPendingConfirmations', () => session.getPendingConfirmations()),
+    vscode.commands.registerCommand('blueMonster.respondToConfirmation', 
+      (id: string, action: 'run' | 'sessionAllow' | 'cancel' | 'custom', customText?: string) => 
+        session.respondToConfirmation(id, action, customText)
+    ),
+    vscode.commands.registerCommand('blueMonster.sendMessage', 
+      (text: string, mode?: 'chat' | 'agent' | 'agent-full') => session.sendMessage(text, mode)
+    ),
     vscode.commands.registerCommand('blueMonster.mcp.startAll', () => {
       mcpManager.startAll(getMcpServers());
       vscode.window.showInformationMessage('BlueMonster MCP servers started.');

@@ -95,15 +95,15 @@ export const WEBVIEW_HTML_TEMPLATE = `<!DOCTYPE html>
     <div class="confirm-options">
       <div class="confirm-option" data-value="1">
         <span class="option-num">1.</span>
-        <span>Yes, <span id="confirmTaskName"></span></span>
+        <span>Yes，同意讓 BlueMonster <span id="confirmTaskName"></span></span>
       </div>
       <div class="confirm-option" data-value="2">
         <span class="option-num">2.</span>
-        <span>Yes, and 在這次對話中永遠允許此類操作</span>
+        <span>Yes，且此類操作後續不再詢問</span>
       </div>
       <div class="confirm-option" data-value="3">
         <span class="option-num">3.</span>
-        <span>No</span>
+        <span>No，取消執行</span>
       </div>
       <div class="confirm-option" data-value="4">
         <span class="option-num">4.</span>

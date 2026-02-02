@@ -47,6 +47,18 @@
         "title": "BlueMonster: Select Model"
       },
       {
+        "command": "blueMonster.setModel",
+        "title": "BlueMonster: Set Model"
+      },
+      {
+        "command": "blueMonster.setMode",
+        "title": "BlueMonster: Set Mode"
+      },
+      {
+        "command": "blueMonster.listModels",
+        "title": "BlueMonster: List Models"
+      },
+      {
         "command": "blueMonster.openPanel",
         "title": "BlueMonster: Open Panel"
       },
@@ -57,6 +69,22 @@
       {
         "command": "blueMonster.clearHistory",
         "title": "BlueMonster: Clear History"
+      },
+      {
+        "command": "blueMonster.getStatus",
+        "title": "BlueMonster: Get Status"
+      },
+      {
+        "command": "blueMonster.getPendingConfirmations",
+        "title": "BlueMonster: Get Pending Confirmations"
+      },
+      {
+        "command": "blueMonster.respondToConfirmation",
+        "title": "BlueMonster: Respond to Confirmation"
+      },
+      {
+        "command": "blueMonster.sendMessage",
+        "title": "BlueMonster: Send Message"
       },
       {
         "command": "blueMonster.mcp.startAll",

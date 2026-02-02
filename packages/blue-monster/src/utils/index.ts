@@ -79,3 +79,14 @@ export type {
   OpenFileInput,
   SearchTasksInput
 } from './tools';
+
+// 從 cache.ts 導出
+export {
+  LRUCache,
+  getCachedTokenCount,
+  setCachedTokenCount,
+  getCachedSearchResults,
+  setCachedSearchResults,
+  invalidateSearchCache,
+  invalidateTokenCache
+} from './cache';

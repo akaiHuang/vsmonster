@@ -719,7 +719,7 @@ body {
 
 /* 確認選項樣式 - 程式碼區塊風格 */
 .confirm-panel-inline {
-  margin: 8px 12px;
+  margin: 10px 5%; /* 左右寬度縮 5% */
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--vscode-panel-border);
@@ -729,7 +729,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 12px;
+  padding: 9px 12px; /* 高度變寬 1.5 倍 (6px -> 9px) */
   background: var(--vscode-editor-background);
   border-bottom: 1px solid var(--vscode-panel-border);
 }
@@ -746,15 +746,15 @@ body {
 .confirm-panel-inline .confirm-command {
   padding: 10px 12px;
   font-family: var(--vscode-editor-font-family);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 10px; /* 文字縮小兩級 (12px -> 10px) */
+  line-height: 1.2; /* 行高縮小 20% (1.5 -> 1.2) */
   white-space: pre-wrap;
   word-wrap: break-word;
   border-bottom: 1px solid var(--vscode-panel-border);
 }
 .confirm-panel-inline .confirm-cwd {
   padding: 4px 12px;
-  font-size: 11px;
+  font-size: 9px; /* 文字縮小兩級 (11px -> 9px) */
   color: #888;
   border-bottom: 1px solid var(--vscode-panel-border);
 }
@@ -770,7 +770,7 @@ body {
   display: flex;
   align-items: center;
   transition: background 0.15s ease;
-  font-size: 13px;
+  font-size: 11px; /* 文字縮小兩級 (13px -> 11px) */
 }
 .confirm-option:hover {
   background: #3c3c3c !important;

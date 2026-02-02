@@ -19,14 +19,28 @@ BlueMonster 提供 VS Code 命令和 WebView 訊息 API，讓你可以程式化�
 
 BlueMonster 註冊了以下 VS Code 命令，可透過命令面板或 API 呼叫：
 
+### 基本命令
+
 | 命令 ID | 功能 |
 |---------|------|
 | `blueMonster.openView` | 開啟 BlueMonster 側邊欄 |
 | `blueMonster.openPanel` | 開啟 BlueMonster 面板 |
-| `blueMonster.selectModel` | 選擇 AI 模型 |
+| `blueMonster.selectModel` | 選擇 AI 模型（彈出選擇器） |
+| `blueMonster.setModel` | 直接設定模型（參數: modelId） |
+| `blueMonster.setMode` | 設定代理模式（參數: mode） |
+| `blueMonster.listModels` | 列出可用模型 |
 | `blueMonster.clearHistory` | 清除當前聊天記錄 |
 | `blueMonster.mcp.startAll` | 啟動所有 MCP 伺服器 |
 | `blueMonster.mcp.stopAll` | 停止所有 MCP 伺服器 |
+
+### 外部控制 API（供 Gateway/LINE 使用）
+
+| 命令 ID | 功能 | 參數 |
+|---------|------|------|
+| `blueMonster.getStatus` | 取得當前狀態 | 無 |
+| `blueMonster.getPendingConfirmations` | 取得待處理確認列表 | 無 |
+| `blueMonster.respondToConfirmation` | 回應確認請求 | id, action, customText? |
+| `blueMonster.sendMessage` | 發送訊息 | text, mode? |
 
 ### 使用方式
 
@@ -34,6 +48,134 @@ BlueMonster 註冊了以下 VS Code 命令，可透過命令面板或 API 呼叫
 // 在你的擴展中呼叫 BlueMonster 命令
 await vscode.commands.executeCommand('blueMonster.openView');
 await vscode.commands.executeCommand('blueMonster.selectModel');
+
+// 設定模型和模式
+await vscode.commands.executeCommand('blueMonster.setModel', 'gpt-4o');
+await vscode.commands.executeCommand('blueMonster.setMode', 'agent-full');
+
+// 外部 API 範例
+const status = await vscode.commands.executeCommand('blueMonster.getStatus');
+const pendingList = await vscode.commands.executeCommand('blueMonster.getPendingConfirmations');
+```
+
+---
+
+## 6. 外部控制 API（LINE/Gateway 整合）
+
+這些 API 專為外部服務（如 LINE Gateway）設計，讓你可以：
+- 查詢 BlueMonster 狀態
+- 取得並回應確認對話框
+- 遠端發送訊息
+
+### 6.1 取得狀態
+
+```typescript
+const status = await vscode.commands.executeCommand('blueMonster.getStatus');
+// 回傳:
+// {
+//   busy: boolean,        // 是否正在處理中
+//   mode: string,         // 當前模式: 'chat' | 'agent' | 'agent-full'
+//   model: string,        // 當前模型標籤
+//   pendingConfirmations: number,  // 待處理確認數量
+//   chatId: string,       // 當前對話 ID
+//   messageCount: number  // 訊息數量
+// }
+```
+
+### 6.2 取得待處理確認
+
+當 BlueMonster 執行危險命令時，會等待使用者確認。透過此 API 可以取得所有待確認的請求：
+
+```typescript
+const pendingList = await vscode.commands.executeCommand('blueMonster.getPendingConfirmations');
+// 回傳: Array<{
+//   id: string,        // 確認請求 ID
+//   command: string,   // 待執行的命令描述
+//   category: string,  // 命令類別（如 'rm', 'terminal', 'blueMonster-self-control'）
+//   timestamp: number, // 建立時間戳記
+//   age: number        // 已等待秒數
+// }>
+```
+
+### 6.3 回應確認
+
+確認對話框的 4 個選項對應的 action：
+
+| 選項 | action 值 | 說明 |
+|------|-----------|------|
+| 1. Yes, BlueMonster 自我控制 | `'run'` | 同意執行 |
+| 2. Yes, and 在這次對話中永遠允許此類操作 | `'sessionAllow'` | 同意並記住本次對話 |
+| 3. No | `'cancel'` | 拒絕執行 |
+| 4. 其他（輸入想法） | `'custom'` | 自定義回應 |
+
+```typescript
+// 同意執行
+await vscode.commands.executeCommand('blueMonster.respondToConfirmation', 
+  'confirmation-id', 'run');
+
+// 同意並允許此類操作
+await vscode.commands.executeCommand('blueMonster.respondToConfirmation', 
+  'confirmation-id', 'sessionAllow');
+
+// 拒絕
+await vscode.commands.executeCommand('blueMonster.respondToConfirmation', 
+  'confirmation-id', 'cancel');
+
+// 自定義回應
+await vscode.commands.executeCommand('blueMonster.respondToConfirmation', 
+  'confirmation-id', 'custom', '請改用其他方式');
+```
+
+### 6.4 發送訊息
+
+```typescript
+// 發送訊息（使用當前模式）
+await vscode.commands.executeCommand('blueMonster.sendMessage', '幫我建立一個 hello.txt');
+
+// 發送訊息並指定模式
+await vscode.commands.executeCommand('blueMonster.sendMessage', 
+  '幫我建立一個 hello.txt', 'agent-full');
+```
+
+### 6.5 LINE Gateway 整合範例
+
+在 Gateway 中透過 WebSocket 轉發命令：
+
+```typescript
+// Gateway 端：接收 LINE 訊息並轉發到 VS Code
+async function handleLineMessage(userId: string, text: string) {
+  // 檢查是否為確認回應
+  if (text === '1' || text === 'yes') {
+    const pending = await sendToVSCode('blueMonster.getPendingConfirmations');
+    if (pending.length > 0) {
+      await sendToVSCode('blueMonster.respondToConfirmation', 
+        pending[0].id, 'run');
+      return '✅ 已同意執行';
+    }
+  }
+  
+  if (text === '2') {
+    const pending = await sendToVSCode('blueMonster.getPendingConfirmations');
+    if (pending.length > 0) {
+      await sendToVSCode('blueMonster.respondToConfirmation', 
+        pending[0].id, 'sessionAllow');
+      return '✅ 已同意，後續同類操作不再詢問';
+    }
+  }
+  
+  if (text === '3' || text === 'no') {
+    const pending = await sendToVSCode('blueMonster.getPendingConfirmations');
+    if (pending.length > 0) {
+      await sendToVSCode('blueMonster.respondToConfirmation', 
+        pending[0].id, 'cancel');
+      return '❌ 已取消執行';
+    }
+  }
+  
+  // 一般訊息：發送給 BlueMonster
+  await sendToVSCode('blueMonster.sendMessage', text);
+  return '訊息已發送';
+}
 ```
 
 ---
