@@ -100,6 +100,33 @@ function createTaskState(chatId: string, agentName: string, agentEmoji: string):
   };
 }
 
+// 根據模型名稱取得 multiplier 數值
+function getModelMultiplierValue(modelName: string): number {
+  const lower = modelName.toLowerCase();
+  // 0x - 免費模型
+  if (lower.includes('gpt-4.1') || lower.includes('gpt-4o') || lower.includes('gpt-5 mini') || lower.includes('gpt-5-mini')) return 0;
+  if (lower.includes('grok') || lower.includes('raptor')) return 0;
+  // 0.33x - 便宜模型
+  if (lower.includes('haiku')) return 0.33;
+  if (lower.includes('flash')) return 0.33;
+  if (lower.includes('codex-mini')) return 0.33;
+  // 10x - 最貴模型
+  if (lower.includes('opus 4.1') || lower.includes('opus-4.1')) return 10;
+  // 3x - 昂貴模型
+  if (lower.includes('opus 4.5') || lower.includes('opus-4.5')) return 3;
+  // 1x - 標準模型
+  return 1;
+}
+
+function formatMultiplier(value: number): string {
+  if (value === 0) return '0x';
+  if (value === 0.33) return '0.33x';
+  if (value === 1) return '1x';
+  if (value === 3) return '3x';
+  if (value === 10) return '10x';
+  return `${value}x`;
+}
+
 type UiMessageKind = 'text' | 'thought' | 'image' | 'file';
 
 interface UiMessage {
@@ -1416,8 +1443,9 @@ class BlueMonsterSession {
         }
       }
       
-      // 增加 request 計數並更新 UI
-      this.currentTask.requestCount++;
+      // 根據模型 multiplier 計算 request 消耗
+      const multiplierValue = getModelMultiplierValue(model.name);
+      this.currentTask.requestCount += multiplierValue;
       this.broadcast({ 
         type: 'agentInfo', 
         name: this.currentTask.agentName, 
@@ -1700,22 +1728,7 @@ class BlueMonsterSession {
       };
     }
 
-    const getModelMultiplier = (name: string): string => {
-      const lower = name.toLowerCase();
-      // 0x - 免費模型
-      if (lower.includes('gpt-4.1') || lower.includes('gpt-4o') || lower.includes('gpt-5 mini') || lower.includes('gpt-5-mini')) return '0x';
-      if (lower.includes('grok') || lower.includes('raptor')) return '0x';
-      // 0.33x - 便宜模型
-      if (lower.includes('haiku')) return '0.33x';
-      if (lower.includes('flash')) return '0.33x';
-      if (lower.includes('codex-mini')) return '0.33x';
-      // 10x - 最貴模型
-      if (lower.includes('opus 4.1') || lower.includes('opus-4.1')) return '10x';
-      // 3x - 昂貴模型
-      if (lower.includes('opus 4.5') || lower.includes('opus-4.5')) return '3x';
-      // 1x - 標準模型
-      return '1x';
-    };
+    const getModelMultiplier = (name: string): string => formatMultiplier(getModelMultiplierValue(name));
 
     const allOptions = models.map((model) => ({ 
       id: model.id, 

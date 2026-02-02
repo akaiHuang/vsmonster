@@ -157,7 +157,7 @@ export const WEBVIEW_JS = `(function() {
   let currentAgentEmoji = '👾';
   let currentRequestCount = 0;
   const headerRequestCountEl = document.getElementById('headerRequestCount');
-  function updateAgentDisplay(name, emoji, requestCount) { currentAgentName = name || 'BlueMonster'; currentAgentEmoji = emoji || '👾'; currentRequestCount = requestCount || 0; if (!isViewingHistory) { if (headerTitleTextEl) headerTitleTextEl.textContent = currentAgentName; if (headerEmojiEl) headerEmojiEl.textContent = currentAgentEmoji; } if (headerRequestCountEl) { headerRequestCountEl.textContent = currentRequestCount > 0 ? String(currentRequestCount).padStart(2, '0') + ' req' : ''; headerRequestCountEl.hidden = currentRequestCount === 0; } }
+  function updateAgentDisplay(name, emoji, requestCount) { currentAgentName = name || 'BlueMonster'; currentAgentEmoji = emoji || '👾'; currentRequestCount = requestCount || 0; if (!isViewingHistory) { if (headerTitleTextEl) headerTitleTextEl.textContent = currentAgentName; if (headerEmojiEl) headerEmojiEl.textContent = currentAgentEmoji; } if (headerRequestCountEl) { const displayCount = currentRequestCount === 0 ? '' : (Number.isInteger(currentRequestCount) ? currentRequestCount.toString() : currentRequestCount.toFixed(2)); headerRequestCountEl.textContent = displayCount ? displayCount + ' req' : ''; headerRequestCountEl.hidden = currentRequestCount === 0; } }
 
   if (choiceSubmitEl) choiceSubmitEl.addEventListener('click', () => handleChoiceInput());
   if (modelApplyEl) modelApplyEl.addEventListener('click', applyModel);
