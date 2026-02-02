@@ -128,8 +128,9 @@ interface ChoiceOption {
 
 function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   const nonce = Math.random().toString(36).slice(2);
+  // 優先使用 blue-monster 自己的 resources，fallback 到 vscode-extension
   const blueMonsterWhSvgUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(extensionUri, '..', 'vscode-extension', 'resources', 'bluemonster', 'blueMonster_wh.svg')
+    vscode.Uri.joinPath(extensionUri, 'resources', 'blueMonster_wh.svg')
   );
   
   // 使用模板並替換佔位符
@@ -166,8 +167,26 @@ class BlueMonsterSession {
   // Session 記憶：這次對話中允許的危險類型
   private sessionAllowedCategories = new Set<string>();
 
+  private saveTimeout?: NodeJS.Timeout;
+  private static instance?: BlueMonsterSession;
+
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
+    BlueMonsterSession.instance = this;
+  }
+
+  static getInstance(): BlueMonsterSession | undefined {
+    return BlueMonsterSession.instance;
+  }
+
+  // 延遲自動儲存（防抖動）
+  private scheduleSave(): void {
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+    }
+    this.saveTimeout = setTimeout(() => {
+      void this.saveCurrentChatToHistory({ reason: 'auto' });
+    }, 5000); // 5 秒後自動儲存
   }
 
   private createChatId(): string {
@@ -290,8 +309,17 @@ class BlueMonsterSession {
       this.pendingChoices.clear();
     }
     if (this.views.size === 0) {
-      await this.saveCurrentChatToHistory({ reason: 'close' });
+      await this.saveCurrentChatToHistory({ reason: 'close', force: true });
     }
+  }
+
+  // 供 deactivate 呼叫的強制儲存方法
+  async forceSaveHistory(): Promise<void> {
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+      this.saveTimeout = undefined;
+    }
+    await this.saveCurrentChatToHistory({ reason: 'deactivate', force: true });
   }
 
   clearHistory() {
@@ -333,6 +361,8 @@ class BlueMonsterSession {
     this.messages.push(entry);
     this.hasUnsavedChanges = true;
     this.broadcast({ type: 'append', message: entry });
+    // 觸發延遲自動儲存
+    this.scheduleSave();
   }
 
   private addAssistantResult(result: ChatResult) {
@@ -2384,7 +2414,7 @@ class BlueMonsterViewProvider implements vscode.WebviewViewProvider {
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [
-        vscode.Uri.joinPath(this.context.extensionUri, '..', 'vscode-extension', 'resources', 'bluemonster'),
+        vscode.Uri.joinPath(this.context.extensionUri, 'resources'),
         this.context.extensionUri
       ]
     };
@@ -2412,7 +2442,7 @@ class BlueMonsterPanel {
     panel.webview.options = {
       enableScripts: true,
       localResourceRoots: [
-        vscode.Uri.joinPath(this.context.extensionUri, '..', 'vscode-extension', 'resources', 'bluemonster'),
+        vscode.Uri.joinPath(this.context.extensionUri, 'resources'),
         this.context.extensionUri
       ]
     };
@@ -2661,6 +2691,11 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 }
 
-export function deactivate() {
+export async function deactivate() {
+  // 確保在 extension 停用時儲存歷史
+  const session = BlueMonsterSession.getInstance();
+  if (session) {
+    await session.forceSaveHistory();
+  }
   disposeTerminal();
 }
