@@ -17,6 +17,7 @@ export const WEBVIEW_JS = `(function() {
   const headerNewChatEl = document.getElementById('headerNewChat');
   const headerBackEl = document.getElementById('headerBack');
   const headerTitleTextEl = document.getElementById('headerTitleText');
+  const headerEmojiEl = document.getElementById('headerEmoji');
   const historyPanelEl = document.getElementById('historyPanel');
   const historyListEl = document.getElementById('historyList');
   const historySearchEl = document.getElementById('historySearch');
@@ -131,7 +132,7 @@ export const WEBVIEW_JS = `(function() {
   function toggleHistory() { historyPanelEl.hidden = !historyPanelEl.hidden; if (!historyPanelEl.hidden) { requestHistory(); if (historySearchEl) setTimeout(() => historySearchEl.focus(), 50); } }
   function closeHistoryPanel() { historyPanelEl.hidden = true; }
   function showBackButton(t) { if (headerBackEl) headerBackEl.hidden = false; if (headerTitleTextEl) headerTitleTextEl.textContent = t || 'BlueMonster'; currentHistoryTitle = t; isViewingHistory = true; }
-  function hideBackButton() { if (headerBackEl) headerBackEl.hidden = true; if (headerTitleTextEl) headerTitleTextEl.textContent = currentAgentEmoji + ' ' + currentAgentName; currentHistoryTitle = ''; isViewingHistory = false; }
+  function hideBackButton() { if (headerBackEl) headerBackEl.hidden = true; if (headerTitleTextEl) headerTitleTextEl.textContent = currentAgentName; if (headerEmojiEl) headerEmojiEl.textContent = currentAgentEmoji; currentHistoryTitle = ''; isViewingHistory = false; }
   function goBackToHistory() { vscode.postMessage({ type: 'newChat' }); hideBackButton(); toggleHistory(); }
   function renderHistory(hs) { if (!hs || hs.length === 0) { historyListEl.innerHTML = (historySearchEl && historySearchEl.value.trim().length > 0) ? '<div class="history-empty">找不到符合的任務</div>' : '<div class="history-empty">尚無任務紀錄</div>'; return; } const tc = hs.length; historyListEl.innerHTML = hs.map((h, i) => { const tid = h.taskId || '#' + String(tc - i).padStart(4, '0'); const emoji = h.agentEmoji || '👾'; const name = h.agentName || 'BlueMonster'; return '<div class="history-item" data-id="' + escapeHtml(h.id) + '" data-title="' + escapeHtml(h.title) + '" data-taskid="' + escapeHtml(tid) + '" data-agent="' + escapeHtml(name) + '"><div class="history-item-avatar">' + emoji + '</div><div class="history-item-content"><div class="history-item-header"><span class="history-item-taskid">' + escapeHtml(tid) + '</span><span class="history-item-agent">' + escapeHtml(name) + '</span></div><div class="history-item-title">' + escapeHtml(h.title) + '</div><div class="history-item-time">' + escapeHtml(h.date || '') + '</div></div></div>'; }).join(''); historyListEl.querySelectorAll('.history-item').forEach(it => { it.addEventListener('click', function() { const id = this.getAttribute('data-id'); const tt = this.getAttribute('data-title'); const agent = this.getAttribute('data-agent'); if (id) { vscode.postMessage({ type: 'loadHistory', id: id }); historyPanelEl.hidden = true; showBackButton(agent || tt || 'Task'); } }); }); }
   window.loadHistoryItem = (id, t) => { vscode.postMessage({ type: 'loadHistory', id: id }); historyPanelEl.hidden = true; showBackButton(t); };
@@ -154,7 +155,7 @@ export const WEBVIEW_JS = `(function() {
   if (choiceInputEl) choiceInputEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); handleChoiceInput(); } });
   let currentAgentName = 'BlueMonster';
   let currentAgentEmoji = '👾';
-  function updateAgentDisplay(name, emoji) { currentAgentName = name || 'BlueMonster'; currentAgentEmoji = emoji || '👾'; if (!isViewingHistory && headerTitleTextEl) { headerTitleTextEl.textContent = currentAgentEmoji + ' ' + currentAgentName; } }
+  function updateAgentDisplay(name, emoji) { currentAgentName = name || 'BlueMonster'; currentAgentEmoji = emoji || '👾'; if (!isViewingHistory) { if (headerTitleTextEl) headerTitleTextEl.textContent = currentAgentName; if (headerEmojiEl) headerEmojiEl.textContent = currentAgentEmoji; } }
 
   if (choiceSubmitEl) choiceSubmitEl.addEventListener('click', () => handleChoiceInput());
   if (modelApplyEl) modelApplyEl.addEventListener('click', applyModel);

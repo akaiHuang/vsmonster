@@ -19,7 +19,7 @@ export const WEBVIEW_HTML_TEMPLATE = `<!DOCTYPE html>
         </svg>
       </button>
       <div class="header-title" id="headerTitle">
-        <span class="icon">👾</span>
+        <span class="header-emoji" id="headerEmoji">👾</span>
         <span id="headerTitleText">BlueMonster</span>
       </div>
     </div>

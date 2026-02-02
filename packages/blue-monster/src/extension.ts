@@ -1912,6 +1912,12 @@ class BlueMonsterSession {
         this.clearHistory();
         break;
       case 'newChat':
+        // 如果正在執行任務，先停止它
+        if (this.busy) {
+          this.requestStop();
+          this.setBusy(false);
+          this.stopThinking();
+        }
         // 保存當前對話到歷史記錄
         if (this.messages.length > 0) {
           await this.saveCurrentChatToHistory();
@@ -2326,6 +2332,13 @@ class BlueMonsterSession {
 
   // 新增：載入歷史對話
   private async loadChatHistory(id: string): Promise<void> {
+    // 如果正在執行任務，先停止它
+    if (this.busy) {
+      this.requestStop();
+      this.setBusy(false);
+      this.stopThinking();
+    }
+    
     const history = await this.ensureHistoryIndex(
       this.context.globalState.get<ChatHistoryEntry[]>('chatHistories') || []
     );
