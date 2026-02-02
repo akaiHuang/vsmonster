@@ -66,6 +66,12 @@
         "icon": "$(gear)"
       },
       {
+        "command": "vsmonster.setPrimaryWindow",
+        "title": "%command.setPrimaryWindow%",
+        "category": "VSMONSTER",
+        "icon": "$(pin)"
+      },
+      {
         "command": "vsmonster.sendToChannel",
         "title": "%command.sendToChannel%",
         "category": "VSMONSTER"
@@ -96,6 +102,77 @@
         "title": "%command.selectModel%",
         "category": "VSMONSTER",
         "icon": "$(hubot)"
+      },
+      {
+        "command": "vsmonster.openChatPanel",
+        "title": "%command.openChatPanel%",
+        "category": "VSMONSTER",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "vsmonster.refreshChannels",
+        "title": "%command.refreshChannels%",
+        "category": "VSMONSTER",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vsmonster.refreshMCP",
+        "title": "%command.refreshMCP%",
+        "category": "VSMONSTER",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vsmonster.sendToCopilot",
+        "title": "%command.sendToCopilot%",
+        "category": "VSMONSTER",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "vsmonster.sendToLine",
+        "title": "%command.sendToLine%",
+        "category": "VSMONSTER",
+        "icon": "$(comment)"
+      },
+      {
+        "command": "vsmonster.sendToTelegram",
+        "title": "%command.sendToTelegram%",
+        "category": "VSMONSTER",
+        "icon": "$(send)"
+      },
+      {
+        "command": "vsmonster.sendToDiscord",
+        "title": "%command.sendToDiscord%",
+        "category": "VSMONSTER",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "vsmonster.clearChat",
+        "title": "%command.clearChat%",
+        "category": "VSMONSTER",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "vsmonster.copyMessage",
+        "title": "%command.copyMessage%",
+        "category": "VSMONSTER"
+      },
+      {
+        "command": "vsmonster.clearTasks",
+        "title": "%command.clearTasks%",
+        "category": "VSMONSTER",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "vsmonster.connect",
+        "title": "%command.connect%",
+        "category": "VSMONSTER",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "vsmonster.disconnect",
+        "title": "%command.disconnect%",
+        "category": "VSMONSTER",
+        "icon": "$(debug-disconnect)"
       }
     ],
     "viewsContainers": {
@@ -115,6 +192,11 @@
           "contextualTitle": "%view.tasks.context%"
         },
         {
+          "id": "vsmonsterChat",
+          "name": "%view.chat%",
+          "contextualTitle": "%view.chat.context%"
+        },
+        {
           "id": "vsmonsterChannels",
           "name": "%view.channels%",
           "contextualTitle": "%view.channels.context%"
@@ -129,18 +211,73 @@
     "menus": {
       "view/title": [
         {
-          "command": "vsmonster.refreshTasks",
-          "when": "view == vsmonsterTasks",
-          "group": "navigation"
+          "command": "vsmonster.connect",
+          "when": "view == vsmonsterTasks && !vsmonster.connected",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vsmonster.disconnect",
+          "when": "view == vsmonsterTasks && vsmonster.connected",
+          "group": "navigation@1"
         },
         {
           "command": "vsmonster.selectModel",
           "when": "view == vsmonsterTasks",
-          "group": "navigation"
+          "group": "navigation@2"
+        },
+        {
+          "command": "vsmonster.refreshTasks",
+          "when": "view == vsmonsterTasks",
+          "group": "navigation@3"
+        },
+        {
+          "command": "vsmonster.clearTasks",
+          "when": "view == vsmonsterTasks",
+          "group": "navigation@4"
         },
         {
           "command": "vsmonster.openSettings",
           "when": "view == vsmonsterTasks",
+          "group": "navigation@5"
+        },
+        {
+          "command": "vsmonster.sendToCopilot",
+          "when": "view == vsmonsterChat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vsmonster.sendToLine",
+          "when": "view == vsmonsterChat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "vsmonster.sendToTelegram",
+          "when": "view == vsmonsterChat",
+          "group": "navigation@3"
+        },
+        {
+          "command": "vsmonster.sendToDiscord",
+          "when": "view == vsmonsterChat",
+          "group": "navigation@4"
+        },
+        {
+          "command": "vsmonster.clearChat",
+          "when": "view == vsmonsterChat",
+          "group": "navigation@5"
+        },
+        {
+          "command": "vsmonster.connect",
+          "when": "view == vsmonsterChannels && !vsmonster.connected",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vsmonster.refreshChannels",
+          "when": "view == vsmonsterChannels",
+          "group": "navigation@2"
+        },
+        {
+          "command": "vsmonster.refreshMCP",
+          "when": "view == vsmonsterMCP",
           "group": "navigation"
         }
       ]
@@ -169,6 +306,19 @@
           "markdownDescription": "%config.defaultModel.description%",
           "description": "%config.defaultModel%"
         },
+        "vsmonster.copilotMode": {
+          "type": "string",
+          "default": "lm",
+          "enum": [
+            "lm",
+            "chat-ui"
+          ],
+          "enumDescriptions": [
+            "%config.copilotMode.lm%",
+            "%config.copilotMode.chatUi%"
+          ],
+          "description": "%config.copilotMode%"
+        },
         "vsmonster.language": {
           "type": "string",
           "default": "auto",
@@ -193,6 +343,72 @@
             "Русский"
           ],
           "description": "%config.language.description%"
+        },
+        "vsmonster.channels.line.channelAccessToken": {
+          "type": "string",
+          "default": "",
+          "description": "LINE Channel Access Token"
+        },
+        "vsmonster.channels.line.channelSecret": {
+          "type": "string",
+          "default": "",
+          "description": "LINE Channel Secret"
+        },
+        "vsmonster.channels.line.webhookSecret": {
+          "type": "string",
+          "default": "",
+          "description": "LINE Webhook Security Token (自動生成的隨機字串)"
+        },
+        "vsmonster.channels.line.whitelist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "LINE 使用者白名單 (User IDs)"
+        },
+        "vsmonster.channels.telegram.botToken": {
+          "type": "string",
+          "default": "",
+          "description": "Telegram Bot Token"
+        },
+        "vsmonster.channels.telegram.webhookSecret": {
+          "type": "string",
+          "default": "",
+          "description": "Telegram Webhook Security Token"
+        },
+        "vsmonster.channels.telegram.whitelist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Telegram 使用者白名單 (User IDs)"
+        },
+        "vsmonster.channels.discord.botToken": {
+          "type": "string",
+          "default": "",
+          "description": "Discord Bot Token"
+        },
+        "vsmonster.channels.discord.applicationId": {
+          "type": "string",
+          "default": "",
+          "description": "Discord Application ID"
+        },
+        "vsmonster.tunnel.cloudflare.tunnelId": {
+          "type": "string",
+          "default": "",
+          "description": "Cloudflare Tunnel ID"
+        },
+        "vsmonster.tunnel.cloudflare.accountId": {
+          "type": "string",
+          "default": "",
+          "description": "Cloudflare Account ID"
+        },
+        "vsmonster.tunnel.cloudflare.token": {
+          "type": "string",
+          "default": "",
+          "description": "Cloudflare Tunnel Token"
         }
       }
     }

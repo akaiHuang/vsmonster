@@ -6,6 +6,7 @@
   "command.showStatus": "Status anzeigen",
   "command.startGateway": "Gateway starten",
   "command.openSettings": "Einstellungen öffnen",
+  "command.setPrimaryWindow": "Als Hauptfenster festlegen",
   "command.sendToChannel": "Nachricht an Kanal senden",
   "command.refreshTasks": "Aufgabenliste aktualisieren",
   "command.runSetupWizard": "Einrichtungsassistent ausführen",
@@ -21,6 +22,9 @@
   "config.autoConnect": "Automatisch mit Gateway verbinden beim Start von VS Code",
   "config.showNotifications": "Aufgabenbenachrichtigungen anzeigen",
   "config.defaultModel": "Standard-KI-Modell",
+  "config.copilotMode": "Copilot-Integrationsmodus",
+  "config.copilotMode.lm": "Language Model API verwenden (ohne Chat-UI)",
+  "config.copilotMode.chatUi": "Copilot-Chat-UI öffnen (manuelle Fortsetzung in VS Code)",
   "config.language": "Erweiterungssprache",
   "config.language.description": "Anzeigesprache der Erweiterung (Neustart erforderlich)"
 }

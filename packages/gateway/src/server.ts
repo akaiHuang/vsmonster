@@ -7,6 +7,8 @@ import { TaskManager } from './task/manager';
 import { TunnelService } from './tunnel/service';
 import { CopilotBridge } from './copilot/bridge';
 import { MCPController } from './mcp/controller';
+import { WebInterface } from './web-interface';
+import { SoulManager } from './soul/manager';
 import { logger } from './utils/logger';
 
 export class VSMONSTERGateway {
@@ -20,6 +22,8 @@ export class VSMONSTERGateway {
   private tunnelService: TunnelService;
   private copilotBridge: CopilotBridge;
   private mcpController: MCPController;
+  private webInterface: WebInterface;
+  private soulManager: SoulManager;
   
   private vsCodeConnections: Set<WebSocket> = new Set();
 
@@ -35,6 +39,8 @@ export class VSMONSTERGateway {
     this.tunnelService = new TunnelService(this.config.tunnel);
     this.copilotBridge = new CopilotBridge();
     this.mcpController = new MCPController(this.config.mcp);
+    this.webInterface = new WebInterface(this.app, this.copilotBridge, this.config.port);
+    this.soulManager = new SoulManager();
     
     this.setupMiddleware();
     this.setupRoutes();
@@ -65,9 +71,26 @@ export class VSMONSTERGateway {
       });
     });
 
-    // LINE Webhook
-    this.app.post('/webhook/line', async (req, res) => {
+    // LINE Webhook - 使用動態安全路徑
+    this.app.post('/webhook/line/:secret', async (req, res) => {
       try {
+        // 驗證 webhook token header
+        const authToken = req.headers['x-line-signature'];
+        if (!authToken) {
+          logger.warn('LINE webhook request without signature header');
+          return res.sendStatus(403);
+        }
+        
+        // 驗證 URL 路徑中的 secret
+        const lineChannel = this.channelManager.getChannel('line') as any;
+        if (lineChannel && lineChannel.webhookPath) {
+          const expectedPath = lineChannel.webhookPath.replace('/webhook/line/', '');
+          if (req.params.secret !== expectedPath) {
+            logger.warn('LINE webhook invalid secret in URL');
+            return res.sendStatus(403);
+          }
+        }
+        
         const events = req.body.events || [];
         for (const event of events) {
           await this.handleChannelMessage('line', event);
@@ -211,31 +234,62 @@ export class VSMONSTERGateway {
 
     const { userId, text, media } = parsed;
 
+    // 檢查是否為問候或第一次使用
+    if (this.isGreeting(text)) {
+      const greeting = this.soulManager.getGreeting();
+      await this.sendToChannel(channel, userId, greeting);
+      return;
+    }
+
     // 解析指令
     const command = this.parseCommand(text);
     
     if (command) {
       await this.handleCommand(channel, userId, command);
     } else {
-      // 一般訊息，發送到 Copilot
-      const task = this.taskManager.createTask({
-        channel,
-        userId,
-        instruction: text,
-        media
-      });
+      // 使用 Soul Manager 判斷是否應該創建任務
+      const shouldCreateTask = this.soulManager.shouldCreateTask(text);
+      
+      if (shouldCreateTask) {
+        // 創建正式任務
+        const task = this.taskManager.createTask({
+          channel,
+          userId,
+          instruction: text,
+          media
+        });
 
-      // 通知 VS Code extension
-      this.broadcastToVSCode({
-        type: 'new_task',
-        task,
-        instruction: text,
-        media
-      });
-
-      // 發送確認訊息到社群
-      await this.sendToChannel(channel, userId, `📋 收到指令，任務已建立: ${task.id}\n正在處理中...`);
+        // 通知 VS Code extension
+        this.broadcastToVSCode({
+          type: 'new_task',
+          task,
+          instruction: text,
+          media
+        });
+        
+        logger.info(`Task created for user ${userId}: ${text}`);
+      } else {
+        // 一般對話，不創建任務，直接使用 Copilot 聊天
+        logger.info(`General chat from user ${userId}: ${text}`);
+        
+        this.broadcastToVSCode({
+          type: 'chat_message',
+          channel,
+          userId,
+          message: text,
+          media
+        });
+      }
     }
+  }
+  
+  /**
+   * 檢查是否為問候訊息
+   */
+  private isGreeting(text: string): boolean {
+    const greetings = ['你好', '嗨', 'hi', 'hello', '哈囉', '安安'];
+    const lowerText = text.toLowerCase().trim();
+    return greetings.some(g => lowerText === g || lowerText === g + '!');
   }
 
   private parseCommand(text: string): { cmd: string; args: string } | null {

@@ -1,6 +1,6 @@
 import { Bot, Context, webhookCallback } from 'grammy';
-import { ChannelAdapter, IncomingMessage, OutgoingMessage } from './base';
-import { logger } from '../utils/logger';
+import { ChannelAdapter, IncomingMessage, OutgoingMessage } from '../base';
+import { logger } from '../../utils/logger';
 
 export interface TelegramConfig {
   botToken: string;

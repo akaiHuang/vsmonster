@@ -1,0 +1,382 @@
+{
+  "name": "blue-monster",
+  "displayName": "BlueMonster",
+  "description": "BlueMonster - AI Chat Assistant with Copilot models, terminal tools, and image analysis",
+  "version": "0.1.0",
+  "publisher": "vsmonster",
+  "license": "MIT",
+  "icon": "resources/bluemonster.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/akaiHuang/vsmonster"
+  },
+  "homepage": "https://github.com/akaiHuang/vsmonster#readme",
+  "bugs": {
+    "url": "https://github.com/akaiHuang/vsmonster/issues"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Chat",
+    "AI",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "copilot",
+    "ai",
+    "chat",
+    "assistant",
+    "terminal",
+    "automation"
+  ],
+  "activationEvents": [
+    "onView:blueMonster.chatView",
+    "onCommand:blueMonster.openPanel",
+    "onCommand:blueMonster.openView",
+    "onCommand:blueMonster.selectModel",
+    "onCommand:blueMonster.clearHistory",
+    "onCommand:blueMonster.mcp.startAll",
+    "onCommand:blueMonster.mcp.stopAll"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "blueMonster.selectModel",
+        "title": "BlueMonster: Select Model"
+      },
+      {
+        "command": "blueMonster.openPanel",
+        "title": "BlueMonster: Open Panel"
+      },
+      {
+        "command": "blueMonster.openView",
+        "title": "BlueMonster: Open View"
+      },
+      {
+        "command": "blueMonster.clearHistory",
+        "title": "BlueMonster: Clear History"
+      },
+      {
+        "command": "blueMonster.mcp.startAll",
+        "title": "BlueMonster: MCP Start All"
+      },
+      {
+        "command": "blueMonster.mcp.stopAll",
+        "title": "BlueMonster: MCP Stop All"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "blueMonster",
+          "title": "BlueMonster",
+          "icon": "resources/blueMonster.svg"
+        }
+      ]
+    },
+    "views": {
+      "blueMonster": [
+        {
+          "id": "blueMonster.chatView",
+          "name": "Chat",
+          "type": "webview"
+        }
+      ]
+    },
+    "languageModelTools": [
+      {
+        "name": "blueMonster_runInTerminal",
+        "displayName": "Run command in terminal",
+        "modelDescription": "Run a shell command in the VS Code integrated terminal",
+        "description": "Run a shell command in the VS Code integrated terminal",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "Shell command to run"
+            },
+            "cwd": {
+              "type": "string",
+              "description": "Optional working directory (absolute path)"
+            }
+          },
+          "required": ["command"]
+        },
+        "tags": ["terminal", "shell", "command"],
+        "requiresConfirmation": true
+      },
+      {
+        "name": "blueMonster_executeVsCodeCommand",
+        "displayName": "Execute VS Code command",
+        "modelDescription": "Execute a VS Code command via the command registry",
+        "description": "Execute a VS Code command via the command registry",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "VS Code command id"
+            },
+            "args": {
+              "type": "array",
+              "description": "Optional arguments for the command",
+              "items": {}
+            }
+          },
+          "required": ["command"]
+        },
+        "tags": ["vscode", "command"],
+        "requiresConfirmation": true
+      },
+      {
+        "name": "blueMonster_readFile",
+        "displayName": "Read file",
+        "modelDescription": "Read a file from disk",
+        "description": "Read a file from disk",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Absolute file path"
+            }
+          },
+          "required": ["path"]
+        },
+        "tags": ["file", "read"],
+        "requiresConfirmation": true
+      },
+      {
+        "name": "blueMonster_writeFile",
+        "displayName": "Write file",
+        "modelDescription": "Write a file to disk",
+        "description": "Write a file to disk",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Absolute file path"
+            },
+            "content": {
+              "type": "string",
+              "description": "File content"
+            }
+          },
+          "required": ["path", "content"]
+        },
+        "tags": ["file", "write"],
+        "requiresConfirmation": true
+      },
+      {
+        "name": "blueMonster_openFile",
+        "displayName": "Open file",
+        "modelDescription": "Open a file in VS Code",
+        "description": "Open a file in VS Code",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Absolute file path"
+            },
+            "preview": {
+              "type": "boolean",
+              "description": "Open in preview mode (optional)"
+            }
+          },
+          "required": ["path"]
+        },
+        "tags": ["file", "open"],
+        "requiresConfirmation": true
+      },
+      {
+        "name": "blueMonster_switchWindow",
+        "displayName": "Switch window",
+        "modelDescription": "Switch VS Code window (opens the window switcher)",
+        "description": "Switch VS Code window (opens the window switcher)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "tags": ["window", "vscode"],
+        "requiresConfirmation": true
+      }
+    ],
+    "configuration": {
+      "title": "BlueMonster",
+      "properties": {
+        "blueMonster.backend": {
+          "type": "string",
+          "default": "lm",
+          "enum": [
+            "lm",
+            "cli"
+          ],
+          "enumDescriptions": [
+            "Use VS Code Language Model API (Copilot)",
+            "Use a local CLI command"
+          ],
+          "description": "Chat backend for BlueMonster"
+        },
+        "blueMonster.cliCommand": {
+          "type": "string",
+          "default": "",
+          "description": "CLI command template. Use {prompt} as placeholder for the user message (and {model} for the CLI model if needed)."
+        },
+        "blueMonster.cliCwd": {
+          "type": "string",
+          "default": "",
+          "description": "Working directory for CLI backend (optional)"
+        },
+        "blueMonster.cliModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model name for CLI backend (optional). Use {model} in cliCommand."
+        },
+        "blueMonster.model": {
+          "type": "string",
+          "default": "",
+          "description": "Preferred Copilot model id (optional override)"
+        },
+        "blueMonster.terminalConfirmation": {
+          "type": "string",
+          "default": "chat",
+          "enum": [
+            "chat",
+            "modal",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Confirm in BlueMonster chat UI",
+            "Show a VS Code modal confirmation dialog",
+            "Run without confirmation"
+          ],
+          "description": "How to confirm terminal commands before running."
+        },
+        "blueMonster.dangerMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow the model to execute VS Code commands via a dangerous tool."
+        },
+        "blueMonster.safeMode.confirmDelete": {
+          "type": "boolean",
+          "default": true,
+          "description": "🗑️ 刪除檔案 - 在安全模式下確認 rm, rmdir, unlink 等刪除命令"
+        },
+        "blueMonster.safeMode.confirmMove": {
+          "type": "boolean",
+          "default": true,
+          "description": "📁 移動檔案 - 在安全模式下確認 mv 移動命令"
+        },
+        "blueMonster.safeMode.confirmSudo": {
+          "type": "boolean",
+          "default": true,
+          "description": "🔐 管理員權限 - 在安全模式下確認 sudo, su 命令"
+        },
+        "blueMonster.safeMode.confirmNetwork": {
+          "type": "boolean",
+          "default": true,
+          "description": "🌐 遠端連線 - 在安全模式下確認 ssh, scp, rsync 命令"
+        },
+        "blueMonster.safeMode.confirmDownload": {
+          "type": "boolean",
+          "default": true,
+          "description": "⬇️ 網路下載 - 在安全模式下確認 curl, wget 命令"
+        },
+        "blueMonster.safeMode.confirmPackage": {
+          "type": "boolean",
+          "default": true,
+          "description": "📦 套件安裝 - 在安全模式下確認 npm, yarn, pnpm, pip, brew, apt 等命令"
+        },
+        "blueMonster.safeMode.confirmGit": {
+          "type": "boolean",
+          "default": true,
+          "description": "📤 Git 操作 - 在安全模式下確認 git push, git reset --hard 等命令"
+        },
+        "blueMonster.safeMode.confirmDocker": {
+          "type": "boolean",
+          "default": true,
+          "description": "🐳 Docker 操作 - 在安全模式下確認 docker rm, docker stop 等命令"
+        },
+        "blueMonster.safeMode.confirmPermission": {
+          "type": "boolean",
+          "default": true,
+          "description": "🔒 權限變更 - 在安全模式下確認 chmod, chown 命令"
+        },
+        "blueMonster.safeMode.confirmKill": {
+          "type": "boolean",
+          "default": true,
+          "description": "💀 終止進程 - 在安全模式下確認 kill, killall, pkill 命令"
+        },
+        "blueMonster.safeMode.confirmSystem": {
+          "type": "boolean",
+          "default": true,
+          "description": "⚡ 系統操作 - 在安全模式下確認 reboot, shutdown, eval, exec 等命令"
+        },
+        "blueMonster.mcpAutoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start configured MCP servers when BlueMonster activates."
+        },
+        "blueMonster.mcpServers": {
+          "type": "array",
+          "default": [],
+          "description": "MCP server configurations for BlueMonster to spawn as child processes.",
+          "items": {
+            "type": "object",
+            "required": ["name", "command"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "MCP server name"
+              },
+              "command": {
+                "type": "string",
+                "description": "Command to launch the MCP server"
+              },
+              "args": {
+                "type": "array",
+                "description": "Command arguments",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "env": {
+                "type": "object",
+                "description": "Environment variables for the MCP process",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Whether this MCP server should be started."
+              },
+              "autostart": {
+                "type": "boolean",
+                "default": true,
+                "description": "Whether to autostart this MCP server."
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.0.0"
+  }
+}

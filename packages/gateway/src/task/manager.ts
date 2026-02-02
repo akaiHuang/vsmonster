@@ -213,6 +213,34 @@ export class TaskManager {
   }
 
   /**
+   * 取得用戶的任務 (alias 為 getUserTasks)
+   */
+  getUserTasks(userId: string): Task[] {
+    return this.getTasksForUser(userId);
+  }
+
+  /**
+   * 更新任務狀態 (alias 為 updateTask)
+   */
+  updateTaskStatus(taskId: string, status: TaskStatus, progress?: number): void {
+    return this.updateTask(taskId, status, progress);
+  }
+
+  /**
+   * 完成任務
+   */
+  completeTask(taskId: string): void {
+    this.updateTask(taskId, 'completed', 100);
+  }
+
+  /**
+   * 更新任務進度
+   */
+  updateTaskProgress(taskId: string, progress: number): void {
+    this.updateTask(taskId, 'running', progress);
+  }
+
+  /**
    * 取得正在執行的任務數量
    */
   getRunningTaskCount(): number {

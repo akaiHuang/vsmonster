@@ -6,6 +6,7 @@
   "command.showStatus": "Показать статус",
   "command.startGateway": "Запустить Gateway",
   "command.openSettings": "Открыть настройки",
+  "command.setPrimaryWindow": "Сделать основным окном",
   "command.sendToChannel": "Отправить сообщение в канал",
   "command.refreshTasks": "Обновить список задач",
   "command.runSetupWizard": "Запустить мастер настройки",
@@ -21,6 +22,9 @@
   "config.autoConnect": "Автоматически подключаться к Gateway при запуске VS Code",
   "config.showNotifications": "Показывать уведомления о задачах",
   "config.defaultModel": "AI модель по умолчанию",
+  "config.copilotMode": "Режим интеграции Copilot",
+  "config.copilotMode.lm": "Использовать Language Model API (без UI чата)",
+  "config.copilotMode.chatUi": "Открывать Copilot Chat UI (ручное продолжение в VS Code)",
   "config.language": "Язык расширения",
   "config.language.description": "Язык отображения расширения (требуется перезагрузка)"
 }

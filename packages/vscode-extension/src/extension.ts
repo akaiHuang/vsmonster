@@ -18,7 +18,14 @@ let chatTreeView: ChatTreeView | undefined;
 let statusBarItem: vscode.StatusBarItem;
 
 const FIRST_RUN_KEY = 'vsmonster.hasCompletedSetup';
-const INSTANCE_LOCK_FILE = path.join(os.tmpdir(), 'vsmonster-instance.lock');
+const PRIMARY_LOCK_FILE = path.join(os.tmpdir(), 'vsmonster-primary.lock');
+
+interface PrimaryLockData {
+  pid: number;
+  sessionId: string;
+  workspaceFolder?: string;
+  timestamp: number;
+}
 
 // Localization helper
 function t(key: string): string {
@@ -28,82 +35,185 @@ function t(key: string): string {
 /**
  * 檢查是否有其他 VSCode 實例正在運行 VSMONSTER
  */
-function checkSingleInstance(context: vscode.ExtensionContext): boolean {
+function getCurrentLockData(): PrimaryLockData {
+  return {
+    pid: process.pid,
+    sessionId: vscode.env.sessionId,
+    workspaceFolder: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    timestamp: Date.now()
+  };
+}
+
+function readPrimaryLock(): PrimaryLockData | null {
   try {
-    if (fs.existsSync(INSTANCE_LOCK_FILE)) {
-      const lockContent = fs.readFileSync(INSTANCE_LOCK_FILE, 'utf-8');
-      const lockData = JSON.parse(lockContent);
-      
-      // 檢查鎖文件的 PID 是否還在運行
-      const isProcessRunning = (pid: number) => {
-        try {
-          process.kill(pid, 0);
-          return true;
-        } catch {
-          return false;
+    if (!fs.existsSync(PRIMARY_LOCK_FILE)) {
+      return null;
+    }
+    const lockContent = fs.readFileSync(PRIMARY_LOCK_FILE, 'utf-8');
+    const lockData = JSON.parse(lockContent);
+    if (!lockData || typeof lockData !== 'object') {
+      return null;
+    }
+    return lockData as PrimaryLockData;
+  } catch {
+    return null;
+  }
+}
+
+function writePrimaryLock(data: PrimaryLockData): void {
+  fs.writeFileSync(PRIMARY_LOCK_FILE, JSON.stringify(data));
+}
+
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function registerPrimaryLockCleanup(context: vscode.ExtensionContext): void {
+  context.subscriptions.push({
+    dispose: () => {
+      try {
+        const lockData = readPrimaryLock();
+        if (lockData?.sessionId === vscode.env.sessionId && fs.existsSync(PRIMARY_LOCK_FILE)) {
+          fs.unlinkSync(PRIMARY_LOCK_FILE);
         }
-      };
-      
-      if (lockData.pid && isProcessRunning(lockData.pid)) {
-        // 另一個實例正在運行
-        console.warn(`Another VSMONSTER instance is running (PID: ${lockData.pid})`);
-        return false;
-      } else {
-        // 鎖文件無效，刪除它
-        fs.unlinkSync(INSTANCE_LOCK_FILE);
+      } catch (err) {
+        console.error('Failed to clean up lock file:', err);
       }
     }
-    
-    // 創建新的鎖文件
-    fs.writeFileSync(INSTANCE_LOCK_FILE, JSON.stringify({
-      pid: process.pid,
-      workspaceFolder: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-      timestamp: Date.now()
-    }));
-    
-    // 清理函數
-    context.subscriptions.push({
-      dispose: () => {
-        try {
-          if (fs.existsSync(INSTANCE_LOCK_FILE)) {
-            fs.unlinkSync(INSTANCE_LOCK_FILE);
-          }
-        } catch (err) {
-          console.error('Failed to clean up lock file:', err);
-        }
+  });
+}
+
+function ensurePrimaryWindow(context: vscode.ExtensionContext): { isPrimary: boolean; lockData?: PrimaryLockData } {
+  try {
+    const lockData = readPrimaryLock();
+    if (lockData?.pid && lockData.sessionId && isProcessRunning(lockData.pid)) {
+      if (lockData.sessionId === vscode.env.sessionId) {
+        writePrimaryLock(getCurrentLockData());
+        registerPrimaryLockCleanup(context);
+        return { isPrimary: true, lockData };
       }
-    });
-    
-    return true;
+      console.warn(`Another VSMONSTER instance is running (PID: ${lockData.pid})`);
+      return { isPrimary: false, lockData };
+    }
+
+    if (fs.existsSync(PRIMARY_LOCK_FILE)) {
+      fs.unlinkSync(PRIMARY_LOCK_FILE);
+    }
+
+    const current = getCurrentLockData();
+    writePrimaryLock(current);
+    registerPrimaryLockCleanup(context);
+    return { isPrimary: true, lockData: current };
   } catch (error) {
-    console.error('Error checking single instance:', error);
-    return true; // 發生錯誤時仍然允許啟動
+    console.error('Error checking primary window:', error);
+    return { isPrimary: true };
   }
+}
+
+function refreshPrimaryLock(): boolean {
+  const lockData = readPrimaryLock();
+  if (!lockData) {
+    writePrimaryLock(getCurrentLockData());
+    return true;
+  }
+
+  if (lockData.sessionId === vscode.env.sessionId) {
+    if (lockData.pid !== process.pid) {
+      writePrimaryLock(getCurrentLockData());
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function startPrimaryMonitor(context: vscode.ExtensionContext): void {
+  const interval = setInterval(() => {
+    if (!refreshPrimaryLock()) {
+      const isChineseLocale = vscode.env.language.startsWith('zh');
+      const msg = isChineseLocale
+        ? 'VSMONSTER 已在另一個 VS Code 視窗中運行。此視窗將停用。'
+        : 'VSMONSTER is now running in another VS Code window. This window will be disabled.';
+      vscode.window.showWarningMessage(msg);
+      void vscode.commands.executeCommand('workbench.action.reloadWindow');
+      clearInterval(interval);
+    }
+  }, 4000);
+
+  context.subscriptions.push({
+    dispose: () => clearInterval(interval)
+  });
+}
+
+async function setPrimaryWindow(context: vscode.ExtensionContext): Promise<void> {
+  const isChineseLocale = vscode.env.language.startsWith('zh');
+  const lockData = readPrimaryLock();
+  if (lockData?.sessionId === vscode.env.sessionId && lockData.pid && isProcessRunning(lockData.pid)) {
+    const msg = isChineseLocale ? '此視窗已是 VSMONSTER 主視窗。' : 'This window is already the VSMONSTER primary window.';
+    vscode.window.showInformationMessage(msg);
+    return;
+  }
+
+  const confirmLabel = isChineseLocale ? '設為主視窗' : 'Set as Primary';
+  const cancelLabel = isChineseLocale ? '取消' : 'Cancel';
+  const message = isChineseLocale
+    ? '將此視窗設為 VSMONSTER 主視窗？其他視窗將會停用。'
+    : 'Set this window as the VSMONSTER primary window? Other windows will be disabled.';
+  const selection = await vscode.window.showWarningMessage(message, confirmLabel, cancelLabel);
+  if (selection !== confirmLabel) return;
+
+  writePrimaryLock(getCurrentLockData());
+  const reloadMsg = isChineseLocale ? '已設為主視窗，正在重新載入...' : 'Primary window set. Reloading...';
+  vscode.window.showInformationMessage(reloadMsg);
+  await vscode.commands.executeCommand('workbench.action.reloadWindow');
 }
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log('VSMONSTER extension is now active');
   
-  // 檢查單一實例
-  if (!checkSingleInstance(context)) {
-    const msg = vscode.env.language.startsWith('zh') 
-      ? 'VSMONSTER 已在另一個 VS Code 視窗中運行。為避免衝突，此視窗的 VSMONSTER 已停用。'
-      : 'VSMONSTER is already running in another VS Code window. This instance has been disabled to avoid conflicts.';
-    
-    vscode.window.showWarningMessage(msg);
-    
-    // 創建停用狀態的狀態欄
+  const primaryState = ensurePrimaryWindow(context);
+  context.subscriptions.push(
+    vscode.commands.registerCommand('vsmonster.setPrimaryWindow', () => setPrimaryWindow(context))
+  );
+
+  if (!primaryState.isPrimary) {
+    const primaryLocation = primaryState.lockData?.workspaceFolder
+      ? ` (${primaryState.lockData.workspaceFolder})`
+      : '';
+    const msg = vscode.env.language.startsWith('zh')
+      ? `VSMONSTER 已在另一個 VS Code 視窗中運行${primaryLocation}。此視窗目前停用。`
+      : `VSMONSTER is already running in another VS Code window${primaryLocation}. This window is inactive.`;
+
+    const actionLabel = vscode.env.language.startsWith('zh') ? '設為主視窗' : 'Set as Primary';
+    vscode.window.showWarningMessage(msg, actionLabel).then(selection => {
+      if (selection === actionLabel) {
+        void setPrimaryWindow(context);
+      }
+    });
+
     statusBarItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Right,
       100
     );
-    statusBarItem.text = '$(error) VSMONSTER (Disabled)';
-    statusBarItem.tooltip = msg;
+    statusBarItem.text = '$(error) VSMONSTER (Inactive)';
+    statusBarItem.tooltip = vscode.env.language.startsWith('zh')
+      ? `${msg} 點擊可切換為主視窗。`
+      : `${msg} Click to set this window as primary.`;
+    statusBarItem.command = 'vsmonster.setPrimaryWindow';
     statusBarItem.show();
     context.subscriptions.push(statusBarItem);
-    
+
+    void vscode.commands.executeCommand('setContext', 'vsmonster.primary', false);
     return; // 停止啟動
   }
+
+  void vscode.commands.executeCommand('setContext', 'vsmonster.primary', true);
+  startPrimaryMonitor(context);
 
   // Create status bar item
   statusBarItem = vscode.window.createStatusBarItem(
@@ -560,7 +670,7 @@ function getSetupWebviewContent(channel: string, guide: { title: string; steps: 
   </div>
 
   <div class="tip">
-    <strong>💡 提示:</strong> 完成設定後，在專案根目錄執行 <code>pnpm dev</code> 啟動 Gateway
+    <strong>💡 提示:</strong> 完成設定後，在專案根目錄執行 <code>pnpm dev:gateway</code>（或 <code>pnpm dev</code>）啟動 Gateway
   </div>
 
   <div class="actions">
@@ -594,7 +704,7 @@ async function openQuickStart() {
 
   // 如果找不到文件，顯示基本說明
   vscode.window.showInformationMessage(
-    '快速開始: 1) 執行 vsmonster init 設定頻道 2) 執行 pnpm dev 啟動 Gateway 3) 在 VS Code 連接 Gateway'
+    '快速開始: 1) 執行設定向導 2) 執行 pnpm dev:gateway（或 pnpm dev）啟動 Gateway 3) 在 VS Code 連接 Gateway'
   );
 }
 
@@ -698,6 +808,8 @@ async function handleNewTask(data: any, taskView: TaskView) {
   // 使用 Copilot 處理任務
   if (copilotBridge) {
     try {
+      const isChatUiMode = copilotBridge.isChatUiMode?.() ?? false;
+      let chatUiFailed = false;
       // 顯示進度
       await vscode.window.withProgress(
         {
@@ -717,6 +829,9 @@ async function handleNewTask(data: any, taskView: TaskView) {
 
             // 發送到 Copilot
             const result = await copilotBridge!.executeSubtask(subtask, instruction);
+            if (result?.method === 'chat-ui' && result?.error) {
+              chatUiFailed = true;
+            }
             
             // 回報進度
             gatewayClient?.send({
@@ -729,11 +844,16 @@ async function handleNewTask(data: any, taskView: TaskView) {
           }
 
           // 任務完成
+          const completionMessage = isChatUiMode
+            ? (chatUiFailed
+                ? '🔴 無法開啟 Copilot Chat 視窗，請確認已安裝 Copilot Chat 並支援 Chat 功能。'
+                : '🟡 已送到 Copilot Chat 視窗，請在主視窗查看並繼續操作。')
+            : `✅ 任務完成: ${instruction}`;
           gatewayClient?.send({
             type: 'copilot_response',
             channel: task.channel,
             userId: task.userId,
-            content: `✅ 任務完成: ${instruction}`,
+            content: completionMessage,
           });
         }
       );
@@ -838,12 +958,68 @@ function showStatus() {
   });
 }
 
+function findVsmonsterWorkspaceRoot(): string | undefined {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders) return;
+
+  for (const folder of workspaceFolders) {
+    const rootPath = folder.uri.fsPath;
+    const packagePath = path.join(rootPath, 'package.json');
+    const gatewayPackagePath = path.join(rootPath, 'packages', 'gateway', 'package.json');
+
+    if (!fs.existsSync(packagePath) || !fs.existsSync(gatewayPackagePath)) {
+      continue;
+    }
+
+    try {
+      const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf-8'));
+      if (pkg?.name === 'vsmonster') {
+        return rootPath;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return;
+}
+
+function getGatewayStartCommand(rootPath: string): string {
+  try {
+    const packagePath = path.join(rootPath, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf-8'));
+    if (pkg?.scripts?.['dev:gateway']) {
+      return 'pnpm dev:gateway';
+    }
+  } catch {
+    // Ignore and fallback below.
+  }
+
+  return 'pnpm --filter @vsmonster/gateway dev';
+}
+
 async function startGateway() {
   if (!terminalManager) return;
   
+  const rootPath = findVsmonsterWorkspaceRoot();
+  const isChineseLocale = vscode.env.language.startsWith('zh');
+
+  if (!rootPath) {
+    const msg = isChineseLocale
+      ? '找不到 VSMONSTER Gateway。請先從 GitHub 下載專案，並在專案根目錄執行 pnpm dev:gateway（或 pnpm dev）。'
+      : 'VSMONSTER Gateway not found. Please clone the repo and run pnpm dev:gateway (or pnpm dev) from the repo root.';
+    const actionLabel = isChineseLocale ? '開啟快速開始' : 'Open Quick Start';
+    const selection = await vscode.window.showWarningMessage(msg, actionLabel);
+    if (selection === actionLabel) {
+      void openQuickStart();
+    }
+    return;
+  }
+
   const terminal = terminalManager.getOrCreateTerminal('VSMONSTER Gateway');
   terminal.show();
-  terminal.sendText('npx vsmonster start');
+  terminal.sendText(`cd "${rootPath}"`);
+  terminal.sendText(getGatewayStartCommand(rootPath));
 }
 
 function openSettings() {

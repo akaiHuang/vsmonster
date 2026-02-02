@@ -103,6 +103,10 @@ export class GatewayClient extends EventEmitter {
         this.emit('new_task', message);
         break;
       
+      case 'chat_message':
+        this.emit('chat_message', message);
+        break;
+      
       case 'switch_model':
         this.emit('switch_model', message);
         break;
@@ -113,6 +117,14 @@ export class GatewayClient extends EventEmitter {
       
       case 'tunnel_update':
         this.emit('tunnel_update', message);
+        break;
+      
+      case 'channel_update':
+        this.emit('channel_update', message.data);
+        break;
+      
+      case 'mcp_update':
+        this.emit('mcp_update', message.data);
         break;
       
       case 'pong':

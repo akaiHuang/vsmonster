@@ -6,6 +6,7 @@
   "command.showStatus": "ステータスを表示",
   "command.startGateway": "Gateway を起動",
   "command.openSettings": "設定を開く",
+  "command.setPrimaryWindow": "メインウィンドウに設定",
   "command.sendToChannel": "チャンネルにメッセージを送信",
   "command.refreshTasks": "タスクリストを更新",
   "command.runSetupWizard": "セットアップウィザードを実行",
@@ -22,6 +23,9 @@
   "config.autoConnect": "VS Code 起動時に Gateway に自動接続",
   "config.showNotifications": "タスク通知を表示",
   "config.defaultModel": "デフォルト AI モデル",
+  "config.copilotMode": "Copilot 連携モード",
+  "config.copilotMode.lm": "Language Model API を使用（チャット UI なし）",
+  "config.copilotMode.chatUi": "Copilot Chat UI を開く（VS Code 内で手動対応）",
   "config.defaultModel.description": "デフォルト AI モデル ID。「VSMONSTER: AI モデルを選択」コマンドを使用して、利用可能な Copilot モデルから選択します。空のままにすると、最初に利用可能なモデルが使用されます。",
   "config.language": "拡張機能の言語",
   "config.language.description": "拡張機能の表示言語（再読み込みが必要）"

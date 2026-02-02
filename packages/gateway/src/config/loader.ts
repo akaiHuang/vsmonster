@@ -9,6 +9,7 @@ export interface VSMONSTERConfig {
   channels: ChannelsConfig;
   tunnel?: TunnelConfig;
   mcp?: MCPConfig;
+  moltbotGatewayUrl?: string;
 }
 
 const DEFAULT_CONFIG: VSMONSTERConfig = {
@@ -20,9 +21,18 @@ const DEFAULT_CONFIG: VSMONSTERConfig = {
  * 載入配置文件
  */
 export function loadConfig(): VSMONSTERConfig {
+  // 嘗試多個可能的配置路徑
   const configPaths = [
+    // 當前工作目錄
     path.join(process.cwd(), 'configs', 'config.json'),
     path.join(process.cwd(), 'config.json'),
+    // 專案根目錄（從 packages/gateway 往上兩層）
+    path.join(process.cwd(), '..', '..', 'configs', 'config.json'),
+    path.join(process.cwd(), '..', '..', 'config.json'),
+    // 使用 __dirname（編譯後的位置）
+    path.join(__dirname, '..', '..', 'configs', 'config.json'),
+    path.join(__dirname, '..', '..', '..', '..', 'configs', 'config.json'),
+    // 用戶主目錄
     path.join(process.env.HOME || '', '.vsmonster', 'config.json'),
   ];
 
@@ -70,11 +80,11 @@ function loadConfigFromEnv(): VSMONSTERConfig {
   }
 
   // Discord
-  if (process.env.DISCORD_BOT_TOKEN) {
+  if (process.env.DISCORD_BOT_TOKEN && process.env.DISCORD_APPLICATION_ID) {
     config.channels.discord = {
       botToken: process.env.DISCORD_BOT_TOKEN,
-      applicationId: process.env.DISCORD_APPLICATION_ID || '',
-      publicKey: process.env.DISCORD_PUBLIC_KEY,
+      applicationId: process.env.DISCORD_APPLICATION_ID,
+      publicKey: process.env.DISCORD_PUBLIC_KEY || undefined,
     };
   }
 

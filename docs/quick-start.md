@@ -27,13 +27,15 @@ pnpm install
 ### 3. 執行設定向導
 
 ```bash
-pnpm dev
+pnpm dev:gateway
 ```
 
 首次啟動會自動執行設定向導，引導你完成:
 - ✅ 環境檢查
 - 🔗 VS Code 連接
 - 📱 社群軟體綁定
+
+> 需要同時啟動 Mission Control 時，可改用 `pnpm dev`。
 
 或者手動執行設定向導:
 
@@ -99,6 +101,11 @@ pnpm exec ts-node bin/cli.ts init
 2. 在 VS Code 按 `Cmd+Shift+P`
 3. 執行 "VSMONSTER: Connect"
 4. 狀態列會顯示 ✅ 已連接
+
+### 🪟 單一視窗模式
+
+VSMONSTER 同時間只會在**一個** VS Code 視窗運作。第一個啟動的視窗會自動成為**主視窗**，
+其他視窗會顯示為停用。若要切換主視窗，請執行 **「VSMONSTER: 設為主視窗」** 或點擊狀態列提示。
 
 ## 💬 開始使用
 

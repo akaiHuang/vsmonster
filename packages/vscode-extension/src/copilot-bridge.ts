@@ -35,6 +35,16 @@ export class CopilotBridge {
     this.context = context;
   }
 
+  private getCopilotMode(): 'lm' | 'chat-ui' {
+    const config = vscode.workspace.getConfiguration('vsmonster');
+    const mode = config.get<string>('copilotMode');
+    return mode === 'chat-ui' ? 'chat-ui' : 'lm';
+  }
+
+  isChatUiMode(): boolean {
+    return this.getCopilotMode() === 'chat-ui';
+  }
+
   /**
    * 獲取所有可用的 Copilot 模型
    */
@@ -129,7 +139,9 @@ export class CopilotBridge {
    */
   async chat(message: string, userId?: string): Promise<string> {
     try {
-      const result = await this.sendToCopilotChat(message);
+      const result = this.isChatUiMode()
+        ? await this.sendToCopilotChatUI(message)
+        : await this.sendToCopilotChat(message);
       return result.response || '抱歉，我無法處理這個訊息。';
     } catch (error) {
       console.error('[VSMONSTER] Chat error:', error);
@@ -145,6 +157,9 @@ export class CopilotBridge {
     const prompt = this.buildPrompt(subtask, fullInstruction);
     
     try {
+      if (this.isChatUiMode()) {
+        return this.sendToCopilotChatUI(prompt);
+      }
       // 方法 1: 使用 Copilot Chat API (如果可用)
       const result = await this.sendToCopilotChat(prompt);
       return result;
@@ -227,6 +242,30 @@ ${subtask.description}
     }
 
     return { response: result };
+  }
+
+  /**
+   * 發送到 Copilot Chat UI（開啟對話面板）
+   */
+  private async sendToCopilotChatUI(prompt: string): Promise<any> {
+    const isChineseLocale = vscode.env.language.startsWith('zh');
+    const successMessage = isChineseLocale
+      ? '已送到 Copilot Chat 視窗，請在主視窗查看並繼續操作。'
+      : 'Sent to Copilot Chat UI. Please continue in the main window.';
+    const failureMessage = isChineseLocale
+      ? '無法開啟 Copilot Chat 視窗，請確認已安裝 Copilot Chat 並支援 Chat 功能。'
+      : 'Unable to open Copilot Chat UI. Please ensure Copilot Chat is installed and chat is supported.';
+
+    try {
+      await vscode.commands.executeCommand('workbench.action.chat.open', {
+        query: prompt,
+        isPartialQuery: false,
+      });
+      return { response: successMessage, method: 'chat-ui' };
+    } catch (error) {
+      console.error('[VSMONSTER] Failed to open Copilot Chat UI:', error);
+      return { response: failureMessage, method: 'chat-ui', error: String(error) };
+    }
   }
 
   /**

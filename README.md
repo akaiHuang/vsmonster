@@ -24,6 +24,24 @@ The project uses 🦞 Moltbot as the messaging layer, while VSMONSTER focuses on
 
 ---
 
+## 🧭 Message Flow (Simple Diagram)
+
+```
+User (LINE/Telegram/Discord)
+          |
+       Webhook
+          |
+VSMONSTER Gateway (Express + WS)
+          |
+     WebSocket
+          |
+ VS Code Extension
+          |
+  Copilot (LM API or Chat UI)
+```
+
+---
+
 ## 🚀 Quick Start
 
 ### Step 0️⃣ Prerequisites (One-time)
@@ -111,6 +129,14 @@ code --install-extension packages/vscode-extension/vsmonster-0.0.2.vsix
 
 ---
 
+#### 🪟 Single-Window Mode
+
+VSMONSTER runs in **one** VS Code window at a time. The first window that activates becomes the **primary** window.
+Other windows will show VSMONSTER as inactive. To switch, run **"VSMONSTER: Set Primary Window"** or click the
+status bar indicator in the window you want to make primary.
+
+---
+
 ### Step 3️⃣ Install 👾 VSMONSTER 👾 Gateway
 
 #### 🤖 One-Click Install with Copilot (Recommended)
@@ -159,8 +185,10 @@ Setup instructions will be provided during installation, or refer to:
 #### 🔌 Start Gateway
 
 ```bash
-pnpm dev
+pnpm dev:gateway
 ```
+
+> Need Mission Control too? Use `pnpm dev`.
 
 Verify status: `http://localhost:3000/health`
 
@@ -322,6 +350,7 @@ VS Code Settings:
 - `vsmonster.autoConnect`
 - `vsmonster.showNotifications`
 - `vsmonster.defaultModel`
+- `vsmonster.copilotMode` (`lm` or `chat-ui`)
 
 ---
 

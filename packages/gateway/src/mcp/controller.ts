@@ -71,32 +71,32 @@ export class MCPController {
     }
 
     try {
-      const process = spawn(server.config.command, server.config.args || [], {
+      const childProcess = spawn(server.config.command, server.config.args || [], {
         env: { ...process.env, ...server.config.env },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
-      process.on('error', (err) => {
+      childProcess.on('error', (err) => {
         server.status = 'error';
         server.lastError = err.message;
         logger.error(`MCP server ${name} error:`, err);
       });
 
-      process.on('exit', (code) => {
+      childProcess.on('exit', (code) => {
         server.status = 'stopped';
         server.process = undefined;
         logger.info(`MCP server ${name} exited with code ${code}`);
       });
 
-      process.stdout?.on('data', (data) => {
+      childProcess.stdout?.on('data', (data) => {
         logger.debug(`[MCP:${name}] ${data.toString().trim()}`);
       });
 
-      process.stderr?.on('data', (data) => {
+      childProcess.stderr?.on('data', (data) => {
         logger.warn(`[MCP:${name}] ${data.toString().trim()}`);
       });
 
-      server.process = process;
+      server.process = childProcess;
       server.status = 'running';
       logger.info(`MCP server ${name} started`);
       return true;

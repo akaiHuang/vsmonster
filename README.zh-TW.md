@@ -24,6 +24,24 @@ VSMONSTER 讓你在社群軟體中下指令、追蹤任務進度，所有執行�
 
 ---
 
+## 🧭 訊息流程（簡圖）
+
+```
+使用者（LINE/Telegram/Discord）
+              |
+           Webhook
+              |
+VSMONSTER Gateway（Express + WS）
+              |
+           WebSocket
+              |
+      VS Code 擴充
+              |
+   Copilot（LM API 或 Chat UI）
+```
+
+---
+
 ## 🚀 快速開始
 
 ### Step 0️⃣ 事前準備（一次性）
@@ -111,6 +129,13 @@ code --install-extension packages/vscode-extension/vsmonster-0.0.2.vsix
 
 ---
 
+#### 🪟 單一視窗模式
+
+VSMONSTER 同時間只會在**一個** VS Code 視窗運作。第一個啟動的視窗會自動成為**主視窗**，
+其他視窗會顯示為停用。若要切換主視窗，請執行 **「VSMONSTER: 設為主視窗」** 或點擊狀態列提示。
+
+---
+
 ### Step 3️⃣ 安裝 👾 VSMONSTER 👾 Gateway
 
 #### 🤖 使用 Copilot 一鍵安裝（推薦）
@@ -159,8 +184,10 @@ VSMONSTER 會引導你設定對外連線，**避免暴露你的真實 IP**：
 #### 🔌 啟動 Gateway
 
 ```bash
-pnpm dev
+pnpm dev:gateway
 ```
+
+> 需要同時啟動 Mission Control 時，可改用 `pnpm dev`。
 
 驗證狀態：`http://localhost:3000/health`
 
@@ -321,6 +348,7 @@ VS Code 設定：
 - `vsmonster.autoConnect`
 - `vsmonster.showNotifications`
 - `vsmonster.defaultModel`
+- `vsmonster.copilotMode`（`lm` 或 `chat-ui`）
 
 ---
 

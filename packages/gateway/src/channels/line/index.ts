@@ -1,22 +1,77 @@
 import { Client as LineClient, middleware as lineMiddleware, WebhookEvent, TextMessage, MessageAPIResponseBase } from '@line/bot-sdk';
-import { ChannelAdapter, IncomingMessage, OutgoingMessage } from './base';
-import { logger } from '../utils/logger';
+import { ChannelAdapter, IncomingMessage, OutgoingMessage } from '../base';
+import { logger } from '../../utils/logger';
+import crypto from 'crypto';
 
 export interface LineConfig {
   channelAccessToken: string;
   channelSecret: string;
+  webhookSecret?: string;  // Webhook URL 的安全令牌
+  whitelist?: string[];    // 白名單用戶 ID
 }
 
 export class LineChannel implements ChannelAdapter {
   readonly name = 'line';
   private client: LineClient;
   private config: LineConfig;
+  private webhookPath: string;  // 包含隨機字串的 webhook 路徑
 
   constructor(config: LineConfig) {
     this.config = config;
     this.client = new LineClient({
       channelAccessToken: config.channelAccessToken,
     });
+    
+    // 生成安全的 webhook 路徑（包含隨機字串）
+    this.webhookPath = config.webhookSecret || this.generateWebhookSecret();
+  }
+  
+  /**
+   * 生成隨機的 webhook 密鑰
+   */
+  private generateWebhookSecret(): string {
+    return crypto.randomBytes(32).toString('hex');
+  }
+  
+  /**
+   * 獲取完整的 webhook URL（含安全路徑）
+   */
+  getWebhookPath(): string {
+    return `/webhook/line/${this.webhookPath}`;
+  }
+  
+  /**
+   * 驗證請求是否來自白名單用戶
+   */
+  isWhitelisted(userId: string): boolean {
+    // 如果沒有設定白名單，允許所有用戶
+    if (!this.config.whitelist || this.config.whitelist.length === 0) {
+      logger.info(`No whitelist configured, allowing user: ${userId}`);
+      return true;
+    }
+    
+    const allowed = this.config.whitelist.includes(userId);
+    if (!allowed) {
+      logger.warn(`User ${userId} not in whitelist, rejecting request`);
+    }
+    return allowed;
+  }
+  
+  /**
+   * 添加用戶到白名單
+   */
+  async addToWhitelist(userId: string): Promise<void> {
+    if (!this.config.whitelist) {
+      this.config.whitelist = [];
+    }
+    
+    if (!this.config.whitelist.includes(userId)) {
+      this.config.whitelist.push(userId);
+      logger.info(`Added user ${userId} to whitelist`);
+      
+      // 通知用戶已加入白名單
+      await this.sendTextMessage(userId, '✅ 你已被加入白名單，現在可以使用 VSMONSTER 了！');
+    }
   }
 
   async initialize(): Promise<void> {
@@ -49,6 +104,20 @@ export class LineChannel implements ChannelAdapter {
       userId = source.userId || 'unknown';
       groupId = source.roomId;
     } else {
+      return null;
+    }
+    
+    // 白名單檢查
+    if (!this.isWhitelisted(userId)) {
+      // 如果是第一次使用，引導用戶加入白名單
+      logger.info(`First time user detected: ${userId}, initiating whitelist onboarding`);
+      
+      // 非同步添加到白名單（不阻塞消息處理）
+      this.addToWhitelist(userId).catch(err => {
+        logger.error('Failed to add user to whitelist:', err);
+      });
+      
+      // 暫時拒絕處理，但已觸發加入白名單流程
       return null;
     }
 
