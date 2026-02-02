@@ -45,6 +45,15 @@ body {
 .header-title .icon {
   font-size: 16px;
 }
+.header-request-count {
+  font-size: 10px;
+  font-weight: 500;
+  color: #888;
+  background: rgba(128, 128, 128, 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
+}
 .header-right {
   display: flex;
   align-items: center;
@@ -130,6 +139,24 @@ body {
 }
 .custom-select-option.selected .check-mark {
   opacity: 1;
+}
+.custom-select-option .multiplier-badge {
+  margin-left: auto;
+  font-size: 10px;
+  color: #888;
+  background: rgba(128, 128, 128, 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.custom-select-option .multiplier-badge.free {
+  color: #4caf50;
+  background: rgba(76, 175, 80, 0.15);
+  font-weight: 600;
+}
+.custom-select-divider {
+  height: 1px;
+  background: rgba(128, 128, 128, 0.3);
+  margin: 4px 8px;
 }
 .select-pill {
   display: none;

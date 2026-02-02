@@ -21,6 +21,7 @@ export const WEBVIEW_HTML_TEMPLATE = `<!DOCTYPE html>
       <div class="header-title" id="headerTitle">
         <span class="header-emoji" id="headerEmoji">👾</span>
         <span id="headerTitleText">BlueMonster</span>
+        <span class="header-request-count" id="headerRequestCount" hidden></span>
       </div>
     </div>
     <div class="header-right">

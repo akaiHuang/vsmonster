@@ -69,6 +69,7 @@ interface TaskState {
   activityFiles: ActivityFileEntry[];
   activityCommands: string[];
   referenceCount: number;
+  requestCount: number; // Copilot request 計數
   sessionAllowedCategories: Set<string>;
   pendingConfirmations: Map<string, (result: ConfirmationResult) => void>;
   pendingConfirmationDetails: Map<string, { command: string; category: string; timestamp: number }>;
@@ -91,6 +92,7 @@ function createTaskState(chatId: string, agentName: string, agentEmoji: string):
     activityFiles: [],
     activityCommands: [],
     referenceCount: 0,
+    requestCount: 0,
     sessionAllowedCategories: new Set(),
     pendingConfirmations: new Map(),
     pendingConfirmationDetails: new Map(),
@@ -249,7 +251,7 @@ class BlueMonsterSession {
     // 更新 UI 顯示
     this.broadcast({ type: 'history', messages: task.messages });
     this.broadcast({ type: 'busy', value: task.busy });
-    this.broadcast({ type: 'agentInfo', name: task.agentName, emoji: task.agentEmoji });
+    this.broadcast({ type: 'agentInfo', name: task.agentName, emoji: task.agentEmoji, requestCount: task.requestCount });
     if (task.thinkingLog.length > 0) {
       this.broadcast({ type: 'thinking', reset: true, text: task.thinkingLog.join('\n') });
     }
@@ -406,7 +408,8 @@ class BlueMonsterSession {
     webview.postMessage({ 
       type: 'agentInfo', 
       name: this.currentAgentName, 
-      emoji: this.currentAgentEmoji 
+      emoji: this.currentAgentEmoji,
+      requestCount: this.currentTask.requestCount
     });
     if (this.thinkingLog.length > 0) {
       webview.postMessage({ type: 'thinking', reset: true, text: this.thinkingLog.join('\n') });
@@ -1413,6 +1416,15 @@ class BlueMonsterSession {
         }
       }
       
+      // 增加 request 計數並更新 UI
+      this.currentTask.requestCount++;
+      this.broadcast({ 
+        type: 'agentInfo', 
+        name: this.currentTask.agentName, 
+        emoji: this.currentTask.agentEmoji, 
+        requestCount: this.currentTask.requestCount 
+      });
+      
       const chatResponse = await model.sendRequest(
         messages,
         {
@@ -1687,7 +1699,47 @@ class BlueMonsterSession {
         hint: 'No Copilot models available. Check Copilot login and plan.'
       };
     }
-    const options = models.map((model) => ({ id: model.id, label: model.name }));
+
+    const getModelMultiplier = (name: string): string => {
+      const lower = name.toLowerCase();
+      // 0x - 免費模型
+      if (lower.includes('gpt-4.1') || lower.includes('gpt-4o') || lower.includes('gpt-5 mini') || lower.includes('gpt-5-mini')) return '0x';
+      if (lower.includes('grok') || lower.includes('raptor')) return '0x';
+      // 0.33x - 便宜模型
+      if (lower.includes('haiku')) return '0.33x';
+      if (lower.includes('flash')) return '0.33x';
+      if (lower.includes('codex-mini')) return '0.33x';
+      // 10x - 最貴模型
+      if (lower.includes('opus 4.1') || lower.includes('opus-4.1')) return '10x';
+      // 3x - 昂貴模型
+      if (lower.includes('opus 4.5') || lower.includes('opus-4.5')) return '3x';
+      // 1x - 標準模型
+      return '1x';
+    };
+
+    const allOptions = models.map((model) => ({ 
+      id: model.id, 
+      label: model.name,
+      multiplier: getModelMultiplier(model.name)
+    }));
+
+    // 排序：0x 在最上面，然後 0.33x, 1x, 3x, 10x
+    const multiplierOrder: Record<string, number> = { '0x': 0, '0.33x': 1, '1x': 2, '3x': 3, '10x': 4 };
+    const sortedOptions = allOptions.sort((a, b) => {
+      const orderA = multiplierOrder[a.multiplier] ?? 99;
+      const orderB = multiplierOrder[b.multiplier] ?? 99;
+      if (orderA !== orderB) return orderA - orderB;
+      return a.label.localeCompare(b.label);
+    });
+
+    // 標記分組（用於前端顯示分隔線）
+    let lastMultiplier = '';
+    const options = sortedOptions.map((opt) => {
+      const isNewGroup = opt.multiplier !== lastMultiplier;
+      lastMultiplier = opt.multiplier;
+      return { ...opt, isNewGroup };
+    });
+
     return {
       backend: 'copilot',
       current: getPreferredModelId(),
@@ -2022,7 +2074,8 @@ class BlueMonsterSession {
         this.broadcast({ 
           type: 'agentInfo', 
           name: newTask.agentName, 
-          emoji: newTask.agentEmoji 
+          emoji: newTask.agentEmoji,
+          requestCount: newTask.requestCount
         });
         this.broadcast({ 
           type: 'toast', 
@@ -2643,7 +2696,7 @@ class BlueMonsterSession {
         ? `${task.agentEmoji} ${task.agentName}` 
         : chat.title;
       this.broadcast({ type: 'toast', text: `📋 Loaded: ${agentDisplay}` });
-      this.broadcast({ type: 'agentInfo', name: task.agentName, emoji: task.agentEmoji });
+      this.broadcast({ type: 'agentInfo', name: task.agentName, emoji: task.agentEmoji, requestCount: task.requestCount });
     }
   }
 
