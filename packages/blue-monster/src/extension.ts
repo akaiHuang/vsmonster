@@ -51,6 +51,53 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+// ========== TaskSession：每個任務的獨立狀態 ==========
+interface TaskState {
+  chatId: string;
+  createdAt: number;
+  agentName: string;
+  agentEmoji: string;
+  messages: UiMessage[];
+  busy: boolean;
+  thinkingLog: string[];
+  mode: 'chat' | 'agent' | 'agent-full';
+  hasUnsavedChanges: boolean;
+  stopRequested: boolean;
+  cancellation?: vscode.CancellationTokenSource;
+  cliProcess?: ChildProcess;
+  activitySteps: string[];
+  activityFiles: ActivityFileEntry[];
+  activityCommands: string[];
+  referenceCount: number;
+  sessionAllowedCategories: Set<string>;
+  pendingConfirmations: Map<string, (result: ConfirmationResult) => void>;
+  pendingConfirmationDetails: Map<string, { command: string; category: string; timestamp: number }>;
+  pendingChoices: Map<string, (result: ChoiceResult) => void>;
+}
+
+function createTaskState(chatId: string, agentName: string, agentEmoji: string): TaskState {
+  return {
+    chatId,
+    createdAt: Date.now(),
+    agentName,
+    agentEmoji,
+    messages: [],
+    busy: false,
+    thinkingLog: [],
+    mode: 'agent',
+    hasUnsavedChanges: false,
+    stopRequested: false,
+    activitySteps: [],
+    activityFiles: [],
+    activityCommands: [],
+    referenceCount: 0,
+    sessionAllowedCategories: new Set(),
+    pendingConfirmations: new Map(),
+    pendingConfirmationDetails: new Map(),
+    pendingChoices: new Map()
+  };
+}
+
 type UiMessageKind = 'text' | 'thought' | 'image' | 'file';
 
 interface UiMessage {
@@ -148,45 +195,95 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
 class BlueMonsterSession {
   private readonly context: vscode.ExtensionContext;
   private readonly views = new Set<vscode.Webview>();
-  private readonly messages: UiMessage[] = [];
   private currentModelLabel = 'Model: (auto)';
-  private busy = false;
-  private thinkingLog: string[] = [];
-  private pendingConfirmations = new Map<string, (result: ConfirmationResult) => void>();
-  private pendingConfirmationDetails = new Map<string, { command: string; category: string; timestamp: number }>();
-  private pendingChoices = new Map<string, (result: ChoiceResult) => void>();
-  private currentChatId = this.createChatId();
-  private currentChatCreatedAt = Date.now();
-  private currentAgentName = '';  // BlueMonster 的名稱
-  private currentAgentEmoji = ''; // BlueMonster 的 emoji
-  private hasUnsavedChanges = false;
-  private currentCancellation?: vscode.CancellationTokenSource;
-  private cliProcess?: ChildProcess;
-  private stopRequested = false;
-  private activitySteps: string[] = [];
-  private activityFiles: ActivityFileEntry[] = [];
-  private activityCommands: string[] = [];
-  private referenceCount = 0;
-  // 當前操作模式: 'chat' | 'agent' | 'agent-full'
-  private currentMode: 'chat' | 'agent' | 'agent-full' = 'agent';
-  // Session 記憶：這次對話中允許的危險類型
-  private sessionAllowedCategories = new Set<string>();
-
+  
+  // ========== 多任務管理 ==========
+  private readonly tasks = new Map<string, TaskState>();  // chatId -> TaskState
+  private activeChatId = '';  // 當前顯示的任務 ID
+  
   private saveTimeout?: NodeJS.Timeout;
   private static instance?: BlueMonsterSession;
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
     BlueMonsterSession.instance = this;
-    // 初始化第一個任務的 BlueMonster 名稱
-    this.initializeAgentName();
+    // 初始化第一個任務
+    this.createNewTask();
   }
 
-  private initializeAgentName(): void {
-    const usedNames = this.getUsedAgentNames();
-    this.currentAgentName = generateRandomName(usedNames);
-    this.currentAgentEmoji = getNameEmoji(this.currentAgentName);
+  // 取得當前活動任務
+  private get currentTask(): TaskState {
+    let task = this.tasks.get(this.activeChatId);
+    if (!task) {
+      // 如果沒有活動任務，創建一個新的
+      task = this.createNewTask();
+    }
+    return task;
   }
+
+  // 根據 chatId 取得任務（用於背景任務回應）
+  private getTask(chatId: string): TaskState | undefined {
+    return this.tasks.get(chatId);
+  }
+
+  // 創建新任務
+  private createNewTask(): TaskState {
+    const chatId = this.createChatId();
+    const usedNames = this.getUsedAgentNames();
+    const agentName = generateRandomName(usedNames);
+    const agentEmoji = getNameEmoji(agentName);
+    
+    const task = createTaskState(chatId, agentName, agentEmoji);
+    this.tasks.set(chatId, task);
+    this.activeChatId = chatId;
+    
+    return task;
+  }
+
+  // 切換到指定任務（只切換顯示，不中斷背景任務）
+  private switchToTask(chatId: string): boolean {
+    const task = this.tasks.get(chatId);
+    if (!task) return false;
+    
+    this.activeChatId = chatId;
+    // 更新 UI 顯示
+    this.broadcast({ type: 'history', messages: task.messages });
+    this.broadcast({ type: 'busy', value: task.busy });
+    this.broadcast({ type: 'agentInfo', name: task.agentName, emoji: task.agentEmoji });
+    if (task.thinkingLog.length > 0) {
+      this.broadcast({ type: 'thinking', reset: true, text: task.thinkingLog.join('\n') });
+    }
+    return true;
+  }
+
+  // 為了向後兼容，提供舊的屬性存取方式
+  private get messages(): UiMessage[] { return this.currentTask.messages; }
+  private get busy(): boolean { return this.currentTask.busy; }
+  private set busy(value: boolean) { this.currentTask.busy = value; }
+  private get thinkingLog(): string[] { return this.currentTask.thinkingLog; }
+  private get pendingConfirmations() { return this.currentTask.pendingConfirmations; }
+  private get pendingConfirmationDetails() { return this.currentTask.pendingConfirmationDetails; }
+  private get pendingChoices() { return this.currentTask.pendingChoices; }
+  private get currentChatId(): string { return this.activeChatId; }
+  private get currentChatCreatedAt(): number { return this.currentTask.createdAt; }
+  private get currentAgentName(): string { return this.currentTask.agentName; }
+  private get currentAgentEmoji(): string { return this.currentTask.agentEmoji; }
+  private get hasUnsavedChanges(): boolean { return this.currentTask.hasUnsavedChanges; }
+  private set hasUnsavedChanges(value: boolean) { this.currentTask.hasUnsavedChanges = value; }
+  private get currentCancellation() { return this.currentTask.cancellation; }
+  private set currentCancellation(value) { this.currentTask.cancellation = value; }
+  private get cliProcess() { return this.currentTask.cliProcess; }
+  private set cliProcess(value) { this.currentTask.cliProcess = value; }
+  private get stopRequested(): boolean { return this.currentTask.stopRequested; }
+  private set stopRequested(value: boolean) { this.currentTask.stopRequested = value; }
+  private get activitySteps(): string[] { return this.currentTask.activitySteps; }
+  private get activityFiles(): ActivityFileEntry[] { return this.currentTask.activityFiles; }
+  private get activityCommands(): string[] { return this.currentTask.activityCommands; }
+  private get referenceCount(): number { return this.currentTask.referenceCount; }
+  private set referenceCount(value: number) { this.currentTask.referenceCount = value; }
+  private get currentMode() { return this.currentTask.mode; }
+  private set currentMode(value) { this.currentTask.mode = value; }
+  private get sessionAllowedCategories() { return this.currentTask.sessionAllowedCategories; }
 
   static getInstance(): BlueMonsterSession | undefined {
     return BlueMonsterSession.instance;
@@ -208,26 +305,19 @@ class BlueMonsterSession {
 
   private getUsedAgentNames(): Set<string> {
     const history = this.context.globalState.get<ChatHistoryEntry[]>('chatHistories') || [];
-    return new Set(history.map(h => h.agentName).filter(Boolean));
+    // 也包含當前活動的任務名稱
+    const activeNames = Array.from(this.tasks.values()).map(t => t.agentName);
+    return new Set([...history.map(h => h.agentName).filter(Boolean), ...activeNames]);
   }
 
-  private resetCurrentChat(): void {
-    this.currentChatId = this.createChatId();
-    this.currentChatCreatedAt = Date.now();
-    this.hasUnsavedChanges = false;
-    // 為新任務生成隨機 BlueMonster 名稱
-    const usedNames = this.getUsedAgentNames();
-    this.currentAgentName = generateRandomName(usedNames);
-    this.currentAgentEmoji = getNameEmoji(this.currentAgentName);
-    // 清空 session 記憶
-    this.sessionAllowedCategories.clear();
-  }
+  // 不再需要 resetCurrentChat，改用 createNewTask
 
   private resetActivity(): void {
-    this.activitySteps = [];
-    this.activityFiles = [];
-    this.activityCommands = [];
-    this.referenceCount = 0;
+    const task = this.currentTask;
+    task.activitySteps = [];
+    task.activityFiles = [];
+    task.activityCommands = [];
+    task.referenceCount = 0;
   }
 
   private recordActivityStep(text: string): void {
@@ -347,12 +437,19 @@ class BlueMonsterSession {
       clearTimeout(this.saveTimeout);
       this.saveTimeout = undefined;
     }
-    await this.saveCurrentChatToHistory({ reason: 'deactivate', force: true });
+    // 保存所有任務
+    for (const task of this.tasks.values()) {
+      if (task.messages.length > 0) {
+        await this.saveTaskToHistory(task, { reason: 'deactivate', force: true });
+      }
+    }
   }
 
   clearHistory() {
-    this.messages.length = 0;
-    this.resetCurrentChat();
+    // 清空當前任務的訊息（用於 clear 指令）
+    this.currentTask.messages.length = 0;
+    this.currentTask.hasUnsavedChanges = false;
+    this.currentTask.sessionAllowedCategories.clear();
     this.broadcast({ type: 'history', messages: [] });
   }
 
@@ -1911,34 +2008,34 @@ class BlueMonsterSession {
       case 'clear':
         this.clearHistory();
         break;
-      case 'newChat':
-        // 如果正在執行任務，先停止它
-        if (this.busy) {
-          this.requestStop();
-          this.setBusy(false);
-          this.stopThinking();
-        }
-        // 保存當前對話到歷史記錄
+      case 'newChat': {
+        // 保存當前對話到歷史記錄（不中斷正在執行的任務！）
         if (this.messages.length > 0) {
           await this.saveCurrentChatToHistory();
         }
-        this.clearHistory();
-        // 通知 UI 新的 agent 資訊
+        // 創建新任務（舊任務繼續在背景執行）
+        const newTask = this.createNewTask();
+        // 更新 UI 顯示新任務
+        this.broadcast({ type: 'history', messages: [] });
+        this.broadcast({ type: 'busy', value: false });
         this.broadcast({ 
           type: 'agentInfo', 
-          name: this.currentAgentName, 
-          emoji: this.currentAgentEmoji 
+          name: newTask.agentName, 
+          emoji: newTask.agentEmoji 
         });
         this.broadcast({ 
           type: 'toast', 
-          text: `${this.currentAgentEmoji} ${this.currentAgentName} 準備好了！` 
+          text: `${newTask.agentEmoji} ${newTask.agentName} 準備好了！` 
         });
         break;
-      case 'getHistory':
+      }
+      case 'getHistory': {
         const query = typeof message?.query === 'string' ? message.query : '';
-        const histories = await this.getChatHistories(query);
+        // 合併歷史記錄和當前活動的任務
+        const histories = await this.getChatHistoriesWithActiveTasks(query);
         this.broadcast({ type: 'chatHistories', histories });
         break;
+      }
       case 'loadHistory':
         await this.loadChatHistory(message.id);
         break;
@@ -2330,42 +2427,219 @@ class BlueMonsterSession {
     }));
   }
 
-  // 新增：載入歷史對話
-  private async loadChatHistory(id: string): Promise<void> {
-    // 如果正在執行任務，先停止它
-    if (this.busy) {
-      this.requestStop();
-      this.setBusy(false);
-      this.stopThinking();
+  // 取得歷史記錄，並合併當前活動的任務（標記執行中的任務）
+  private async getChatHistoriesWithActiveTasks(query?: string): Promise<any[]> {
+    const history = await this.ensureHistoryIndex(
+      this.context.globalState.get<ChatHistoryEntry[]>('chatHistories') || []
+    );
+    const trimmedQuery = typeof query === 'string' ? query.trim() : '';
+    
+    // 將活動任務轉換為歷史格式
+    const activeTasks: any[] = [];
+    for (const task of this.tasks.values()) {
+      if (task.messages.length === 0) continue; // 跳過空任務
+      
+      const firstUserMsg = task.messages.find((m) => m.role === 'user' && m.text);
+      const title = firstUserMsg?.text?.substring(0, 50) || 'New Task';
+      const dateObj = new Date(task.createdAt);
+      const dateStr = dateObj.toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }) + 
+        ' ' + dateObj.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+      
+      activeTasks.push({
+        id: task.chatId,
+        taskId: '#LIVE', // 特殊標記：活動中的任務
+        agentName: task.agentName,
+        agentEmoji: task.agentEmoji,
+        title,
+        date: dateStr,
+        messageCount: task.messages.length,
+        preview: '',
+        isActive: true,
+        isBusy: task.busy
+      });
     }
     
+    // 過濾掉已在活動任務中的歷史記錄
+    const activeIds = new Set(activeTasks.map(t => t.id));
+    const filteredHistory = history.filter(h => !activeIds.has(h.id));
+    
+    if (!trimmedQuery) {
+      // 活動任務排在最前面
+      const historyItems = filteredHistory.map((entry) => ({
+        id: entry.id,
+        taskId: entry.taskId || '#????',
+        agentName: entry.agentName || '',
+        agentEmoji: entry.agentEmoji || '👾',
+        title: entry.title,
+        date: entry.date,
+        messageCount: entry.messageCount,
+        preview: entry.preview || '',
+        isActive: false,
+        isBusy: false
+      }));
+      return [...activeTasks, ...historyItems];
+    }
+
+    // 有搜尋詞時，搜尋活動任務和歷史記錄
+    const normalizedQuery = this.normalizeText(trimmedQuery);
+    const tokens = this.tokenize(normalizedQuery);
+    
+    // 簡單搜尋活動任務
+    const matchedActiveTasks = activeTasks.filter(t => 
+      t.title.toLowerCase().includes(trimmedQuery.toLowerCase()) ||
+      t.agentName.toLowerCase().includes(trimmedQuery.toLowerCase())
+    );
+    
+    // 搜尋歷史記錄
+    const results = filteredHistory
+      .map((entry) => {
+        const { score, matchCount } = this.scoreHistory(entry, tokens, normalizedQuery);
+        return { entry, score, matchCount };
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => {
+        const timeA = a.entry.updatedAt || a.entry.createdAt || 0;
+        const timeB = b.entry.updatedAt || b.entry.createdAt || 0;
+        return b.score - a.score || timeB - timeA;
+      });
+
+    const historyItems = results.map(({ entry, matchCount }) => ({
+      id: entry.id,
+      taskId: entry.taskId || '',
+      agentName: entry.agentName || '',
+      agentEmoji: entry.agentEmoji || '👾',
+      title: entry.title,
+      date: entry.date,
+      messageCount: entry.messageCount,
+      preview: entry.preview || '',
+      isActive: false,
+      isBusy: false,
+      matchCount
+    }));
+    
+    return [...matchedActiveTasks, ...historyItems];
+  }
+
+  // 保存指定任務到歷史記錄
+  private async saveTaskToHistory(task: TaskState, options?: { reason?: string; force?: boolean }): Promise<void> {
+    if (task.messages.length === 0) return;
+    if (!options?.force && !task.hasUnsavedChanges) return;
+
+    const history = this.context.globalState.get<ChatHistoryEntry[]>('chatHistories') || [];
+    const firstUserMsg = task.messages.find((m) => m.role === 'user' && m.text);
+    const title = firstUserMsg?.text?.substring(0, 50) || 'Untitled Chat';
+    const now = Date.now();
+    const clonedMessages = this.cloneMessages(task.messages);
+    const searchText = this.buildSearchText(clonedMessages);
+    const tokenCounts = this.buildTokenCounts(searchText);
+    const preview = this.buildHistoryPreview(clonedMessages);
+
+    const existingIndex = history.findIndex((entry) => entry.id === task.chatId);
+    const createdAt = existingIndex >= 0 ? history[existingIndex].createdAt : task.createdAt;
+    
+    let taskId: string;
+    let agentName = task.agentName;
+    let agentEmoji = task.agentEmoji;
+    
+    if (existingIndex >= 0 && history[existingIndex].taskId) {
+      taskId = history[existingIndex].taskId;
+    } else {
+      const existingIds = history
+        .map(h => h.taskId)
+        .filter(id => id && id.startsWith('#'))
+        .map(id => parseInt(id.slice(1), 10))
+        .filter(n => !isNaN(n));
+      const storedMaxId = this.context.globalState.get<number>('maxTaskId') || 0;
+      const maxId = Math.max(storedMaxId, existingIds.length > 0 ? Math.max(...existingIds) : 0);
+      const newId = maxId + 1;
+      taskId = '#' + String(newId).padStart(4, '0');
+      await this.context.globalState.update('maxTaskId', newId);
+    }
+    
+    const dateObj = new Date(now);
+    const dateStr = dateObj.toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }) + 
+      ' ' + dateObj.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+    
+    const entry: ChatHistoryEntry = {
+      id: task.chatId,
+      taskId,
+      agentName,
+      agentEmoji,
+      title,
+      date: dateStr,
+      messageCount: clonedMessages.length,
+      messages: clonedMessages,
+      createdAt,
+      updatedAt: now,
+      preview,
+      searchText,
+      tokenCounts
+    };
+
+    if (existingIndex >= 0) {
+      history.splice(existingIndex, 1);
+    }
+    history.unshift(entry);
+    if (history.length > MAX_HISTORY_ITEMS) {
+      history.length = MAX_HISTORY_ITEMS;
+    }
+
+    await this.context.globalState.update('chatHistories', history);
+    task.hasUnsavedChanges = false;
+  }
+
+  // 新增：載入歷史對話（或切換到活動任務）
+  private async loadChatHistory(id: string): Promise<void> {
+    // 首先檢查是否是當前活動的任務
+    if (this.tasks.has(id)) {
+      // 切換到該活動任務（不中斷任何任務！）
+      this.switchToTask(id);
+      const task = this.tasks.get(id)!;
+      const agentDisplay = task.agentEmoji && task.agentName 
+        ? `${task.agentEmoji} ${task.agentName}` 
+        : 'Task';
+      // 如果該任務正在執行，顯示狀態
+      if (task.busy) {
+        this.broadcast({ type: 'toast', text: `🔄 ${agentDisplay} 正在執行中...` });
+      } else {
+        this.broadcast({ type: 'toast', text: `📋 切換到 ${agentDisplay}` });
+      }
+      return;
+    }
+    
+    // 從歷史記錄中載入
     const history = await this.ensureHistoryIndex(
       this.context.globalState.get<ChatHistoryEntry[]>('chatHistories') || []
     );
     const chat = history.find((entry) => entry.id === id);
     
     if (chat && chat.messages) {
-      // 先保存當前對話
-      if (this.messages.length > 0) {
+      // 保存當前任務（如果有內容）
+      if (this.currentTask.messages.length > 0) {
         await this.saveCurrentChatToHistory();
       }
       
-      this.messages.length = 0;
-      this.messages.push(...chat.messages);
-      this.currentChatId = chat.id;
-      this.currentChatCreatedAt = chat.createdAt;
-      // 恢復該任務的 agent 名稱
-      this.currentAgentName = chat.agentName || '';
-      this.currentAgentEmoji = chat.agentEmoji || '👾';
-      this.hasUnsavedChanges = false;
-      this.broadcast({ type: 'history', messages: this.messages });
-      // 顯示 agent 名稱
-      const agentDisplay = this.currentAgentEmoji && this.currentAgentName 
-        ? `${this.currentAgentEmoji} ${this.currentAgentName}` 
+      // 從歷史創建新的活動任務
+      const task = createTaskState(
+        chat.id,
+        chat.agentName || generateRandomName(this.getUsedAgentNames()),
+        chat.agentEmoji || '👾'
+      );
+      task.messages.push(...chat.messages);
+      task.createdAt = chat.createdAt;
+      
+      // 加入活動任務列表
+      this.tasks.set(chat.id, task);
+      this.activeChatId = chat.id;
+      
+      // 更新 UI
+      this.broadcast({ type: 'history', messages: task.messages });
+      this.broadcast({ type: 'busy', value: false });
+      const agentDisplay = task.agentEmoji && task.agentName 
+        ? `${task.agentEmoji} ${task.agentName}` 
         : chat.title;
       this.broadcast({ type: 'toast', text: `📋 Loaded: ${agentDisplay}` });
-      // 通知 UI 當前的 agent 資訊
-      this.broadcast({ type: 'agentInfo', name: this.currentAgentName, emoji: this.currentAgentEmoji });
+      this.broadcast({ type: 'agentInfo', name: task.agentName, emoji: task.agentEmoji });
     }
   }
 

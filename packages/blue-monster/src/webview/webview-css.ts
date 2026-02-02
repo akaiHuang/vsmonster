@@ -974,6 +974,34 @@ body {
   color: var(--vscode-foreground);
   flex-shrink: 0;
 }
+.history-item-status {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.history-item-status.active {
+  color: #4caf50;
+  background: rgba(76, 175, 80, 0.15);
+}
+.history-item-status.busy {
+  color: #2196f3;
+  background: rgba(33, 150, 243, 0.15);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.history-item.active {
+  border-left: 2px solid #4caf50;
+  background: rgba(76, 175, 80, 0.05);
+}
+.history-item.busy {
+  border-left: 2px solid #2196f3;
+  background: rgba(33, 150, 243, 0.05);
+}
 .history-item-title {
   font-size: 12px;
   font-weight: 400;
