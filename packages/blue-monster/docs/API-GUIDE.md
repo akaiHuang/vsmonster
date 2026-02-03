@@ -103,19 +103,21 @@ const pendingList = await vscode.commands.executeCommand('blueMonster.getPending
 
 | 選項 | action 值 | 說明 |
 |------|-----------|------|
-| 1. Yes, BlueMonster 自我控制 | `'run'` | 同意執行 |
-| 2. Yes, and 在這次對話中永遠允許此類操作 | `'sessionAllow'` | 同意並記住本次對話 |
+| 1. Yes，開始執行 | `'run'` | 同意執行 |
+| 2. Yes，在這專案中永遠同意這件事 | `'projectAllow'` | 寫入 workspace 設定，之後同類操作不再詢問 |
 | 3. No | `'cancel'` | 拒絕執行 |
 | 4. 其他（輸入想法） | `'custom'` | 自定義回應 |
+
+> `sessionAllow` 仍保留向後相容，但 UI 預設使用 `projectAllow`。
 
 ```typescript
 // 同意執行
 await vscode.commands.executeCommand('blueMonster.respondToConfirmation', 
   'confirmation-id', 'run');
 
-// 同意並允許此類操作
+// 同意並在此專案永遠允許此類操作
 await vscode.commands.executeCommand('blueMonster.respondToConfirmation', 
-  'confirmation-id', 'sessionAllow');
+  'confirmation-id', 'projectAllow');
 
 // 拒絕
 await vscode.commands.executeCommand('blueMonster.respondToConfirmation', 
@@ -158,8 +160,8 @@ async function handleLineMessage(userId: string, text: string) {
     const pending = await sendToVSCode('blueMonster.getPendingConfirmations');
     if (pending.length > 0) {
       await sendToVSCode('blueMonster.respondToConfirmation', 
-        pending[0].id, 'sessionAllow');
-      return '✅ 已同意，後續同類操作不再詢問';
+        pending[0].id, 'projectAllow');
+      return '✅ 已同意，此專案後續同類操作不再詢問';
     }
   }
   
@@ -337,6 +339,7 @@ interface UiMessage {
 1. `Cmd+Shift+P` (macOS) 或 `Ctrl+Shift+P` (Windows/Linux)
 2. 輸入 "BlueMonster: Select Model"
 3. 選擇想要的模型
+4. 若為 GPT 模型，可選擇 Reasoning Effort 等級
 
 ### 方法 B：透過程式碼
 
@@ -354,31 +357,50 @@ vscode.postMessage({ type: 'requestModelOptions' });
 window.addEventListener('message', event => {
   if (event.data.type === 'modelOptions') {
     console.log('可用模型:', event.data.options);
-    // options: [{ label: 'GPT-4o', value: 'gpt-4o' }, ...]
+    // options: [{ id: 'gpt-5', label: 'GPT-5', reasoningOptions: ['low', 'medium', 'high'] }, ...]
+    console.log('當前 Reasoning:', event.data.currentReasoning);
   }
 });
 
-// 切換到指定模型
-vscode.postMessage({ type: 'applyModel', value: 'gpt-4o' });
+// 切換到指定模型（含 Reasoning Effort）
+vscode.postMessage({ 
+  type: 'applyModel', 
+  value: 'gpt-5',
+  reasoningEffort: 'high'  // 可選：low, medium, high, extra-high
+});
 ```
 
 ### 支援的模型
 
-| 模型值 | 說明 |
-|--------|------|
-| `gpt-4o` | GPT-4o (推薦) |
-| `gpt-4o-mini` | GPT-4o Mini (快速) |
-| `o1` | O1 推理模型 |
-| `o1-mini` | O1 Mini |
-| `o3-mini` | O3 Mini |
-| `claude-3.5-sonnet` | Claude 3.5 Sonnet |
-| `claude-3.7-sonnet` | Claude 3.7 Sonnet |
-| `claude-3.7-sonnet-thought` | Claude 3.7 Sonnet (Thought) |
-| `gemini-2.0-flash-001` | Gemini 2.0 Flash |
+| 模型值 | 說明 | Reasoning Effort |
+|--------|------|------------------|
+| `gpt-5` | GPT-5 | low, medium, high |
+| `gpt-5-mini` | GPT-5 Mini (快速) | low, medium, high |
+| `gpt-5.1` | GPT-5.1 | low, medium, high |
+| `gpt-5.1-codex` | GPT-5.1 Codex | low, medium, high |
+| `gpt-5.1-codex-mini` | GPT-5.1 Codex Mini | low, medium, high |
+| `gpt-5.1-codex-max` | GPT-5.1 Codex Max | low, medium, high, extra-high |
+| `gpt-5.2` | GPT-5.2 | low, medium, high |
+| `gpt-5.2-codex` | GPT-5.2 Codex | low, medium, high, extra-high |
+| `claude-sonnet-4` | Claude Sonnet 4 | - |
+| `claude-sonnet-4.5` | Claude Sonnet 4.5 | - |
+| `claude-opus-4.5` | Claude Opus 4.5 | - |
+| `gemini-3-pro-preview` | Gemini 3 Pro | - |
+
+### Reasoning Effort 等級
+
+GPT 模型支援不同的推理深度等級：
+
+| 等級 | 說明 | 適用場景 |
+|------|------|----------|
+| `low` | ⚡ 更快回應，較少推理 | 簡單任務、快速問答 |
+| `medium` | ⚖️ 平衡速度與深度（預設）| 一般開發任務 |
+| `high` | 🧠 深入推理，較慢回應 | 複雜問題、程式設計 |
+| `extra-high` | 🔥 最大推理深度 | 僅部分模型支援（如 GPT-5.2-Codex）|
 
 ### 方法 D：透過 UI 下拉選單
 
-在聊天介面頂部有模型選擇器，直接點選切換。
+在聊天介面頂部有模型選擇器，直接點選切換。選擇 GPT 模型時會顯示 Reasoning Effort 選項。
 
 ---
 
@@ -545,7 +567,7 @@ window.addEventListener('message', event => {
 | `exportChat` | 匯出對話 | - |
 | `stop` | 停止生成 | - |
 | `clear` | 清除對話 | - |
-| `applyModel` | 切換模型 | `value` |
+| `applyModel` | 切換模型 | `value`, `reasoningEffort?` |
 | `requestModelOptions` | 請求模型列表 | - |
 | `selectFiles` | 選擇檔案附件 | `includeActive?` |
 | `openFile` | 開啟檔案 | `path` |

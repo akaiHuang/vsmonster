@@ -2,6 +2,8 @@ import { Client as LineClient, middleware as lineMiddleware, WebhookEvent, TextM
 import { ChannelAdapter, IncomingMessage, OutgoingMessage } from '../base';
 import { logger } from '../../utils/logger';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 export interface LineConfig {
   channelAccessToken: string;
@@ -15,6 +17,7 @@ export class LineChannel implements ChannelAdapter {
   private client: LineClient;
   private config: LineConfig;
   private webhookPath: string;  // 包含隨機字串的 webhook 路徑
+  private whitelistPath: string;
 
   constructor(config: LineConfig) {
     this.config = config;
@@ -24,6 +27,9 @@ export class LineChannel implements ChannelAdapter {
     
     // 生成安全的 webhook 路徑（包含隨機字串）
     this.webhookPath = config.webhookSecret || this.generateWebhookSecret();
+
+    this.whitelistPath = path.join(process.cwd(), 'configs', 'line-whitelist.json');
+    this.loadWhitelist();
   }
   
   /**
@@ -46,8 +52,7 @@ export class LineChannel implements ChannelAdapter {
   isWhitelisted(userId: string): boolean {
     // 如果沒有設定白名單，允許所有用戶
     if (!this.config.whitelist || this.config.whitelist.length === 0) {
-      logger.info(`No whitelist configured, allowing user: ${userId}`);
-      return true;
+      return false;
     }
     
     const allowed = this.config.whitelist.includes(userId);
@@ -67,11 +72,43 @@ export class LineChannel implements ChannelAdapter {
     
     if (!this.config.whitelist.includes(userId)) {
       this.config.whitelist.push(userId);
+      this.saveWhitelist();
       logger.info(`Added user ${userId} to whitelist`);
       
       // 通知用戶已加入白名單
       await this.sendTextMessage(userId, '✅ 你已被加入白名單，現在可以使用 VSMONSTER 了！');
     }
+  }
+
+  private loadWhitelist(): void {
+    try {
+      if (fs.existsSync(this.whitelistPath)) {
+        const content = fs.readFileSync(this.whitelistPath, 'utf8');
+        const list = JSON.parse(content);
+        if (Array.isArray(list)) {
+          this.config.whitelist = Array.from(new Set([...(this.config.whitelist || []), ...list]));
+        }
+      } else if (this.config.whitelist && this.config.whitelist.length > 0) {
+        this.saveWhitelist();
+      }
+    } catch (error) {
+      logger.warn('Failed to load LINE whitelist:', error);
+    }
+  }
+
+  private saveWhitelist(): void {
+    try {
+      const list = this.config.whitelist || [];
+      fs.mkdirSync(path.dirname(this.whitelistPath), { recursive: true });
+      fs.writeFileSync(this.whitelistPath, JSON.stringify(list, null, 2));
+    } catch (error) {
+      logger.warn('Failed to save LINE whitelist:', error);
+    }
+  }
+
+  clearWhitelist(): void {
+    this.config.whitelist = [];
+    this.saveWhitelist();
   }
 
   async initialize(): Promise<void> {
@@ -107,20 +144,6 @@ export class LineChannel implements ChannelAdapter {
       return null;
     }
     
-    // 白名單檢查
-    if (!this.isWhitelisted(userId)) {
-      // 如果是第一次使用，引導用戶加入白名單
-      logger.info(`First time user detected: ${userId}, initiating whitelist onboarding`);
-      
-      // 非同步添加到白名單（不阻塞消息處理）
-      this.addToWhitelist(userId).catch(err => {
-        logger.error('Failed to add user to whitelist:', err);
-      });
-      
-      // 暫時拒絕處理，但已觸發加入白名單流程
-      return null;
-    }
-
     const message = event.message;
     const result: IncomingMessage = {
       channel: 'line',
@@ -162,7 +185,7 @@ export class LineChannel implements ChannelAdapter {
           type: 'file',
           id: message.id,
           fileName: message.fileName,
-          fileSize: message.fileSize,
+          fileSize: Number(message.fileSize),
         }];
         break;
       case 'location':

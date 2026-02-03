@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import dotenv from 'dotenv';
 import { ChannelsConfig } from '../channels/base';
 import { TunnelConfig } from '../tunnel/service';
 import { MCPConfig } from '../mcp/controller';
@@ -10,6 +11,7 @@ export interface VSMONSTERConfig {
   tunnel?: TunnelConfig;
   mcp?: MCPConfig;
   moltbotGatewayUrl?: string;
+  publicUrl?: string;
 }
 
 const DEFAULT_CONFIG: VSMONSTERConfig = {
@@ -17,10 +19,39 @@ const DEFAULT_CONFIG: VSMONSTERConfig = {
   channels: {},
 };
 
+function loadDotEnv(): void {
+  const candidates = [
+    path.join(process.cwd(), '.env'),
+    path.join(process.cwd(), '..', '.env'),
+    path.join(process.cwd(), '..', '..', '.env'),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      dotenv.config({ path: candidate });
+      return;
+    }
+  }
+}
+
+function isPlaceholder(value: string | undefined): boolean {
+  if (!value) {
+    return true;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return true;
+  }
+  const upper = trimmed.toUpperCase();
+  return upper.startsWith('YOUR_') || upper === 'CHANGEME';
+}
+
 /**
  * 載入配置文件
  */
 export function loadConfig(): VSMONSTERConfig {
+  loadDotEnv();
+
   // 嘗試多個可能的配置路徑
   const configPaths = [
     // 當前工作目錄
@@ -36,68 +67,95 @@ export function loadConfig(): VSMONSTERConfig {
     path.join(process.env.HOME || '', '.vsmonster', 'config.json'),
   ];
 
+  let fileConfig: VSMONSTERConfig | null = null;
   for (const configPath of configPaths) {
     if (fs.existsSync(configPath)) {
       try {
         const content = fs.readFileSync(configPath, 'utf-8');
         const config = JSON.parse(content);
-        return mergeConfig(DEFAULT_CONFIG, config);
+        fileConfig = mergeConfig(DEFAULT_CONFIG, config);
+        break;
       } catch (error) {
         console.error(`Failed to load config from ${configPath}:`, error);
       }
     }
   }
 
-  // 嘗試從環境變數載入
-  return loadConfigFromEnv();
+  if (!fileConfig) {
+    fileConfig = { ...DEFAULT_CONFIG };
+  }
+
+  return applyConfigFromEnv(fileConfig);
 }
 
 /**
  * 從環境變數載入配置
  */
-function loadConfigFromEnv(): VSMONSTERConfig {
-  const config: VSMONSTERConfig = { ...DEFAULT_CONFIG };
+function applyConfigFromEnv(config: VSMONSTERConfig): VSMONSTERConfig {
+  const merged: VSMONSTERConfig = {
+    ...config,
+    channels: { ...config.channels },
+    tunnel: config.tunnel ? { ...config.tunnel } : config.tunnel,
+    mcp: config.mcp ? { ...config.mcp } : config.mcp,
+  };
 
   // Port
   if (process.env.VSMONSTER_PORT) {
-    config.port = parseInt(process.env.VSMONSTER_PORT, 10);
+    merged.port = parseInt(process.env.VSMONSTER_PORT, 10);
+  }
+
+  if (!isPlaceholder(process.env.VSMONSTER_PUBLIC_URL)) {
+    merged.publicUrl = process.env.VSMONSTER_PUBLIC_URL as string;
   }
 
   // LINE
-  if (process.env.LINE_CHANNEL_ACCESS_TOKEN && process.env.LINE_CHANNEL_SECRET) {
-    config.channels.line = {
-      channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-      channelSecret: process.env.LINE_CHANNEL_SECRET,
-    };
+  if (!isPlaceholder(process.env.LINE_CHANNEL_ACCESS_TOKEN) && !isPlaceholder(process.env.LINE_CHANNEL_SECRET)) {
+    merged.channels.line = {
+      ...(merged.channels.line || {}),
+      channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN as string,
+      channelSecret: process.env.LINE_CHANNEL_SECRET as string,
+    } as any;
+  }
+  if (!isPlaceholder(process.env.LINE_WEBHOOK_SECRET)) {
+    merged.channels.line = {
+      ...(merged.channels.line || {}),
+      webhookSecret: process.env.LINE_WEBHOOK_SECRET as string,
+    } as any;
   }
 
   // Telegram
-  if (process.env.TELEGRAM_BOT_TOKEN) {
-    config.channels.telegram = {
-      botToken: process.env.TELEGRAM_BOT_TOKEN,
+  if (!isPlaceholder(process.env.TELEGRAM_BOT_TOKEN)) {
+    merged.channels.telegram = {
+      ...(merged.channels.telegram || {}),
+      botToken: process.env.TELEGRAM_BOT_TOKEN as string,
       webhookUrl: process.env.TELEGRAM_WEBHOOK_URL,
     };
   }
 
   // Discord
-  if (process.env.DISCORD_BOT_TOKEN && process.env.DISCORD_APPLICATION_ID) {
-    config.channels.discord = {
-      botToken: process.env.DISCORD_BOT_TOKEN,
-      applicationId: process.env.DISCORD_APPLICATION_ID,
-      publicKey: process.env.DISCORD_PUBLIC_KEY || undefined,
+  if (
+    !isPlaceholder(process.env.DISCORD_BOT_TOKEN) &&
+    !isPlaceholder(process.env.DISCORD_APPLICATION_ID)
+  ) {
+    merged.channels.discord = {
+      ...(merged.channels.discord || {}),
+      botToken: process.env.DISCORD_BOT_TOKEN as string,
+      applicationId: process.env.DISCORD_APPLICATION_ID as string,
+      publicKey: process.env.DISCORD_PUBLIC_KEY || '',
     };
   }
 
   // Tunnel
   if (process.env.NGROK_AUTHTOKEN) {
-    config.tunnel = {
+    merged.tunnel = {
+      ...(merged.tunnel || {}),
       enabled: process.env.NGROK_ENABLED !== 'false',
       authtoken: process.env.NGROK_AUTHTOKEN,
       region: (process.env.NGROK_REGION as any) || 'ap',
     };
   }
 
-  return config;
+  return merged;
 }
 
 /**

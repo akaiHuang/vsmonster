@@ -1,0 +1,171 @@
+{
+  "name": "ufo-control-center",
+  "displayName": "UFO Control Center",
+  "description": "UFO Control Center - Task spec and handoff manager for VSMONSTER",
+  "version": "0.0.1",
+  "publisher": "vsmonster",
+  "license": "MIT",
+  "icon": "resources/ufo.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other",
+    "Chat",
+    "AI"
+  ],
+  "activationEvents": [
+    "onView:ufoTasks",
+    "onCommand:ufo.createTaskSpec",
+    "onCommand:ufo.openTools",
+    "onCommand:ufo.refreshQueue"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ufo.createTaskSpec",
+        "title": "UFO: Create Task Spec"
+      },
+      {
+        "command": "ufo.openTools",
+        "title": "UFO: Open Tools"
+      },
+      {
+        "command": "ufo.refreshQueue",
+        "title": "UFO: Refresh Task Queue"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ufo",
+          "title": "UFO",
+          "icon": "resources/ufo.png"
+        }
+      ]
+    },
+    "views": {
+      "ufo": [
+        {
+          "id": "ufoTasks",
+          "name": "Tasks"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "ufo.createTaskSpec",
+          "when": "view == ufoTasks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ufo.refreshQueue",
+          "when": "view == ufoTasks",
+          "group": "navigation@2"
+        },
+        {
+          "command": "ufo.openTools",
+          "when": "view == ufoTasks",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "UFO",
+      "properties": {
+        "ufo.gatewayUrl": {
+          "type": "string",
+          "default": "ws://localhost:3000",
+          "description": "Gateway WebSocket URL for UFO"
+        },
+        "ufo.gateway.port": {
+          "type": "number",
+          "default": 3000,
+          "description": "Gateway HTTP port (used to sync .env: VSMONSTER_PORT)"
+        },
+        "ufo.env.autoSync": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically sync UFO settings to the project .env file"
+        },
+        "ufo.line.channelAccessToken": {
+          "type": "string",
+          "default": "",
+          "description": "LINE Channel Access Token"
+        },
+        "ufo.line.channelSecret": {
+          "type": "string",
+          "default": "",
+          "description": "LINE Channel Secret"
+        },
+        "ufo.line.webhookSecret": {
+          "type": "string",
+          "default": "",
+          "description": "LINE Webhook Secret (fixed path segment)"
+        },
+        "ufo.telegram.botToken": {
+          "type": "string",
+          "default": "",
+          "description": "Telegram Bot Token"
+        },
+        "ufo.telegram.webhookUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Telegram Webhook URL (optional)"
+        },
+        "ufo.discord.botToken": {
+          "type": "string",
+          "default": "",
+          "description": "Discord Bot Token"
+        },
+        "ufo.discord.applicationId": {
+          "type": "string",
+          "default": "",
+          "description": "Discord Application ID"
+        },
+        "ufo.discord.publicKey": {
+          "type": "string",
+          "default": "",
+          "description": "Discord Public Key"
+        },
+        "ufo.publicUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Public base URL for approvals (syncs to VSMONSTER_PUBLIC_URL)"
+        },
+        "ufo.models.chat": {
+          "type": "string",
+          "default": "gpt-5-mini",
+          "description": "Copilot model id for UFO chat"
+        },
+        "ufo.models.spec": {
+          "type": "string",
+          "default": "gpt-5-mini",
+          "description": "Copilot model id for initial spec generation"
+        },
+        "ufo.models.opus": {
+          "type": "string",
+          "default": "opus-4.5",
+          "description": "Copilot model id for Opus refinement (optional)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production"
+  },
+  "devDependencies": {
+    "@types/node": "^20.x",
+    "@types/ws": "^8.5.10",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.x"
+  },
+  "dependencies": {
+    "ws": "8.19.0"
+  }
+}

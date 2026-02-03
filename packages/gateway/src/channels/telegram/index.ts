@@ -1,4 +1,4 @@
-import { Bot, Context, webhookCallback } from 'grammy';
+import { Bot, Context, InputFile, webhookCallback } from 'grammy';
 import { ChannelAdapter, IncomingMessage, OutgoingMessage } from '../base';
 import { logger } from '../../utils/logger';
 
@@ -144,16 +144,22 @@ export class TelegramChannel implements ChannelAdapter {
 
     // 圖片
     if (message.image) {
-      await this.bot.api.sendPhoto(chatId, message.image.url || message.image.buffer, {
-        caption: message.image.caption,
-      });
+      const photo = message.image.url ?? (message.image.buffer ? new InputFile(message.image.buffer) : undefined);
+      if (photo) {
+        await this.bot.api.sendPhoto(chatId, photo, {
+          caption: message.image.caption,
+        });
+      }
     }
 
     // 文件
     if (message.file) {
-      await this.bot.api.sendDocument(chatId, message.file.url || message.file.buffer, {
-        caption: message.file.caption,
-      });
+      const document = message.file.url ?? (message.file.buffer ? new InputFile(message.file.buffer) : undefined);
+      if (document) {
+        await this.bot.api.sendDocument(chatId, document, {
+          caption: message.file.caption,
+        });
+      }
     }
   }
 

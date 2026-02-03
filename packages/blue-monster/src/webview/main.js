@@ -30,9 +30,9 @@
   const modelSelectOptionsEl = document.getElementById('modelSelectOptions');
   const imageInputEl = document.getElementById('imageInput');
   const attachmentAreaEl = document.getElementById('attachmentArea');
-  const thinkingPanelEl = document.getElementById('thinkingPanel');
-  const thinkingBodyEl = document.getElementById('thinkingBody');
-  const thinkingLabelEl = document.getElementById('thinkingLabel');
+  const activityPanelEl = document.getElementById('activityPanel');
+  const activityStatusEl = document.getElementById('activityStatus');
+  const activityBodyEl = document.getElementById('activityBody');
   const confirmPanelEl = document.getElementById('confirmPanel');
   const confirmCommandEl = document.getElementById('confirmCommand');
   const confirmCwdEl = document.getElementById('confirmCwd');
@@ -52,15 +52,18 @@
   const modelApplyEl = document.getElementById('modelApply');
   const modelCancelEl = document.getElementById('modelCancel');
   const modelHintEl = document.getElementById('modelHint');
+  const reasoningSectionEl = document.getElementById('reasoningSection');
+  const reasoningSelectEl = document.getElementById('reasoningSelect');
 
   let pendingConfirmId = '';
-  let pendingModelBackend = '';
   let pendingChoiceId = '';
   let pendingChoiceCount = 0;
   let pendingImages = [];
   let pendingFiles = [];
   let isBusy = false;
   let hasContent = false;
+  let currentModelOptions = []; // 存儲模型選項以便查詢 reasoningOptions
+  let currentReasoningValue = 'medium';
 
   function escapeHtml(value) {
     return String(value ?? '')
@@ -189,29 +192,17 @@
     modelLabelEl.textContent = label || 'Model:';
   }
 
-  function setThinkingVisible(visible) {
-    if (!thinkingPanelEl) return;
-    thinkingPanelEl.hidden = !visible;
-    if (!visible && thinkingBodyEl) {
-      thinkingBodyEl.textContent = '';
+  function updateActivity(status, lines) {
+    if (!activityPanelEl) return;
+    const safeStatus = status || 'Idle';
+    const safeLines = Array.isArray(lines) ? lines.filter(Boolean) : [];
+    if (activityStatusEl) {
+      activityStatusEl.textContent = safeStatus;
     }
-  }
-
-  function resetThinking(text) {
-    if (!thinkingBodyEl) return;
-    thinkingBodyEl.textContent = text || '';
-    if (thinkingLabelEl) {
-      thinkingLabelEl.textContent = 'Thinking...';
+    if (activityBodyEl) {
+      activityBodyEl.innerHTML = safeLines.map(line => '<div class="activity-line">' + escapeHtml(line) + '</div>').join('');
     }
-  }
-
-  function appendThinking(text) {
-    if (!thinkingBodyEl) return;
-    if (!text) return;
-    if (thinkingBodyEl.textContent) {
-      thinkingBodyEl.textContent += '\n';
-    }
-    thinkingBodyEl.textContent += text;
+    activityPanelEl.hidden = safeStatus === 'Idle' && safeLines.length === 0;
   }
 
   // 當前確認的危險類別（用於 session 記憶）
@@ -389,8 +380,13 @@
 
   function showModelPanel(payload) {
     if (!modelSelectOptionsEl || !modelSelectTriggerEl) return;
-    pendingModelBackend = payload.backend || '';
     modelSelectOptionsEl.innerHTML = '';
+    currentModelOptions = payload.options || [];
+    currentReasoningValue = payload.currentReasoning || 'medium';
+    if (modelHintEl) {
+      modelHintEl.textContent = payload.hint || '';
+      modelHintEl.style.display = payload.hint ? 'block' : 'none';
+    }
 
     function createOption(value, label, selected) {
       const option = el('div', 'custom-select-option' + (selected ? ' selected' : ''));
@@ -399,12 +395,33 @@
       return option;
     }
 
-    if (pendingModelBackend === 'cli') {
-      const label = payload.current || 'CLI model';
-      modelSelectTriggerEl.textContent = truncateText(label, 12);
-      modelSelectOptionsEl.appendChild(createOption(payload.current || '', label, true));
-      currentModelValue = payload.current || '';
-      return;
+    // Reasoning Effort 標籤
+    const reasoningLabels = {
+      'low': '⚡ Low - 更快回應',
+      'medium': '⚖️ Medium - 平衡',
+      'high': '🧠 High - 深度推理',
+      'extra-high': '🔥 Extra High - 最大深度'
+    };
+
+    function updateReasoningOptions(modelId) {
+      if (!reasoningSectionEl || !reasoningSelectEl) return;
+      const model = currentModelOptions.find(m => m.id === modelId);
+      if (model && model.reasoningOptions && model.reasoningOptions.length > 0) {
+        reasoningSectionEl.style.display = 'block';
+        reasoningSelectEl.innerHTML = '';
+        model.reasoningOptions.forEach(opt => {
+          const option = document.createElement('option');
+          option.value = opt;
+          option.textContent = reasoningLabels[opt] || opt;
+          if (opt === currentReasoningValue || (opt === model.defaultReasoning && !currentReasoningValue)) {
+            option.selected = true;
+            currentReasoningValue = opt;
+          }
+          reasoningSelectEl.appendChild(option);
+        });
+      } else {
+        reasoningSectionEl.style.display = 'none';
+      }
     }
 
     if (Array.isArray(payload.options) && payload.options.length > 0) {
@@ -416,21 +433,31 @@
         if (isSelected) {
           modelSelectTriggerEl.textContent = truncateText(label, 12);
           currentModelValue = value;
+          updateReasoningOptions(value);
         }
+      });
+      // 監聽模型選擇變化以更新 reasoning 選項
+      modelSelectOptionsEl.querySelectorAll('.custom-select-option').forEach(opt => {
+        opt.addEventListener('click', () => {
+          updateReasoningOptions(opt.dataset.value);
+        });
       });
     } else {
       modelSelectTriggerEl.textContent = 'No models';
       modelSelectOptionsEl.appendChild(createOption('', 'No models', true));
+      if (reasoningSectionEl) reasoningSectionEl.style.display = 'none';
     }
   }
 
   function clearModelPanel() {
-    pendingModelBackend = '';
+    if (reasoningSectionEl) reasoningSectionEl.style.display = 'none';
+    if (modelHintEl) modelHintEl.style.display = 'none';
   }
 
   function applyModel() {
     if (!currentModelValue) return;
-    vscode.postMessage({ type: 'applyModel', value: currentModelValue });
+    const reasoning = reasoningSelectEl ? reasoningSelectEl.value : currentReasoningValue;
+    vscode.postMessage({ type: 'applyModel', value: currentModelValue, reasoningEffort: reasoning });
     clearModelPanel();
   }
 
@@ -455,7 +482,7 @@
     if (value === '1') {
       sendConfirmResponse('run');
     } else if (value === '2') {
-      sendConfirmResponse('sessionAllow');
+      sendConfirmResponse('projectAllow');
     } else if (value === '3') {
       sendConfirmResponse('cancel');
     } else if (value === '4') {
@@ -729,10 +756,6 @@
     sendEl.disabled = busy;
     sendEl.hidden = busy;
     stopEl.hidden = !busy;
-    setThinkingVisible(Boolean(busy));
-    if (busy) {
-      resetThinking('Thinking...');
-    }
   }
 
   function sendMessage() {
@@ -997,7 +1020,7 @@
       if (value === '1') {
         sendConfirmResponse('run');
       } else if (value === '2') {
-        sendConfirmResponse('sessionAllow');
+        sendConfirmResponse('projectAllow');
       } else if (value === '3') {
         sendConfirmResponse('cancel');
       } else if (value === '4') {
@@ -1059,17 +1082,8 @@
       appendMessage(message.message);
     } else if (message.type === 'busy') {
       setBusy(Boolean(message.value));
-    } else if (message.type === 'thinking') {
-      if (message.reset) {
-        resetThinking(String(message.text || ''));
-        setThinkingVisible(true);
-      } else if (message.text) {
-        appendThinking(String(message.text || ''));
-        setThinkingVisible(true);
-      }
-      if (message.done) {
-        setThinkingVisible(false);
-      }
+    } else if (message.type === 'activity') {
+      updateActivity(String(message.status || 'Idle'), message.lines || []);
     } else if (message.type === 'model') {
       setModelLabel(String(message.label || ''));
     } else if (message.type === 'confirm') {

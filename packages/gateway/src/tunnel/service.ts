@@ -46,7 +46,7 @@ export class TunnelService {
       // 連接 ngrok
       this.url = await ngrok.connect({
         addr: port,
-        region: this.config.region || 'ap',
+        region: (this.config.region as any) || 'ap',
         subdomain: this.config.subdomain,
       });
 

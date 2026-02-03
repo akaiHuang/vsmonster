@@ -7,9 +7,9 @@
 ## ✨ Features
 
 ### 🤖 AI-Powered Chat
-- **Multiple Modes**: Agent, Ask, Edit, and Plan modes for different use cases
-- **Copilot Integration**: Powered by VS Code Language Model API (GitHub Copilot)
-- **Smart Conversations**: Context-aware responses with conversation history
+- **Three Modes**: 計畫 / 代理-安全 / 代理-危險
+- **Copilot SDK**: SDK-only backend with parallel worker sessions
+- **Task Memory**: Each task has isolated context and history
 
 ### 🖼️ Image Analysis
 - Upload multiple images for AI analysis
@@ -19,7 +19,7 @@
 ### 💻 Terminal Integration
 - Execute shell commands directly from chat
 - View command output in the chat window
-- Confirmation prompts for safety
+- Confirmation prompts with 1/2/3/4 options (包含「專案永遠同意」)
 
 ### 📁 File Operations (Danger Mode)
 - Read, write, and open files
@@ -31,6 +31,12 @@
 - Switch between tasks without interrupting execution
 - Each task has independent state and chat history
 - Visual status indicators in task list
+
+### 🧠 Task Persona & Instructions
+- 每個任務建立獨立資料夾：`.bluemonster/tasks/<taskId>/`
+- 任務指引：`.vscode/copilot-instructions.md`
+- 個性設定：`.vscode/me.md`
+- 會在該任務的 system prompt 內被注入（確保生效）
 
 ## 🏷️ Task Status Tags
 
@@ -60,7 +66,7 @@ BlueMonster 使用狀態標籤幫助你追蹤任務狀態：
 ## 🚀 Quick Start
 
 1. **Open BlueMonster**: Click the BlueMonster icon in the Activity Bar (sidebar)
-2. **Select Mode**: Choose from Agent, Ask, Edit, or Plan
+2. **Select Mode**: Choose 計畫 / 代理-安全 / 代理-危險
 3. **Start Chatting**: Type your message and press Enter
 
 ## 📖 Commands
@@ -105,6 +111,13 @@ BlueMonster 提供三種操作模式，適合不同的使用場景：
 
 設定位置：VS Code Settings → 搜尋 `blueMonster.safeMode`
 
+#### ✅ 確認選項（安全模式）
+當出現確認視窗時，提供 1/2/3/4 選項：
+1. Yes，開始執行
+2. Yes，在這專案中永遠同意這件事（寫入 workspace settings）
+3. No，拒絕
+4. 其他想法（輸入自定義回覆）
+
 ### ⚡ 代理-危險模式 (Agent-Danger)
 - 所有命令自動執行，不需確認
 - 適合完全信任 AI 的自動化工作流程
@@ -114,10 +127,11 @@ BlueMonster 提供三種操作模式，適合不同的使用場景：
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `blueMonster.backend` | Chat backend (lm or cli) | `lm` |
 | `blueMonster.model` | Preferred Copilot model ID | (auto) |
+| `blueMonster.reasoningEffort` | Reasoning effort for supported models | `medium` |
 | `blueMonster.terminalConfirmation` | Terminal command confirmation mode | `chat` |
 | `blueMonster.dangerMode` | Enable file and VS Code command tools | `false` |
+| `blueMonster.safeMode.*` | Safe-mode confirmation toggles | `true` |
 
 ### Terminal Confirmation Modes
 

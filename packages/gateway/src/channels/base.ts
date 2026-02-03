@@ -137,6 +137,8 @@ export interface ChannelsConfig {
   line?: {
     channelAccessToken: string;
     channelSecret: string;
+    webhookSecret?: string;
+    whitelist?: string[];
   };
   telegram?: {
     botToken: string;

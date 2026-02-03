@@ -144,8 +144,6 @@ class BlueMonsterSession {
 | `countLineDiff(before, after)` | 計算文字的行數差異 (LCS 演算法) |
 | `extractHeredocWrite(command)` | 從 heredoc 命令提取路徑和內容 |
 | `extractRedirectTarget(command)` | 從命令提取重定向目標 |
-| `escapeShellArg(value)` | 轉義 shell 參數 |
-| `buildCliCommand(template, prompt, model?)` | 建構 CLI 命令 |
 | `normalizeText(value)` | 正規化文字 (小寫、去空白) |
 | `tokenize(value)` | 將文字分詞 (用於搜尋) |
 | `normalizeInput(input, validator)` | 通用輸入驗證 |
@@ -167,13 +165,10 @@ class BlueMonsterSession {
 | 函數 | 說明 |
 |------|------|
 | `getConfig()` | 取得 VS Code 配置物件 |
-| `getCliCommand()` | 取得 CLI 命令模板 |
-| `getCliModel()` | 取得 CLI 模型 |
-| `getCliCwd()` | 取得 CLI 工作目錄 |
+| `getReasoningEffort()` | 取得 Reasoning Effort（含舊設定相容） |
 | `getTerminalConfirmationMode()` | 取得終端機確認模式 |
 | `setTerminalConfirmationMode(mode)` | 設定終端機確認模式 |
 | `getDangerModeEnabled()` | 取得是否啟用 Danger Mode |
-| `getBackend()` | 取得後端類型 (copilot/cli) |
 | `getPreferredModelId()` | 取得偏好的模型 ID |
 | `getMcpAutoStart()` | 取得 MCP 是否自動啟動 |
 | `getMcpServers()` | 取得 MCP 伺服器配置列表 |

@@ -153,6 +153,32 @@ async function selectLanguage() {
     return 'en';
   }
 
+  if (process.env.VSMONSTER_LANG_CHOICE) {
+    const choice = process.env.VSMONSTER_LANG_CHOICE.trim();
+    if (choice === '2') {
+      return 'zh-TW';
+    }
+    if (choice === '1') {
+      return 'en';
+    }
+  }
+
+  // If stdin is not a TTY, fall back to saved preference or English.
+  if (!process.stdin.isTTY) {
+    try {
+      const configPath = path.join(__dirname, '..', '.vsmonster-config.json');
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        if (config.language === 'zh-TW') {
+          return 'zh-TW';
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return 'en';
+  }
+
   // In CI environment, default to English
   if (process.env.CI) {
     return 'en';

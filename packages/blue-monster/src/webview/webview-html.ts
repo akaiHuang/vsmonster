@@ -51,6 +51,10 @@ export const WEBVIEW_HTML_TEMPLATE = `<!DOCTYPE html>
     <div class="panel-title">🤖 Select Model</div>
     <div class="panel-meta" id="modelHint"></div>
     <select id="modelSelect" style="width: 100%; margin-bottom: 8px; padding: 8px; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border); border-radius: 4px;"></select>
+    <div id="reasoningSection" style="display: none; margin-bottom: 8px;">
+      <label style="display: block; margin-bottom: 4px; font-size: 12px; color: var(--vscode-descriptionForeground);">⚡ Reasoning Effort</label>
+      <select id="reasoningSelect" style="width: 100%; padding: 8px; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border); border-radius: 4px;"></select>
+    </div>
     <input id="modelInput" type="text" placeholder="Enter model name" style="width: 100%; margin-bottom: 8px; padding: 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px;" />
     <div class="panel-actions">
       <button class="btn-primary" id="modelApply">Apply</button>
@@ -96,19 +100,19 @@ export const WEBVIEW_HTML_TEMPLATE = `<!DOCTYPE html>
     <div class="confirm-options">
       <div class="confirm-option" data-value="1">
         <span class="option-num">1.</span>
-        <span>Yes，同意讓 BlueMonster <span id="confirmTaskName"></span></span>
+        <span>Yes，開始執行 <span id="confirmTaskName"></span></span>
       </div>
       <div class="confirm-option" data-value="2">
         <span class="option-num">2.</span>
-        <span>Yes，且此類操作後續不再詢問</span>
+        <span>Yes，在這專案中永遠同意這件事</span>
       </div>
       <div class="confirm-option" data-value="3">
         <span class="option-num">3.</span>
-        <span>No，取消執行</span>
+        <span>No，拒絕</span>
       </div>
       <div class="confirm-option" data-value="4">
         <span class="option-num">4.</span>
-        <span>其他（輸入想法）</span>
+        <span>其他想法</span>
       </div>
     </div>
     <div class="confirm-input-wrap">
@@ -131,12 +135,12 @@ export const WEBVIEW_HTML_TEMPLATE = `<!DOCTYPE html>
     <div class="confirm-hint">💡 輸入數字選擇方案，或直接輸入您的想法</div>
   </div>
   
-  <div class="thinking-panel" id="thinkingPanel" hidden>
-    <div class="thinking-header">
+  <div class="activity-panel" id="activityPanel" hidden>
+    <div class="activity-header">
       <div class="spinner"></div>
-      <span id="thinkingLabel">Thinking...</span>
+      <span id="activityStatus" class="activity-status">Idle</span>
     </div>
-    <div class="thinking-body" id="thinkingBody"></div>
+    <div class="activity-body" id="activityBody"></div>
   </div>
   
   <div class="input-area">

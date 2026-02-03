@@ -18,6 +18,18 @@ const CORE_RULES = `你是 BlueMonster，VS Code 開發助手。協助使用者�
 1. TERMINAL (zsh)
    - 禁止使用 shell 註解 (#)，會導致 "zsh: command not found"
    - 禁止多行腳本，所有指令用 && 串接在同一行
+   - 輸出的指令必須是完全可執行的，不要假設變數在環境中已定義 (例如不要用 $EDITOR)
+   - 禁止使用 "code --execute-command"，此環境可能不存在 "code" 指令
+
+2. CORE IDENTITY
+   - 當被問及「你是什麼模型」時，必須包含推理強度設定 (Reasoning Effort)。
+   - 格式範例：gpt-5-mini (low ⚡), gpt-5 (high 🧠), gpt-4o (medium ⚖️)
+   - 如果不確定，就回答 "gpt-5-mini (low ⚡)" 作為預設值。
+   - 絕對禁止在回答模型時只說型號而忽略推理強度。
+   - 除非使用者明確詢問「你是什麼模型/用哪個模型」，否則不要主動提到模型名稱或推理強度。
+
+3. FILE OPERATIONS
+
    - 正確: printf "%s\\n" "line 1" "line 2"
    - 正確: echo "a" && echo "b"
    - 錯誤: # this is a comment
@@ -54,7 +66,7 @@ const CORE_RULES = `你是 BlueMonster，VS Code 開發助手。協助使用者�
 </escalation>
 
 <self_control>
-自我控制指令（透過 blueMonster_vsCommand 執行，安全模式需使用者確認）:
+自我控制指令（透過 blueMonster_executeVsCodeCommand 工具執行，安全模式需使用者確認）:
 
 模型切換:
 - blueMonster.listModels: 列出所有可用模型（附帶編號）
@@ -88,6 +100,7 @@ const CORE_RULES = `你是 BlueMonster，VS Code 開發助手。協助使用者�
 3. **一般原則**:
    - 每個意圖只執行一個最精確的自我控制指令。
    - 相信指令的回傳結果，不要多此一舉。
+- **不要** 透過終端機執行 VS Code 命令（例如 "code --execute-command"），一律使用 "blueMonster_executeVsCodeCommand" 工具。
 </self_control>`;
 
 // ============================================================
@@ -209,6 +222,12 @@ export type ModelType = 'claude' | 'gpt' | 'gemini';
 export interface BuildPromptOptions {
   /** 是否啟用 Danger Mode 工具 */
   dangerMode?: boolean;
+  /** 當前使用的模型名稱（用於告訴 AI 它是什麼模型） */
+  modelName?: string;
+  /** 當前的代理模式 */
+  agentMode?: 'chat' | 'agent' | 'agent-full';
+  /** 當前的推理強度 */
+  reasoningEffort?: string;
 }
 
 /**
@@ -239,7 +258,7 @@ export function detectModelType(modelName: string): ModelType {
  * @returns 完整的 system prompt
  */
 export function buildPrompt(model: ModelType, options: BuildPromptOptions = {}): string {
-  const { dangerMode = false } = options;
+  const { dangerMode = false, modelName, agentMode, reasoningEffort } = options;
 
   const patch = MODEL_PATCHES[model];
   if (patch === undefined) {
@@ -255,6 +274,29 @@ export function buildPrompt(model: ModelType, options: BuildPromptOptions = {}):
   if (dangerMode) {
     prompt += '\n' + DANGER_MODE_ADDON;
   }
+
+  // 加入當前配置資訊
+  if (modelName || agentMode) {
+    const modeLabels: Record<string, string> = {
+      'chat': '計畫模式（僅討論，不執行任何操作）',
+      'agent': '代理-安全模式（執行前需使用者確認）',
+      'agent-full': '代理-危險模式（自動執行，無需確認）'
+    };
+    
+    // 嘗試從 extension 全域 Config 取得 reasoning effort
+    // // 注意：這裡是純函數，無法讀取 vscode.workspace，需由呼叫者傳入。
+    // // 目前我們在 extension.ts 使用時，通常無法動態注入 reasoning
+    // // 但我們可以用一個特殊的 placeholder，或者要求 extension.ts 調用前先準備好
+    
+    prompt += `\n\n<current_config>
+當前配置:
+- 模型: ${modelName || '未指定'}
+- 模式: ${agentMode ? modeLabels[agentMode] || agentMode : '未指定'}
+- Reasoning Effort: ${reasoningEffort || 'medium'} (若未指定，請預設視為 standard/medium)
+注意：除非使用者詢問，請勿主動提及以上配置細節。
+</current_config>`;
+  }
+
 
   return prompt;
 }

@@ -28,9 +28,11 @@ scripts/*.local.sh
 # ============================================
 configs/config.json
 configs/config.local.json
+configs/line-whitelist.json
 .env
 .env.local
 .env.*.local
+UFO/tasks/
 
 # ============================================
 # 💻 IDE
@@ -54,3 +56,4 @@ configs/config.local.json
 *.tgz
 coverage/
 .turbo/
+packages/blue-monster/devPrintshoot/

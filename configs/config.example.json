@@ -4,7 +4,9 @@
   "channels": {
     "line": {
       "channelAccessToken": "YOUR_LINE_CHANNEL_ACCESS_TOKEN",
-      "channelSecret": "YOUR_LINE_CHANNEL_SECRET"
+      "channelSecret": "YOUR_LINE_CHANNEL_SECRET",
+      "webhookSecret": "YOUR_LINE_WEBHOOK_SECRET",
+      "whitelist": []
     },
     "telegram": {
       "botToken": "YOUR_TELEGRAM_BOT_TOKEN"
@@ -20,24 +22,35 @@
       {
         "name": "filesystem",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/folder"],
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/path/to/allowed/folder"
+        ],
         "enabled": false
       },
       {
         "name": "puppeteer",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-puppeteer"
+        ],
         "enabled": false
       },
       {
         "name": "github",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-github"
+        ],
         "env": {
           "GITHUB_PERSONAL_ACCESS_TOKEN": ""
         },
         "enabled": false
       }
     ]
-  }
+  },
+  "publicUrl": "https://ufo.fawstudio.com"
 }

@@ -8,11 +8,10 @@ export {
   countLineDiff,
   extractHeredocWrite,
   extractRedirectTarget,
-  escapeShellArg,
-  buildCliCommand,
   normalizeText,
   tokenize,
-  normalizeInput
+  normalizeInput,
+  setupTaskFolder
 } from './helpers';
 
 // 從 terminal.ts 導出
@@ -26,17 +25,15 @@ export {
 export {
   CONFIG_SECTION,
   getConfig,
-  getCliCommand,
-  getCliModel,
-  getCliCwd,
+  getReasoningEffort,
   getTerminalConfirmationMode,
   setTerminalConfirmationMode,
   getDangerModeEnabled,
-  getBackend,
   getPreferredModelId,
   getMcpAutoStart,
   getMcpServers,
   getSafeModeSettings,
+  setSafeModeCategoryConfirmation,
   detectDangerousCommand,
   shouldConfirmCommand
 } from './config';

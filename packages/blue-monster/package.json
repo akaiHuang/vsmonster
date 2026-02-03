@@ -131,9 +131,15 @@
               "description": "Optional working directory (absolute path)"
             }
           },
-          "required": ["command"]
+          "required": [
+            "command"
+          ]
         },
-        "tags": ["terminal", "shell", "command"],
+        "tags": [
+          "terminal",
+          "shell",
+          "command"
+        ],
         "requiresConfirmation": true
       },
       {
@@ -154,9 +160,14 @@
               "items": {}
             }
           },
-          "required": ["command"]
+          "required": [
+            "command"
+          ]
         },
-        "tags": ["vscode", "command"],
+        "tags": [
+          "vscode",
+          "command"
+        ],
         "requiresConfirmation": true
       },
       {
@@ -172,9 +183,14 @@
               "description": "Absolute file path"
             }
           },
-          "required": ["path"]
+          "required": [
+            "path"
+          ]
         },
-        "tags": ["file", "read"],
+        "tags": [
+          "file",
+          "read"
+        ],
         "requiresConfirmation": true
       },
       {
@@ -194,9 +210,15 @@
               "description": "File content"
             }
           },
-          "required": ["path", "content"]
+          "required": [
+            "path",
+            "content"
+          ]
         },
-        "tags": ["file", "write"],
+        "tags": [
+          "file",
+          "write"
+        ],
         "requiresConfirmation": true
       },
       {
@@ -216,9 +238,14 @@
               "description": "Open in preview mode (optional)"
             }
           },
-          "required": ["path"]
+          "required": [
+            "path"
+          ]
         },
-        "tags": ["file", "open"],
+        "tags": [
+          "file",
+          "open"
+        ],
         "requiresConfirmation": true
       },
       {
@@ -230,40 +257,27 @@
           "type": "object",
           "properties": {}
         },
-        "tags": ["window", "vscode"],
+        "tags": [
+          "window",
+          "vscode"
+        ],
         "requiresConfirmation": true
       }
     ],
     "configuration": {
       "title": "BlueMonster",
       "properties": {
-        "blueMonster.backend": {
+        "blueMonster.reasoningEffort": {
           "type": "string",
-          "default": "lm",
-          "enum": [
-            "lm",
-            "cli"
-          ],
+          "default": "medium",
+          "enum": ["low", "medium", "high", "extra-high"],
           "enumDescriptions": [
-            "Use VS Code Language Model API (Copilot)",
-            "Use a local CLI command"
+            "Low - 更快回應，較少推理",
+            "Medium - 平衡速度與推理深度（預設）",
+            "High - 更深入推理，較慢回應",
+            "Extra High - 最大推理深度，最慢回應（僅部分模型支援）"
           ],
-          "description": "Chat backend for BlueMonster"
-        },
-        "blueMonster.cliCommand": {
-          "type": "string",
-          "default": "",
-          "description": "CLI command template. Use {prompt} as placeholder for the user message (and {model} for the CLI model if needed)."
-        },
-        "blueMonster.cliCwd": {
-          "type": "string",
-          "default": "",
-          "description": "Working directory for CLI backend (optional)"
-        },
-        "blueMonster.cliModel": {
-          "type": "string",
-          "default": "",
-          "description": "Model name for CLI backend (optional). Use {model} in cliCommand."
+          "description": "GPT 模型的 Reasoning Effort 等級"
         },
         "blueMonster.model": {
           "type": "string",
@@ -345,6 +359,19 @@
           "default": true,
           "description": "⚡ 系統操作 - 在安全模式下確認 reboot, shutdown, eval, exec 等命令"
         },
+        "blueMonster.maxConcurrentTasks": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "🏭 最多同時執行幾個任務 (1-10)。超過的任務會排隊等待。"
+        },
+        "blueMonster.requestBudget": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "💰 Request 預算上限 (0 = 無限制)。達到上限後所有任務會暫停。根據模型 multiplier 計算 (0x 免費, 0.33x, 1x, 3x, 10x)。"
+        },
         "blueMonster.mcpAutoStart": {
           "type": "boolean",
           "default": true,
@@ -356,7 +383,10 @@
           "description": "MCP server configurations for BlueMonster to spawn as child processes.",
           "items": {
             "type": "object",
-            "required": ["name", "command"],
+            "required": [
+              "name",
+              "command"
+            ],
             "properties": {
               "name": {
                 "type": "string",
@@ -406,5 +436,8 @@
     "@types/vscode": "^1.90.0",
     "esbuild": "^0.20.0",
     "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@github/copilot-sdk": "^0.1.20"
   }
 }

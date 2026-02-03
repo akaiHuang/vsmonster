@@ -1,7 +1,6 @@
 import { ChannelAdapter, ChannelsConfig, IncomingMessage, OutgoingMessage } from './base';
 import { LineChannel } from './line';
 import { TelegramChannel } from './telegram';
-import { DiscordChannel } from './discord';
 import { logger } from '../utils/logger';
 
 /**
@@ -55,6 +54,9 @@ export class ChannelManager {
 
     // Discord
     if (this.config.discord) {
+      // Lazy import to avoid loading Discord when not configured.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { DiscordChannel } = require('./discord');
       const discordChannel = new DiscordChannel(this.config.discord);
       // 設定 Discord 訊息處理器
       if (this.messageHandler) {
@@ -62,7 +64,7 @@ export class ChannelManager {
       }
       this.channels.set('discord', discordChannel);
       initPromises.push(
-        discordChannel.initialize().catch(err => {
+        discordChannel.initialize().catch((err: unknown) => {
           logger.error('Failed to initialize Discord channel:', err);
         })
       );

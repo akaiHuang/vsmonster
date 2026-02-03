@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { exec as execCallback, spawn, ChildProcess } from 'child_process';
-import { promisify } from 'util';
+import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { WEBVIEW_CSS, WEBVIEW_JS, WEBVIEW_HTML_TEMPLATE } from './webview';
 import { buildPrompt, detectModelType } from './prompts';
@@ -10,15 +9,15 @@ import {
   TOOL_NAME, VS_COMMAND_TOOL_NAME, READ_FILE_TOOL_NAME,
   WRITE_FILE_TOOL_NAME, OPEN_FILE_TOOL_NAME, SWITCH_WINDOW_TOOL_NAME, SEARCH_TASKS_TOOL_NAME,
   // Helpers
-  countLineDiff, extractHeredocWrite, extractRedirectTarget, escapeShellArg,
-  buildCliCommand, normalizeText, tokenize,
+  countLineDiff, extractHeredocWrite, extractRedirectTarget,
+  normalizeText, tokenize, setupTaskFolder,
   // Terminal
   setupTerminalCloseHandler, getTerminal, disposeTerminal,
   // Config
-  getConfig, getCliCommand, getCliModel, getCliCwd,
-  getTerminalConfirmationMode, setTerminalConfirmationMode, getDangerModeEnabled, getBackend,
+  getConfig, getReasoningEffort,
+  getTerminalConfirmationMode, setTerminalConfirmationMode, getDangerModeEnabled,
   getPreferredModelId, getMcpAutoStart, getMcpServers,
-  getSafeModeSettings, shouldConfirmCommand,
+  getSafeModeSettings, setSafeModeCategoryConfirmation, shouldConfirmCommand,
   // Tools
   terminalToolDefinition, vsCodeCommandToolDefinition, readFileToolDefinition,
   writeFileToolDefinition, openFileToolDefinition, switchWindowToolDefinition, searchTasksToolDefinition,
@@ -33,7 +32,6 @@ import type {
   RunInTerminalInput, VsCodeCommandInput, ReadFileInput, WriteFileInput, OpenFileInput
 } from './utils';
 
-const exec = promisify(execCallback);
 
 const VIEW_ID = 'blueMonster.chatView';
 const MAX_TOOL_TURNS = 8;
@@ -41,6 +39,50 @@ const MAX_HISTORY_ITEMS = 100;
 const MAX_HISTORY_TEXT_CHARS = 20000;
 const MAX_MEMORY_MATCHES = 3;
 const MAX_MEMORY_CONTEXT_CHARS = 1200;
+
+// Copilot SDK 支援的模型列表（含 Reasoning Effort 選項）
+const SDK_MODELS = [
+  // Claude 系列
+  { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', multiplier: '0.33x' },
+  { id: 'claude-sonnet-4', label: 'Claude Sonnet 4', multiplier: '1x' },
+  { id: 'claude-sonnet-4.5', label: 'Claude Sonnet 4.5', multiplier: '1x' },
+  { id: 'claude-opus-4.5', label: 'Claude Opus 4.5', multiplier: '3x' },
+  // Gemini 系列
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', multiplier: '1x' },
+  { id: 'gemini-3-flash', label: 'Gemini 3 Flash', multiplier: '0.33x' },
+  { id: 'gemini-3-pro', label: 'Gemini 3 Pro', multiplier: '1x' },
+  // GPT 系列（部分支援 Reasoning Effort）
+  { id: 'gpt-4.1', label: 'GPT-4.1', multiplier: '0x' },
+  { id: 'gpt-4o', label: 'GPT-4o', multiplier: '0x' },
+  { id: 'gpt-5-mini', label: 'GPT-5 Mini', multiplier: '0x', reasoningOptions: ['low', 'medium', 'high'], defaultReasoning: 'medium' },
+  { id: 'gpt-5', label: 'GPT-5', multiplier: '1x', reasoningOptions: ['low', 'medium', 'high'], defaultReasoning: 'medium' },
+  { id: 'gpt-5-codex', label: 'GPT-5 Codex', multiplier: '1x', reasoningOptions: ['low', 'medium', 'high'], defaultReasoning: 'medium' },
+  { id: 'gpt-5.1', label: 'GPT-5.1', multiplier: '1x', reasoningOptions: ['low', 'medium', 'high'], defaultReasoning: 'medium' },
+  { id: 'gpt-5.1-codex', label: 'GPT-5.1 Codex', multiplier: '1x', reasoningOptions: ['low', 'medium', 'high'], defaultReasoning: 'high' },
+  { id: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Codex Mini', multiplier: '0.33x', reasoningOptions: ['low', 'medium', 'high'], defaultReasoning: 'medium' },
+  { id: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max', multiplier: '1x', reasoningOptions: ['low', 'medium', 'high', 'extra-high'], defaultReasoning: 'high' },
+  { id: 'gpt-5.2', label: 'GPT-5.2', multiplier: '1x', reasoningOptions: ['low', 'medium', 'high'], defaultReasoning: 'medium' },
+  { id: 'gpt-5.2-codex', label: 'GPT-5.2 Codex', multiplier: '1x', reasoningOptions: ['low', 'medium', 'high', 'extra-high'], defaultReasoning: 'high' },
+  // 其他
+  { id: 'grok-code-fast-1', label: 'Grok Code Fast 1', multiplier: '0x' },
+  { id: 'raptor-mini', label: 'Raptor Mini', multiplier: '0x' },
+];
+
+function supportsReasoningEffort(modelId: string): boolean {
+  const match = SDK_MODELS.find(m => m.id === modelId);
+  if (match?.reasoningOptions && match.reasoningOptions.length > 0) {
+    return true;
+  }
+  return /^gpt-5/.test(modelId);
+}
+
+// Suppress specific Node.js deprecation warnings (cleaner debug console)
+const originalEmitWarning = process.emitWarning;
+process.emitWarning = (warning, ...args) => {
+  if (typeof warning === 'string' && warning.includes('punycode')) return;
+  if (typeof warning === 'object' && warning.message && warning.message.includes('punycode')) return;
+  return originalEmitWarning.call(process, warning, ...args);
+};
 
 async function fileExists(filePath: string): Promise<boolean> {
   try {
@@ -51,29 +93,241 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+// ========== Copilot SDK - 真正的並行多工系統 ==========
+import { CopilotClient, CopilotSession } from '@github/copilot-sdk';
+
+function getMaxConcurrentTasks(): number {
+  return vscode.workspace.getConfiguration(CONFIG_SECTION).get<number>('maxConcurrentTasks', 3);
+}
+
+function getRequestBudget(): number {
+  return vscode.workspace.getConfiguration(CONFIG_SECTION).get<number>('requestBudget', 0);
+}
+
+// CopilotSDKManager - 管理真正的並行 Workers (每個 Task 獨立 Session)
+class CopilotSDKManager {
+  private client: CopilotClient | null = null;
+  private sessions: Map<string, CopilotSession> = new Map(); // chatId -> session
+  private sessionModels: Map<string, string> = new Map(); // chatId -> model (追蹤每個 session 使用的模型)
+  private busySessions: Set<string> = new Set(); // 正在執行請求的 session
+  private totalUsedBudget = 0;
+  private budgetExceeded = false;
+  private listeners: Array<() => void> = [];
+  private initPromise: Promise<void> | null = null;
+
+  // 初始化 Copilot Client
+  async initialize(): Promise<void> {
+    if (this.client) return;
+    if (this.initPromise) return this.initPromise;
+    
+    this.initPromise = (async () => {
+      try {
+        this.client = new CopilotClient({
+          autoStart: true,
+          autoRestart: true,
+          useLoggedInUser: true,
+          logLevel: 'warning'  // CLI accepts: none, error, warning, info, debug, all, default
+        });
+        await this.client.start();
+        console.log('[CopilotSDK] Client started - TRUE PARALLEL WORKERS enabled! 🏭');
+      } catch (err) {
+        console.error('[CopilotSDK] Failed to start client:', err);
+        this.client = null;
+        throw err;
+      }
+    })();
+    
+    return this.initPromise;
+  }
+
+  // 為任務創建獨立的 session (真正的並行 Worker)
+  async createWorker(chatId: string, model: string = 'gpt-4.1', reasoningEffort: string = 'medium'): Promise<CopilotSession> {
+    await this.initialize();
+    if (!this.client) {
+      throw new Error('Copilot SDK client not initialized');
+    }
+    
+    // 檢查預算
+    const budget = getRequestBudget();
+    if (budget > 0 && this.totalUsedBudget >= budget) {
+      this.budgetExceeded = true;
+      this.notifyListeners();
+      throw new Error(`預算已用盡 (${this.totalUsedBudget.toFixed(2)}/${budget})`);
+    }
+    
+    // 檢查是否已有 session，且模型是否改變
+    const existing = this.sessions.get(chatId);
+    const existingModel = this.sessionModels.get(chatId);
+    const modelKey = `${model}:${reasoningEffort}`;
+    
+    if (existing && existingModel === modelKey) {
+      // 模型相同，重用 session
+      return existing;
+    }
+    
+    if (existing && existingModel !== modelKey) {
+      // 模型改變，銷毀舊 session
+      console.log(`[CopilotSDK] 🔄 Model changed from ${existingModel} to ${modelKey}, recreating session...`);
+      try {
+        await existing.destroy();
+      } catch {}
+      this.sessions.delete(chatId);
+      this.sessionModels.delete(chatId);
+    }
+    
+    // 創建新的獨立 session - 這是真正的並行 Worker！
+    // 嘗試將 reasoning_effort 傳遞給 createSession
+    // 注意：SDK 型別可能尚未更新，使用 as any 繞過檢查
+    const sessionOpts: any = {
+      sessionId: `${chatId}-${Date.now()}`, // 加入時間戳確保唯一
+      model: model,
+      streaming: true,
+      infiniteSessions: { enabled: true }
+    };
+    
+    if (reasoningEffort && reasoningEffort !== 'medium') {
+      // 修正: 移除 reasoningEffort (camelCase) 以避免 API 錯誤
+      // 根據實測 CAPIError: 400 invalid_request_body，可能是多餘的參數導致
+      sessionOpts.reasoning_effort = reasoningEffort;
+    }
+
+    const session = await this.client.createSession(sessionOpts);
+    
+    this.sessions.set(chatId, session);
+    this.sessionModels.set(chatId, modelKey);
+    this.notifyListeners();
+    console.log(`[CopilotSDK] 🔵 Worker CREATED for ${chatId}, model: ${model}, reasoning: ${reasoningEffort}`);
+    return session;
+  }
+
+  // 取得已存在的 session
+  getWorker(chatId: string): CopilotSession | undefined {
+    return this.sessions.get(chatId);
+  }
+
+  // 標記 session 開始執行
+  markBusy(chatId: string): void {
+    this.busySessions.add(chatId);
+    this.notifyListeners();
+  }
+
+  // 標記 session 執行完成
+  markIdle(chatId: string): void {
+    this.busySessions.delete(chatId);
+    this.notifyListeners();
+  }
+
+  // 銷毀任務的 session
+  async destroyWorker(chatId: string): Promise<void> {
+    const session = this.sessions.get(chatId);
+    if (session) {
+      try {
+        await session.destroy();
+      } catch {}
+      this.sessions.delete(chatId);
+      this.sessionModels.delete(chatId);
+      this.busySessions.delete(chatId);
+      this.notifyListeners();
+      console.log(`[CopilotSDK] 🔴 Worker DESTROYED for ${chatId}`);
+    }
+  }
+
+  // 記錄 request 消耗
+  recordUsage(amount: number): void {
+    this.totalUsedBudget += amount;
+    const budget = getRequestBudget();
+    if (budget > 0 && this.totalUsedBudget >= budget) {
+      this.budgetExceeded = true;
+    }
+    this.notifyListeners();
+  }
+
+  // 重置預算
+  resetBudget(): void {
+    this.totalUsedBudget = 0;
+    this.budgetExceeded = false;
+    this.notifyListeners();
+  }
+
+  // 取得狀態
+  getStatus(): {
+    running: number;
+    total: number;
+    maxConcurrent: number;
+    usedBudget: number;
+    budget: number;
+    budgetExceeded: boolean;
+  } {
+    return {
+      running: this.busySessions.size,
+      total: this.sessions.size,
+      maxConcurrent: getMaxConcurrentTasks(),
+      usedBudget: this.totalUsedBudget,
+      budget: getRequestBudget(),
+      budgetExceeded: this.budgetExceeded
+    };
+  }
+
+  // 添加狀態監聽器
+  addListener(listener: () => void): () => void {
+    this.listeners.push(listener);
+    return () => {
+      const index = this.listeners.indexOf(listener);
+      if (index >= 0) this.listeners.splice(index, 1);
+    };
+  }
+
+  private notifyListeners(): void {
+    this.listeners.forEach(l => l());
+  }
+
+  // 關閉所有
+  async shutdown(): Promise<void> {
+    for (const [chatId, session] of this.sessions) {
+      try { await session.destroy(); } catch {}
+    }
+    this.sessions.clear();
+    this.sessionModels.clear();
+    this.busySessions.clear();
+    if (this.client) {
+      try { await this.client.stop(); } catch {}
+      this.client = null;
+    }
+    this.initPromise = null;
+    console.log('[CopilotSDK] 🛑 All workers shutdown');
+  }
+}
+
+// 全域 SDK Manager 實例 - 真正的並行工廠！
+const copilotSDK = new CopilotSDKManager();
+
 // ========== TaskSession：每個任務的獨立狀態 ==========
 interface TaskState {
   chatId: string;
   createdAt: number;
   agentName: string;
   agentEmoji: string;
+  taskFolder?: string; // 任務專屬資料夾路徑
   messages: UiMessage[];
   busy: boolean;
-  thinkingLog: string[];
+  activityStatus: string;
+  activityLines: string[];
   mode: 'chat' | 'agent' | 'agent-full';
   hasUnsavedChanges: boolean;
   stopRequested: boolean;
   cancellation?: vscode.CancellationTokenSource;
-  cliProcess?: ChildProcess;
   activitySteps: string[];
   activityFiles: ActivityFileEntry[];
   activityCommands: string[];
   referenceCount: number;
   requestCount: number; // Copilot request 計數
+  queuePosition: number; // 在佇列中的位置 (0 = 未排隊或執行中)
   sessionAllowedCategories: Set<string>;
   pendingConfirmations: Map<string, (result: ConfirmationResult) => void>;
   pendingConfirmationDetails: Map<string, { command: string; category: string; timestamp: number }>;
   pendingChoices: Map<string, (result: ChoiceResult) => void>;
+  lastToolProgressAt: number;
+  lastToolProgressMessage: string;
 }
 
 function createTaskState(chatId: string, agentName: string, agentEmoji: string): TaskState {
@@ -84,7 +338,8 @@ function createTaskState(chatId: string, agentName: string, agentEmoji: string):
     agentEmoji,
     messages: [],
     busy: false,
-    thinkingLog: [],
+    activityStatus: 'Idle',
+    activityLines: [],
     mode: 'agent',
     hasUnsavedChanges: false,
     stopRequested: false,
@@ -93,10 +348,13 @@ function createTaskState(chatId: string, agentName: string, agentEmoji: string):
     activityCommands: [],
     referenceCount: 0,
     requestCount: 0,
+    queuePosition: 0,
     sessionAllowedCategories: new Set(),
     pendingConfirmations: new Map(),
     pendingConfirmationDetails: new Map(),
-    pendingChoices: new Map()
+    pendingChoices: new Map(),
+    lastToolProgressAt: 0,
+    lastToolProgressMessage: ''
   };
 }
 
@@ -189,6 +447,7 @@ interface ConfirmationResult {
   approved: boolean;
   remember?: boolean;
   sessionAllow?: string; // 這次 session 允許的危險類型
+  projectAllow?: string; // 這個專案永遠允許的危險類型
   customResponse?: string; // 用戶自定義回應
 }
 
@@ -236,16 +495,28 @@ class BlueMonsterSession {
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
     BlueMonsterSession.instance = this;
-    // 初始化第一個任務
-    this.createNewTask();
+    // 初始化第一個任務（異步）
+    this.createNewTask().catch(err => console.error('[BlueMonster] Failed to create initial task:', err));
   }
 
   // 取得當前活動任務
   private get currentTask(): TaskState {
     let task = this.tasks.get(this.activeChatId);
     if (!task) {
-      // 如果沒有活動任務，創建一個新的
-      task = this.createNewTask();
+      // 如果沒有活動任務，創建一個新的（異步設置 taskFolder）
+      this.createNewTask().catch(err => console.error('[BlueMonster] Failed to create task:', err));
+      // 重新取得（此時可能還沒有 taskFolder，但至少有 task）
+      task = this.tasks.get(this.activeChatId);
+      if (!task) {
+        // Fallback: 同步創建基本任務
+        const chatId = this.createChatId();
+        const usedNames = this.getUsedAgentNames();
+        const agentName = generateRandomName(usedNames);
+        const agentEmoji = getNameEmoji(agentName);
+        task = createTaskState(chatId, agentName, agentEmoji);
+        this.tasks.set(chatId, task);
+        this.activeChatId = chatId;
+      }
     }
     return task;
   }
@@ -256,7 +527,7 @@ class BlueMonsterSession {
   }
 
   // 創建新任務
-  private createNewTask(): TaskState {
+  private async createNewTask(): Promise<TaskState> {
     const chatId = this.createChatId();
     const usedNames = this.getUsedAgentNames();
     const agentName = generateRandomName(usedNames);
@@ -266,7 +537,28 @@ class BlueMonsterSession {
     this.tasks.set(chatId, task);
     this.activeChatId = chatId;
     
+    // 同步建立任務資料夾（確保 SDK 任務執行前資料夾已準備好）
+    await this.setupTaskFolderAsync(task);
+    
     return task;
+  }
+  
+  // 異步建立任務專屬資料夾
+  private async setupTaskFolderAsync(task: TaskState): Promise<void> {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceFolder) return;
+    
+    const taskFolder = await setupTaskFolder(
+      workspaceFolder,
+      task.chatId,
+      task.agentName,
+      task.agentEmoji
+    );
+    
+    if (taskFolder) {
+      task.taskFolder = taskFolder;
+      console.log(`[BlueMonster] Task folder created: ${taskFolder}`);
+    }
   }
 
   // 切換到指定任務（只切換顯示，不中斷背景任務）
@@ -279,8 +571,8 @@ class BlueMonsterSession {
     this.broadcast({ type: 'history', messages: task.messages });
     this.broadcast({ type: 'busy', value: task.busy });
     this.broadcast({ type: 'agentInfo', name: task.agentName, emoji: task.agentEmoji, requestCount: task.requestCount });
-    if (task.thinkingLog.length > 0) {
-      this.broadcast({ type: 'thinking', reset: true, text: task.thinkingLog.join('\n') });
+    if (task.activityLines.length > 0 || task.activityStatus !== 'Idle') {
+      this.broadcast({ type: 'activity', status: task.activityStatus, lines: [...task.activityLines] });
     }
     return true;
   }
@@ -289,8 +581,10 @@ class BlueMonsterSession {
   private get messages(): UiMessage[] { return this.currentTask.messages; }
   private get busy(): boolean { return this.currentTask.busy; }
   private set busy(value: boolean) { this.currentTask.busy = value; }
-  private get thinkingLog(): string[] { return this.currentTask.thinkingLog; }
-  private set thinkingLog(value: string[]) { this.currentTask.thinkingLog = value; }
+  private get activityStatus(): string { return this.currentTask.activityStatus; }
+  private set activityStatus(value: string) { this.currentTask.activityStatus = value; }
+  private get activityLines(): string[] { return this.currentTask.activityLines; }
+  private set activityLines(value: string[]) { this.currentTask.activityLines = value; }
   private get pendingConfirmations() { return this.currentTask.pendingConfirmations; }
   private get pendingConfirmationDetails() { return this.currentTask.pendingConfirmationDetails; }
   private get pendingChoices() { return this.currentTask.pendingChoices; }
@@ -302,8 +596,6 @@ class BlueMonsterSession {
   private set hasUnsavedChanges(value: boolean) { this.currentTask.hasUnsavedChanges = value; }
   private get currentCancellation() { return this.currentTask.cancellation; }
   private set currentCancellation(value) { this.currentTask.cancellation = value; }
-  private get cliProcess() { return this.currentTask.cliProcess; }
-  private set cliProcess(value) { this.currentTask.cliProcess = value; }
   private get stopRequested(): boolean { return this.currentTask.stopRequested; }
   private set stopRequested(value: boolean) { this.currentTask.stopRequested = value; }
   private get activitySteps(): string[] { return this.currentTask.activitySteps; }
@@ -438,8 +730,8 @@ class BlueMonsterSession {
       emoji: this.currentAgentEmoji,
       requestCount: this.currentTask.requestCount
     });
-    if (this.thinkingLog.length > 0) {
-      webview.postMessage({ type: 'thinking', reset: true, text: this.thinkingLog.join('\n') });
+    if (this.activityLines.length > 0 || this.activityStatus !== 'Idle') {
+      webview.postMessage({ type: 'activity', status: this.activityStatus, lines: [...this.activityLines] });
     }
   }
 
@@ -573,11 +865,6 @@ class BlueMonsterSession {
   }
 
   private async refreshModelLabel(): Promise<void> {
-    const backend = getBackend();
-    if (backend === 'cli') {
-      this.setModelLabel('Model: CLI');
-      return;
-    }
     const model = await this.resolveModel();
     if (model) {
       this.setModelLabel(`Model: ${model.name}`);
@@ -586,10 +873,138 @@ class BlueMonsterSession {
     }
   }
 
-  private startThinking(text = 'Thinking...') {
-    this.thinkingLog = [];
-    this.thinkingLog.push(text);
-    this.broadcast({ type: 'thinking', reset: true, text });
+  private formatActivityLine(text: string): string {
+    const cleaned = text.replace(/\s+/g, ' ').trim();
+    if (!cleaned) return '';
+    const maxLen = 140;
+    return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen)}…` : cleaned;
+  }
+
+  private broadcastActivity() {
+    this.broadcast({ type: 'activity', status: this.activityStatus, lines: [...this.activityLines] });
+  }
+
+  private pushActivityLine(text: string) {
+    const cleaned = this.formatActivityLine(text);
+    if (!cleaned) return;
+    const last = this.activityLines[this.activityLines.length - 1];
+    if (last === cleaned) return;
+    this.activityLines.push(cleaned);
+    if (this.activityLines.length > 3) {
+      this.activityLines.shift();
+    }
+    this.broadcastActivity();
+  }
+
+  private setActivity(status: string, line?: string, reset = false) {
+    if (reset || status === 'Idle') {
+      this.activityLines = [];
+    }
+    this.activityStatus = status;
+    if (line) {
+      this.pushActivityLine(line);
+    } else {
+      this.broadcastActivity();
+    }
+  }
+
+  private handleSdkActivityEvent(event: any, chatId: string) {
+    if (!event || chatId !== this.currentChatId) return;
+    const type = event.type;
+    switch (type) {
+      case 'assistant.turn_start':
+        this.setActivity('Thinking', '開始推理');
+        this.addMessage('system', '🧠 Thinking…');
+        break;
+      case 'assistant.intent':
+        if (event?.data?.intent) {
+          this.pushActivityLine(`意圖: ${event.data.intent}`);
+          this.addMessage('system', `🧭 Intent: ${event.data.intent}`);
+        }
+        break;
+      case 'assistant.reasoning_delta':
+        if (this.activityStatus !== 'Thinking') {
+          this.setActivity('Thinking', '推理中...');
+        }
+        break;
+      case 'assistant.message_delta':
+        if (this.activityStatus !== 'Responding') {
+          this.setActivity('Responding', '產生回覆...');
+        }
+        break;
+      case 'assistant.message':
+        this.setActivity('Responding', '回覆完成');
+        break;
+      case 'assistant.turn_end':
+      case 'session.idle':
+        this.setActivity('Idle', undefined, true);
+        break;
+      case 'tool.user_requested': {
+        const toolName = event?.data?.toolName || 'tool';
+        this.setActivity('Waiting for Confirmation', `請求使用者確認: ${toolName}`);
+        this.addMessage('system', `⏳ Waiting for confirmation: ${toolName}`);
+        break;
+      }
+      case 'tool.execution_start': {
+        const toolName = event?.data?.toolName || 'tool';
+        const args = event?.data?.arguments ? this.formatActivityLine(JSON.stringify(event.data.arguments)) : '';
+        this.setActivity('Working', `執行工具: ${toolName}`);
+        this.addMessage('system', `🛠️ Tool start: ${toolName}${args ? `\n\`\`\`\n${args}\n\`\`\`` : ''}`);
+        break;
+      }
+      case 'tool.execution_progress': {
+        const msg = event?.data?.progressMessage;
+        if (msg) {
+          this.pushActivityLine(`工具進度: ${msg}`);
+          const now = Date.now();
+          const lastAt = this.currentTask.lastToolProgressAt;
+          const lastMsg = this.currentTask.lastToolProgressMessage;
+          if (now - lastAt > 1500 || lastMsg !== msg) {
+            this.currentTask.lastToolProgressAt = now;
+            this.currentTask.lastToolProgressMessage = msg;
+            this.addMessage('system', `🔧 Tool progress: ${msg}`);
+          }
+        }
+        break;
+      }
+      case 'tool.execution_complete': {
+        const toolName = event?.data?.toolName || 'tool';
+        const success = event?.data?.success;
+        this.pushActivityLine(`工具完成: ${toolName} ${success ? '✅' : '❌'}`);
+        let summary = `✅ Tool complete: ${toolName}`;
+        if (success === false) summary = `❌ Tool failed: ${toolName}`;
+        const resultContent = event?.data?.result?.content;
+        if (resultContent && typeof resultContent === 'string') {
+          const snippet = this.formatActivityLine(resultContent);
+          summary += `\n\`\`\`\n${snippet}\n\`\`\``;
+        }
+        this.addMessage('system', summary);
+        break;
+      }
+      case 'session.model_change': {
+        const nextModel = event?.data?.newModel;
+        if (nextModel) {
+          this.pushActivityLine(`模型切換: ${nextModel}`);
+          this.addMessage('system', `🔁 Model changed: ${nextModel}`);
+        }
+        break;
+      }
+      case 'session.error': {
+        const message = event?.data?.message || 'Session error';
+        this.setActivity('Error', message);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  private startThinking(text = '收到請求，開始處理...') {
+    this.setActivity('Thinking', text, true);
+  }
+
+  private startWorking(text = 'Working...') {
+    this.setActivity('Working', text, false);
   }
 
   private appendThinking(text: string) {
@@ -607,13 +1022,32 @@ class BlueMonsterSession {
     if (skipPatterns.some(pattern => text.includes(pattern))) {
       return;
     }
-    this.thinkingLog.push(text);
-    this.broadcast({ type: 'thinking', text });
+    if (this.activityStatus !== 'Thinking') {
+      this.activityStatus = 'Thinking';
+    }
+    this.pushActivityLine(text);
+  }
+
+  private appendWorking(text: string) {
+    if (!this.busy || !text) {
+      return;
+    }
+    if (this.activityStatus !== 'Working') {
+      this.activityStatus = 'Working';
+    }
+    this.pushActivityLine(text);
   }
 
   private stopThinking() {
-    this.thinkingLog = [];
-    this.broadcast({ type: 'thinking', done: true });
+    if (this.activityStatus === 'Thinking') {
+      this.setActivity('Idle', undefined, true);
+    }
+  }
+
+  private stopWorking() {
+    if (this.activityStatus === 'Working') {
+      this.setActivity('Idle', undefined, true);
+    }
   }
 
   private requestStop(): void {
@@ -622,10 +1056,6 @@ class BlueMonsterSession {
       this.currentCancellation.cancel();
       this.currentCancellation.dispose();
       this.currentCancellation = undefined;
-    }
-    if (this.cliProcess) {
-      this.cliProcess.kill();
-      this.cliProcess = undefined;
     }
   }
 
@@ -645,13 +1075,18 @@ class BlueMonsterSession {
       }
       
       // 檢查 session 記憶：是否已在本次對話中允許此類操作
+      // 安全模式下仍然要確認「刪除/移動」類型
       if (category && this.sessionAllowedCategories.has(category)) {
-        return true;
+        if (category !== 'delete' && category !== 'move') {
+          return true;
+        }
       }
       
       // 需要確認
       this.appendThinking(`${label} - 等待用戶確認...`);
-      return this.confirmTerminalCommandInline(command, cwd, label, category);
+      const result = await this.confirmTerminalCommandInline(command, cwd, label, category);
+      await this.applyConfirmationResult(result, category);
+      return result.approved;
     }
     
     // 「計畫」模式：不執行任何命令
@@ -666,26 +1101,37 @@ class BlueMonsterSession {
       return true;
     }
     if (mode === 'modal') {
-      return this.confirmTerminalCommandModal(command, cwd);
+      const result = await this.confirmTerminalCommandModal(command, cwd);
+      await this.applyConfirmationResult(result, '');
+      return result.approved;
     }
     this.appendThinking('Awaiting approval to run a terminal command...');
-    return this.confirmTerminalCommandInline(command, cwd);
+    const result = await this.confirmTerminalCommandInline(command, cwd);
+    await this.applyConfirmationResult(result, '');
+    return result.approved;
   }
 
-  private async confirmTerminalCommandModal(command: string, cwd?: string): Promise<boolean> {
-    const detail = cwd ? `\nWorking dir: ${cwd}` : '';
-    const choice = await vscode.window.showWarningMessage(
-      `Run terminal command?\n\n${command}${detail}`,
-      { modal: true },
-      'Run'
-    );
-    return choice === 'Run';
+  private async confirmTerminalCommandModal(command: string, cwd?: string): Promise<ConfirmationResult> {
+    const detail = cwd ? `\n📁 ${cwd}` : '';
+    const action = await this.showConfirmationPrompt(`執行終端機命令？\n\n${command}${detail}`);
+    if (action.kind === 'run') {
+      return { approved: true };
+    }
+    if (action.kind === 'projectAllow') {
+      return { approved: true, projectAllow: 'terminal' };
+    }
+    if (action.kind === 'custom') {
+      return { approved: false, customResponse: action.customText || '' };
+    }
+    return { approved: false };
   }
 
-  private async confirmTerminalCommandInline(command: string, cwd?: string, dangerType?: string, category?: string): Promise<boolean> {
+  private async confirmTerminalCommandInline(command: string, cwd?: string, dangerType?: string, category?: string): Promise<ConfirmationResult> {
     if (this.views.size === 0) {
       return this.confirmTerminalCommandModal(command, cwd);
     }
+    const summary = command.length > 60 ? `${command.slice(0, 60)}...` : command;
+    this.setActivity('Waiting for Confirmation', `等待確認: ${summary}`);
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const result = await new Promise<ConfirmationResult>((resolve) => {
       this.pendingConfirmations.set(id, resolve);
@@ -698,11 +1144,7 @@ class BlueMonsterSession {
     });
     this.pendingConfirmationDetails.delete(id);
     this.broadcast({ type: 'confirmClear', id });
-    if (result.remember) {
-      await setTerminalConfirmationMode('off');
-      this.addMessage('system', 'Terminal confirmations disabled in settings.');
-    }
-    return result.approved;
+    return result;
   }
 
   private async runTerminalCommand(command: string, cwd?: string) {
@@ -724,7 +1166,11 @@ class BlueMonsterSession {
     this.recordActivityCommand(command);
     
     const terminal = getTerminal(cwd);
-    const workingDir = cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const workingDir = cwd || this.currentTask.taskFolder || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+    const preview = command.length > 120 ? `${command.slice(0, 120)}...` : command;
+    const cwdLabel = workingDir ? `\n📁 ${workingDir}` : '';
+    this.addMessage('system', `🛠️ 執行命令:\n\`\`\`\n${preview}\n\`\`\`${cwdLabel}`);
     
     // 預處理命令：移除 shell 註解行（避免 zsh 中 # 被當作無效命令）
     const preprocessCommand = (cmd: string): string => {
@@ -904,12 +1350,17 @@ class BlueMonsterSession {
 
   private async confirmVsCodeCommand(command: string): Promise<boolean> {
     if (this.views.size === 0) {
-      const choice = await vscode.window.showWarningMessage(
-        `BlueMonster 要求執行: ${command}`,
-        { modal: true },
-        '允許'
-      );
-      return choice === '允許';
+      const action = await this.showConfirmationPrompt(`BlueMonster 要求執行:\n\n${command}`);
+      const result: ConfirmationResult =
+        action.kind === 'run'
+          ? { approved: true }
+          : action.kind === 'projectAllow'
+          ? { approved: true, projectAllow: 'blueMonster-self-control' }
+          : action.kind === 'custom'
+          ? { approved: false, customResponse: action.customText || '' }
+          : { approved: false };
+      await this.applyConfirmationResult(result, 'blueMonster-self-control');
+      return result.approved;
     }
     
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -929,7 +1380,60 @@ class BlueMonsterSession {
     });
     this.pendingConfirmationDetails.delete(id);
     this.broadcast({ type: 'confirmClear', id });
+    await this.applyConfirmationResult(result, 'blueMonster-self-control');
     return result.approved;
+  }
+
+  private async applyConfirmationResult(result: ConfirmationResult, category: string) {
+    if (result.remember) {
+      await setTerminalConfirmationMode('off');
+      this.addMessage('system', 'Terminal confirmations disabled in settings.');
+    }
+    if (result.projectAllow) {
+      const updated = await this.applyProjectAllow(category);
+      if (!updated && category) {
+        this.sessionAllowedCategories.add(category);
+      }
+    }
+    if (result.sessionAllow && category) {
+      this.sessionAllowedCategories.add(category);
+      this.addMessage('system', `✅ 已在本次對話中允許「${category}」類操作`);
+    }
+    if (result.customResponse) {
+      this.addMessage('system', `💭 您的回饋：${result.customResponse}`);
+    }
+  }
+
+  private async showConfirmationPrompt(message: string): Promise<{ kind: 'run' | 'projectAllow' | 'cancel' | 'custom'; customText?: string }> {
+    const options = [
+      { label: '1. Yes, 開始執行', kind: 'run' as const, detail: '立即執行這個動作' },
+      { label: '2. Yes, 在這專案中永遠同意', kind: 'projectAllow' as const, detail: '此專案以後不再詢問同類型操作' },
+      { label: '3. No', kind: 'cancel' as const, detail: '拒絕執行' },
+      { label: '4. 其他想法', kind: 'custom' as const, detail: '輸入你的想法' }
+    ];
+    const picked = await vscode.window.showQuickPick(options, {
+      title: '需要你的確認',
+      placeHolder: message,
+      canPickMany: false,
+      ignoreFocusOut: true
+    });
+    if (!picked) return { kind: 'cancel' };
+    if (picked.kind === 'custom') {
+      const custom = await vscode.window.showInputBox({ prompt: '請輸入您的想法', ignoreFocusOut: true });
+      if (!custom) return { kind: 'cancel' };
+      return { kind: 'custom', customText: custom };
+    }
+    return { kind: picked.kind };
+  }
+
+  private async applyProjectAllow(category: string): Promise<boolean> {
+    const updated = await setSafeModeCategoryConfirmation(category, false, vscode.ConfigurationTarget.Workspace);
+    if (updated) {
+      this.addMessage('system', `✅ 已在此專案永遠允許「${category}」類操作`);
+      return true;
+    }
+    this.addMessage('system', `⚠️ 無法在此專案永久允許「${category}」，改為本次對話允許`);
+    return false;
   }
 
   async readFileWithResult(path: string): Promise<string> {
@@ -1041,48 +1545,6 @@ class BlueMonsterSession {
     return `Found ${results.length} task(s) matching "${query}":\n\n${taskList}`;
   }
 
-  private async runCli(prompt: string, memoryContext?: string): Promise<ChatResult> {
-    const template = getCliCommand();
-    if (!template) {
-      const text = 'CLI backend is selected but blueMonster.cliCommand is empty.';
-      return { text, parts: [{ kind: 'text', text }] };
-    }
-    const contextPrefix = memoryContext
-      ? `Long-term memory (previous chats, may be relevant):\n${memoryContext}\n\n`
-      : '';
-    const combinedPrompt = `${contextPrefix}${prompt}`.trim();
-    const command = buildCliCommand(template, combinedPrompt, getCliModel());
-    const cwd = getCliCwd();
-    this.appendThinking('Running CLI command...');
-    return await new Promise<ChatResult>((resolve, reject) => {
-      const child = execCallback(
-        command,
-        {
-          cwd: cwd || undefined,
-          maxBuffer: 1024 * 1024
-        },
-        (error, stdout, stderr) => {
-          if (this.cliProcess === child) {
-            this.cliProcess = undefined;
-          }
-          if (this.stopRequested) {
-            reject(new Error('Cancelled'));
-            return;
-          }
-          if (error) {
-            const text = `CLI error: ${String(error)}`;
-            resolve({ text, parts: [{ kind: 'text', text }] });
-            return;
-          }
-          const output = `${stdout || ''}${stderr || ''}`.trim();
-          const text = output || 'CLI finished with no output.';
-          resolve({ text, parts: [{ kind: 'text', text }] });
-        }
-      );
-      this.cliProcess = child;
-    });
-  }
-
   async selectModel(): Promise<void> {
     if (!vscode.lm?.selectChatModels) {
       vscode.window.showErrorMessage('Language Model API is not available in this VS Code version.');
@@ -1124,55 +1586,129 @@ class BlueMonsterSession {
    * - 完整 ID: "gpt-4o", "claude-3.5-sonnet"
    * - 部分名稱: "gpt-4", "claude", "gemini"
    * - 數字索引: "1", "2", "3" (從可用模型列表中選擇)
+   * - 帶 Reasoning Effort: "gpt-5 (high)", "gpt-5-mini (low)"
    */
   async setModel(modelIdOrIndex: string): Promise<string> {
-    if (!vscode.lm?.selectChatModels) {
-      return 'Language Model API is not available.';
+    const input = modelIdOrIndex.trim();
+    
+    // 解析 reasoning effort（如果有的話）
+    let reasoningEffort = '';
+    let modelName = input;
+    const parenMatch = input.match(/\(([^)]+)\)/);
+    if (parenMatch) {
+      const inside = parenMatch[1];
+      const insideMatch = inside.match(/\b(low|medium|high|extra-high)\b/i);
+      if (insideMatch) {
+        reasoningEffort = insideMatch[1].toLowerCase();
+      }
+      modelName = input.replace(parenMatch[0], '').trim();
     }
+    if (!reasoningEffort) {
+      const looseMatch = input.match(/\b(low|medium|high|extra-high)\b/i);
+      if (looseMatch) {
+        reasoningEffort = looseMatch[1].toLowerCase();
+        modelName = input.replace(looseMatch[0], '').trim();
+      }
+    }
+    modelName = modelName.replace(/\s+/g, ' ').trim();
 
-    const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-    if (models.length === 0) {
-      return 'No Copilot models available.';
+    let models: vscode.LanguageModelChat[] = [];
+    let modelFetchError: string | undefined;
+    if (vscode.lm?.selectChatModels) {
+      try {
+        models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+      } catch (err) {
+        modelFetchError = String(err);
+      }
     }
 
     let targetModel: vscode.LanguageModelChat | undefined;
-    const input = modelIdOrIndex.trim().toLowerCase();
+    const inputLower = modelName.toLowerCase();
 
-    // 嘗試數字索引 (1-based)
-    const index = parseInt(input, 10);
-    if (!isNaN(index) && index >= 1 && index <= models.length) {
-      targetModel = models[index - 1];
+    if (models.length > 0) {
+      // 嘗試數字索引 (1-based) - 僅純數字
+      const index = /^\d+$/.test(modelName) ? parseInt(modelName, 10) : NaN;
+      if (!isNaN(index) && index >= 1 && index <= models.length) {
+        targetModel = models[index - 1];
+      }
+
+      // 嘗試完全匹配 ID
+      if (!targetModel) {
+        targetModel = models.find(m => m.id.toLowerCase() === inputLower);
+      }
+
+      // 嘗試部分匹配 ID 或名稱
+      if (!targetModel) {
+        targetModel = models.find(m =>
+          m.id.toLowerCase().includes(inputLower) ||
+          m.name.toLowerCase().includes(inputLower)
+        );
+      }
+
+      // 嘗試從常見模型別名解析
+      if (!targetModel) {
+        const resolvedId = this.resolveModelIdFromText(modelName, models);
+        if (resolvedId) {
+          targetModel = models.find(m => m.id === resolvedId);
+        }
+      }
     }
 
-    // 嘗試完全匹配 ID
-    if (!targetModel) {
-      targetModel = models.find(m => m.id.toLowerCase() === input);
-    }
+    const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
 
-    // 嘗試部分匹配 ID 或名稱
-    if (!targetModel) {
-      targetModel = models.find(m => 
-        m.id.toLowerCase().includes(input) || 
-        m.name.toLowerCase().includes(input)
-      );
-    }
-
-    if (!targetModel) {
+    if (!targetModel && models.length > 0) {
       const availableModels = models.map((m, i) => `${i + 1}. ${m.name} (${m.id})`).join('\n');
       return `Model not found: "${modelIdOrIndex}". Available models:\n${availableModels}`;
     }
 
-    await vscode.workspace
-      .getConfiguration(CONFIG_SECTION)
-      .update('model', targetModel.id, vscode.ConfigurationTarget.Global);
+    if (!targetModel) {
+      const fallbackId = this.resolveModelIdFromText(modelName) || modelName;
+      if (!fallbackId || /^\d+$/.test(modelName)) {
+        const note = modelFetchError
+          ? `⚠️ Copilot 模型清單無法取得：${modelFetchError}\n`
+          : '⚠️ Copilot 模型清單不可用。\n';
+        return this.formatStaticModelList(`${note}請改用模型名稱（例如 gpt-5-mini）再試一次。`);
+      }
+      await config.update('model', fallbackId, vscode.ConfigurationTarget.Global);
+      if (reasoningEffort) {
+        await config.update('reasoningEffort', reasoningEffort, vscode.ConfigurationTarget.Global);
+      }
+      this.setModelLabel(`Model: ${fallbackId}`);
+      const modelOptions = await this.getModelOptions();
+      this.broadcast({ type: 'modelOptions', ...modelOptions });
+      const suffix = modelFetchError ? ' (Copilot 清單暫時無法取得，已存為覆寫)' : ' (已存為覆寫)';
+      return reasoningEffort
+        ? `Model set to: ${fallbackId} with reasoning: ${reasoningEffort}${suffix}`
+        : `Model set to: ${fallbackId}${suffix}`;
+    }
+
+    await config.update('model', targetModel.id, vscode.ConfigurationTarget.Global);
+    if (reasoningEffort) {
+      await config.update('reasoningEffort', reasoningEffort, vscode.ConfigurationTarget.Global);
+    }
 
     this.setModelLabel(`Model: ${targetModel.name}`);
-    
+
     // 更新 webview 的模型選擇器
     const modelOptions = await this.getModelOptions();
     this.broadcast({ type: 'modelOptions', ...modelOptions });
-    
+
+    if (reasoningEffort) {
+      return `Model switched to: ${targetModel.name} (${targetModel.id}) with reasoning: ${reasoningEffort}`;
+    }
     return `Model switched to: ${targetModel.name} (${targetModel.id})`;
+  }
+
+  private formatStaticModelList(note?: string): string {
+    const currentId = getPreferredModelId();
+    const lines = SDK_MODELS.map((m, i) => {
+      const current = m.id === currentId ? ' ← current' : '';
+      const reasoning = m.reasoningOptions?.length ? ` [reasoning: ${m.reasoningOptions.join('/')}]` : '';
+      const multiplier = m.multiplier ? ` ${m.multiplier}` : '';
+      return `${i + 1}. ${m.label} (${m.id})${multiplier}${reasoning}${current}`;
+    }).join('\n');
+    const prefix = note ? `${note.trim()}\n\n` : '';
+    return `${prefix}Available models (built-in list):\n${lines}\n\nUse blueMonster.setModel with number or name to switch.`;
   }
 
   /**
@@ -1180,21 +1716,25 @@ class BlueMonsterSession {
    */
   async listModels(): Promise<string> {
     if (!vscode.lm?.selectChatModels) {
-      return 'Language Model API is not available.';
+      return this.formatStaticModelList('⚠️ Language Model API 不可用，顯示內建清單。');
     }
 
-    const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-    if (models.length === 0) {
-      return 'No Copilot models available.';
+    try {
+      const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+      if (models.length === 0) {
+        return this.formatStaticModelList('⚠️ Copilot 沒有回傳模型清單，顯示內建清單。');
+      }
+
+      const currentId = getPreferredModelId();
+      const list = models.map((m, i) => {
+        const current = m.id === currentId ? ' ← current' : '';
+        return `${i + 1}. ${m.name} (${m.id})${current}`;
+      }).join('\n');
+
+      return `Available models:\n${list}\n\nUse blueMonster.setModel with number or name to switch.`;
+    } catch (err) {
+      return this.formatStaticModelList(`⚠️ 取得 Copilot 模型清單失敗：${String(err)}\n顯示內建清單。`);
     }
-
-    const currentId = getPreferredModelId();
-    const list = models.map((m, i) => {
-      const current = m.id === currentId ? ' ← current' : '';
-      return `${i + 1}. ${m.name} (${m.id})${current}`;
-    }).join('\n');
-
-    return `Available models:\n${list}\n\nUse blueMonster.setModel with number or name to switch.`;
   }
 
   /**
@@ -1266,11 +1806,11 @@ class BlueMonsterSession {
   /**
    * 回應確認請求
    * @param id 確認請求 ID
-   * @param action 動作: 'run' | 'sessionAllow' | 'cancel' | 'custom'
+   * @param action 動作: 'run' | 'sessionAllow' | 'projectAllow' | 'cancel' | 'custom'
    * @param customText 自定義回應文字（當 action 為 'custom' 時）
    * @returns 回應結果訊息
    */
-  respondToConfirmation(id: string, action: 'run' | 'sessionAllow' | 'cancel' | 'custom', customText?: string): string {
+  respondToConfirmation(id: string, action: 'run' | 'sessionAllow' | 'projectAllow' | 'cancel' | 'custom', customText?: string): string {
     const pending = this.pendingConfirmations.get(id);
     const details = this.pendingConfirmationDetails.get(id);
     
@@ -1287,18 +1827,16 @@ class BlueMonsterSession {
       case 'run':
         pending({ approved: true });
         return `Confirmation ${id} approved`;
+      case 'projectAllow':
+        pending({ approved: true, projectAllow: category });
+        return `Confirmation ${id} approved (project allow for ${category})`;
       case 'sessionAllow':
-        if (category) {
-          this.sessionAllowedCategories.add(category);
-          this.addMessage('system', `✅ 已在本次對話中允許「${category}」類操作`);
-        }
         pending({ approved: true, sessionAllow: category });
         return `Confirmation ${id} approved (session allow for ${category})`;
       case 'cancel':
         pending({ approved: false });
         return `Confirmation ${id} cancelled`;
       case 'custom':
-        this.addMessage('system', `💭 外部回饋：${customText || ''}`);
         pending({ approved: false, customResponse: customText || '' });
         return `Confirmation ${id} responded with custom text`;
       default:
@@ -1345,17 +1883,21 @@ class BlueMonsterSession {
     if (!vscode.lm?.selectChatModels) {
       return undefined;
     }
-
-    const preferredModelId = getPreferredModelId();
-    if (preferredModelId) {
-      const matches = await vscode.lm.selectChatModels({ vendor: 'copilot', id: preferredModelId });
-      if (matches.length > 0) {
-        return matches[0];
+    try {
+      const preferredModelId = getPreferredModelId();
+      if (preferredModelId) {
+        const matches = await vscode.lm.selectChatModels({ vendor: 'copilot', id: preferredModelId });
+        if (matches.length > 0) {
+          return matches[0];
+        }
       }
-    }
 
-    const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-    return models[0];
+      const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+      return models[0];
+    } catch (err) {
+      console.warn('[BlueMonster] Failed to resolve model:', err);
+      return undefined;
+    }
   }
 
   private async runChatLoop(
@@ -1428,6 +1970,7 @@ class BlueMonsterSession {
       }
       
       this.appendThinking('Waiting for model response...');
+      this.appendWorking('向模型送出請求...');
       
       // 「計畫」模式下不提供工具，只能聊天
       let tools: vscode.LanguageModelChatTool[] = [];
@@ -1446,12 +1989,16 @@ class BlueMonsterSession {
       // 根據模型 multiplier 計算 request 消耗
       const multiplierValue = getModelMultiplierValue(model.name);
       this.currentTask.requestCount += multiplierValue;
+      // 同時記錄到全域預算追蹤
+      requestQueue.recordUsage(multiplierValue);
       this.broadcast({ 
         type: 'agentInfo', 
         name: this.currentTask.agentName, 
         emoji: this.currentTask.agentEmoji, 
         requestCount: this.currentTask.requestCount 
       });
+      // 廣播更新的佇列狀態（包含預算）
+      this.broadcastQueueStatus();
       
       const chatResponse = await model.sendRequest(
         messages,
@@ -1464,6 +2011,7 @@ class BlueMonsterSession {
 
       const toolCalls: vscode.LanguageModelToolCallPart[] = [];
       let announcedStreaming = false;
+      let announcedWorking = false;
 
       for await (const part of chatResponse.stream) {
         // 在串流中檢查取消
@@ -1476,6 +2024,10 @@ class BlueMonsterSession {
           if (!announcedStreaming) {
             this.appendThinking('Generating response...');
             announcedStreaming = true;
+          }
+          if (!announcedWorking) {
+            this.appendWorking('產生回應中...');
+            announcedWorking = true;
           }
           appendText(part.value);
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
@@ -1560,6 +2112,7 @@ class BlueMonsterSession {
             continue;
           }
           this.appendThinking(`Tool requested: ${handler.label}.`);
+          this.appendWorking(`執行工具：${handler.label}`);
           const text = await handler.action(normalized);
           result = new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(text)]);
         } catch (error) {
@@ -1591,6 +2144,174 @@ class BlueMonsterSession {
     images?: Array<{dataUrl: string, mimeType: string, name: string}>,
     memoryContext?: string
   ): Promise<ChatResult> {
+    const chatId = this.currentChatId;
+    const task = this.currentTask;
+    
+    // ===== 真正的並行執行 - 使用 Copilot SDK =====
+    try {
+      // 嘗試使用 SDK 並行模式
+      return await this._runWithSDK(chatId, task, prompt, images, memoryContext);
+    } catch (sdkErr) {
+      // SDK 失敗時 fallback 到 VS Code API
+      console.warn('[BlueMonster] SDK failed, falling back to VS Code API:', sdkErr);
+      this.appendThinking('SDK 不可用，使用 VS Code API...');
+      return await this._runLmCore(prompt, images, memoryContext);
+    }
+  }
+  
+  // 使用 Copilot SDK 的真正並行執行
+  private async _runWithSDK(
+    chatId: string,
+    task: TaskState,
+    prompt: string,
+    images?: Array<{dataUrl: string, mimeType: string, name: string}>,
+    memoryContext?: string
+  ): Promise<ChatResult> {
+    // 取得或創建獨立的 Worker Session
+    this.appendThinking('🏭 啟動並行 Worker...');
+    const preferredModel = getPreferredModelId() || 'gpt-4.1';
+    const configuredReasoning = getReasoningEffort();
+    const reasoningSupported = supportsReasoningEffort(preferredModel);
+    const reasoningEffort = reasoningSupported ? configuredReasoning : 'medium';
+    console.log(`[BlueMonster] Using model: ${preferredModel}${reasoningSupported ? ` (Reasoning: ${reasoningEffort})` : ''}`);
+    this.appendThinking(`🤖 模型: ${preferredModel}${reasoningSupported && reasoningEffort !== 'medium' ? ` (${reasoningEffort})` : ''}`);
+    this.appendWorking('啟動並行 Worker...');
+    const session = await copilotSDK.createWorker(chatId, preferredModel, reasoningEffort);
+    const unsubscribe = session.on((event: any) => this.handleSdkActivityEvent(event, chatId));
+    
+    // 標記為忙碌
+    copilotSDK.markBusy(chatId);
+    this.broadcastQueueStatus();
+    this.appendThinking(`🔵 Worker ${chatId.slice(0, 8)} 開始執行`);
+    
+    try {
+      // 組建提示 - 使用 prompts/index.ts 的 buildPrompt
+      const modelType = detectModelType(preferredModel);
+      const dangerMode = this.currentMode === 'agent-full';
+      const systemPrompt = buildPrompt(modelType, { 
+        dangerMode,
+        modelName: preferredModel,
+        agentMode: this.currentMode as 'chat' | 'agent' | 'agent-full',
+        reasoningEffort
+      });
+      
+      let fullPrompt = systemPrompt;
+
+      const personaPrompt = await this.loadTaskPersonaPrompt(task.taskFolder);
+      if (personaPrompt) {
+        fullPrompt += `\n\n${personaPrompt}`;
+      }
+      
+      // 注入工作目錄資訊 (Fix: AI 不知道自己在哪裡)
+      const currentCwd = task.taskFolder || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (currentCwd) {
+        fullPrompt += `\n\n<current_working_directory>${currentCwd}</current_working_directory>`;
+        fullPrompt += `\nSystem Note: You are executing in "${currentCwd}".\n1. Do NOT mention this path unless asked.\n2. Always SAVE files to this directory (cwd) by default, do NOT use /tmp or other system paths unless explicitly requested.`;
+      }
+
+      if (memoryContext) {
+        fullPrompt += `\n\nLong-term memory:\n${memoryContext}`;
+      }
+      fullPrompt += `\n\nUser: ${prompt}`;
+      
+      // 記錄 request 消耗
+      const multiplierValue = getModelMultiplierValue(preferredModel);
+      task.requestCount += multiplierValue;
+      copilotSDK.recordUsage(multiplierValue);
+      this.broadcast({ 
+        type: 'agentInfo', 
+        name: task.agentName, 
+        emoji: task.agentEmoji, 
+        requestCount: task.requestCount 
+      });
+      this.broadcastQueueStatus();
+      
+      // 使用 sendAndWait - 更簡潔的 API
+      // 這是真正的並行！多個 session 可以同時 sendAndWait
+      this.appendThinking('🚀 發送請求 (並行模式)...');
+      this.appendWorking('送出請求到 Copilot...');
+      
+      try {
+        const response = await session.sendAndWait(
+          { prompt: fullPrompt },
+          300000 // 5 分鐘超時
+        );
+        
+        const responseText = response?.data?.content || 'No response.';
+        this.pushActivityLine('已收到回應');
+        this.setActivity('Idle');
+        return { 
+          text: responseText, 
+          parts: [{ kind: 'text', text: responseText }]
+        };
+      } catch (err) {
+        // 如果 session 內部錯誤 (例如 timeout 或 invalid body)，可能會導致 session 狀態卡住
+        // 因此必須銷毀此 session，確保下次請求能建立新的 worker
+        console.error(`[BlueMonster] Worker ${chatId} crashed, destroying session:`, err);
+        await copilotSDK.destroyWorker(chatId);
+        throw err; // 拋出給外層 catch 處理 (fallback)
+      } finally {
+        try { unsubscribe(); } catch {}
+        copilotSDK.markIdle(chatId);
+        this.broadcastQueueStatus();
+      }
+    } catch (err) {
+       // 外層會 catch 並 fallback to LM API
+       // 確保這裡也標記為閒置 (雖然 finally 已經處理了 inner try，但為了保險起見)
+       copilotSDK.markIdle(chatId);
+       this.broadcastQueueStatus();
+       throw err; 
+    }
+  }
+  
+  // 廣播狀態給所有 webview
+  private broadcastQueueStatus(): void {
+    const status = copilotSDK.getStatus();
+    this.broadcast({
+      type: 'queueStatus',
+      ...status
+    });
+  }
+
+  private async loadTaskPersonaPrompt(taskFolder?: string): Promise<string> {
+    if (!taskFolder) return '';
+    const fs = await import('fs').then(m => m.promises);
+    const path = await import('path');
+    const vscodeDir = path.join(taskFolder, '.vscode');
+    const instructionsPath = path.join(vscodeDir, 'copilot-instructions.md');
+    const mePath = path.join(vscodeDir, 'me.md');
+
+    const readLimited = async (filePath: string, maxChars: number): Promise<string | undefined> => {
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        if (!content) return undefined;
+        return content.length > maxChars ? content.slice(0, maxChars) : content;
+      } catch {
+        return undefined;
+      }
+    };
+
+    const [instructions, me] = await Promise.all([
+      readLimited(instructionsPath, 12000),
+      readLimited(mePath, 8000)
+    ]);
+
+    const sections: string[] = [];
+    if (instructions) {
+      sections.push(`<copilot_instructions>\n${instructions}\n</copilot_instructions>`);
+    }
+    if (me) {
+      sections.push(`<persona>\n${me}\n</persona>`);
+    }
+
+    return sections.join('\n\n');
+  }
+
+  private async _runLmCore(
+    prompt: string,
+    images?: Array<{dataUrl: string, mimeType: string, name: string}>,
+    memoryContext?: string
+  ): Promise<ChatResult> {
     const model = await this.resolveModel();
     if (!model) {
       const text = 'No Copilot model available. Check Copilot login and plan.';
@@ -1611,7 +2332,22 @@ class BlueMonsterSession {
     // 組建 System Prompt（根據模型類型自動選擇最佳化 prompt）
     const modelType = detectModelType(model.name);
     const dangerMode = getDangerModeEnabled();
-    let systemPrompt = buildPrompt(modelType, { dangerMode });
+    const currentReasoning = supportsReasoningEffort(model.id || model.name)
+      ? getReasoningEffort()
+      : 'medium';
+    
+    let systemPrompt = buildPrompt(modelType, { 
+      dangerMode,
+      modelName: model.name || model.id,
+      agentMode: this.currentMode,
+      reasoningEffort: currentReasoning
+    });
+
+    const personaPrompt = await this.loadTaskPersonaPrompt(this.currentTask.taskFolder);
+    if (personaPrompt) {
+      systemPrompt += `\n\n${personaPrompt}`;
+    }
+    
     if (memoryContext) {
       systemPrompt += `\nSystem: Long-term memory (previous chats, may be relevant):\n${memoryContext}`;
     }
@@ -1693,104 +2429,73 @@ class BlueMonsterSession {
   }
 
   private async listCopilotModels(): Promise<string> {
-    if (!vscode.lm?.selectChatModels) {
-      return 'Language Model API is not available in this VS Code version.';
-    }
-    const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-    if (models.length === 0) {
-      return 'No Copilot models available. Check Copilot login and plan.';
-    }
-    const lines = models.map((model) => `- ${model.name} (${model.id})`);
-    return `Available Copilot models:\n${lines.join('\n')}`;
+    return this.listModels();
   }
 
-  private async getModelOptions(): Promise<{ backend: string; current?: string; options?: any[]; hint?: string }> {
-    const backend = getBackend();
-    if (backend === 'cli') {
-      const current = getCliModel();
-      return {
-        backend: 'cli',
-        current,
-        hint: 'CLI backend: enter a model name.'
-      };
-    }
-    if (!vscode.lm?.selectChatModels) {
-      return {
-        backend: 'copilot',
-        hint: 'Language Model API is not available in this VS Code version.'
-      };
-    }
-    const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-    if (models.length === 0) {
-      return {
-        backend: 'copilot',
-        hint: 'No Copilot models available. Check Copilot login and plan.'
-      };
+  private async getModelOptions(): Promise<{ current?: string; currentReasoning?: string; options?: any[]; hint?: string }> {
+    // Copilot SDK 支援的模型列表（含 Reasoning Effort 選項）- 參考 GitHub Copilot 官方 Multiplier
+    let hint = '🏭 Copilot SDK: 真正並行執行';
+    let dynamicModels: vscode.LanguageModelChat[] = [];
+    try {
+      if (vscode.lm?.selectChatModels) {
+        dynamicModels = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+      }
+      if (dynamicModels.length > 0) {
+        hint = '✅ 使用 Copilot 服務提供的模型清單';
+      }
+    } catch (err) {
+      hint = '⚠️ 無法取得 Copilot 模型清單，顯示內建清單';
     }
 
-    const getModelMultiplier = (name: string): string => formatMultiplier(getModelMultiplierValue(name));
+    const currentReasoning = getReasoningEffort();
+    const availableIds = new Set(dynamicModels.map(m => m.id));
+    const baseOptions = availableIds.size > 0
+      ? SDK_MODELS.filter(m => availableIds.has(m.id))
+      : SDK_MODELS;
 
-    const allOptions = models.map((model) => ({ 
-      id: model.id, 
-      label: model.name,
-      multiplier: getModelMultiplier(model.name)
-    }));
+    const extras = dynamicModels
+      .filter(m => !SDK_MODELS.some(s => s.id === m.id))
+      .map((m) => ({
+        id: m.id,
+        label: m.name || m.id,
+        multiplier: '',
+        reasoningOptions: undefined
+      }));
 
-    // 排序：0x 在最上面，然後 0.33x, 1x, 3x, 10x
-    const multiplierOrder: Record<string, number> = { '0x': 0, '0.33x': 1, '1x': 2, '3x': 3, '10x': 4 };
-    const sortedOptions = allOptions.sort((a, b) => {
+    let mergedOptions = [...baseOptions, ...extras];
+    const current = getPreferredModelId() || (dynamicModels[0]?.id ?? 'gpt-4.1');
+    if (current && !mergedOptions.some(o => o.id === current)) {
+      mergedOptions.unshift({
+        id: current,
+        label: current,
+        multiplier: '',
+        reasoningOptions: undefined
+      });
+    }
+
+    const multiplierOrder: Record<string, number> = { '0x': 0, '0.33x': 1, '1x': 2, '3x': 3, '10x': 4, '': 99 };
+    const sortedOptions = [...mergedOptions].sort((a, b) => {
       const orderA = multiplierOrder[a.multiplier] ?? 99;
       const orderB = multiplierOrder[b.multiplier] ?? 99;
       if (orderA !== orderB) return orderA - orderB;
       return a.label.localeCompare(b.label);
     });
-
-    // 標記分組（用於前端顯示分隔線）
     let lastMultiplier = '';
     const options = sortedOptions.map((opt) => {
       const isNewGroup = opt.multiplier !== lastMultiplier;
       lastMultiplier = opt.multiplier;
       return { ...opt, isNewGroup };
     });
-
     return {
-      backend: 'copilot',
-      current: getPreferredModelId(),
+      current,
+      currentReasoning,
       options,
-      hint: 'Copilot backend: select a model.'
+      hint
     };
   }
 
   private async setCopilotModelByName(name: string): Promise<string> {
-    if (!vscode.lm?.selectChatModels) {
-      return 'Language Model API is not available in this VS Code version.';
-    }
-    const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-    if (models.length === 0) {
-      return 'No Copilot models available. Check Copilot login and plan.';
-    }
-    const needle = name.toLowerCase();
-    let match = models.find((model) => model.id.toLowerCase() === needle || model.name.toLowerCase() === needle);
-    if (!match) {
-      match = models.find(
-        (model) => model.id.toLowerCase().includes(needle) || model.name.toLowerCase().includes(needle)
-      );
-    }
-    if (!match) {
-      return `No matching Copilot model for "${name}". Use "/model list" to see options.`;
-    }
-    await vscode.workspace
-      .getConfiguration(CONFIG_SECTION)
-      .update('model', match.id, vscode.ConfigurationTarget.Global);
-    this.setModelLabel(`Model: ${match.name}`);
-    return `BlueMonster model set to: ${match.name} (${match.id})`;
-  }
-
-  private async setCliModelByName(name: string): Promise<string> {
-    await vscode.workspace
-      .getConfiguration(CONFIG_SECTION)
-      .update('cliModel', name, vscode.ConfigurationTarget.Global);
-    return `CLI model set to: ${name}`;
+    return this.setModel(name);
   }
 
   private handleConfirmResponse(message: any) {
@@ -1810,22 +2515,15 @@ class BlueMonsterSession {
     if (action === 'always') {
       // 舊的「不再詢問」- 永久關閉確認（保留向後相容）
       pending({ approved: true, remember: true });
+    } else if (action === 'projectAllow') {
+      pending({ approved: true, projectAllow: category });
     } else if (action === 'sessionAllow') {
-      // 選項 2：這次 session 允許此類操作
-      if (category) {
-        this.sessionAllowedCategories.add(category);
-        this.addMessage('system', `✅ 已在本次對話中允許「${category}」類操作`);
-      }
       pending({ approved: true, sessionAllow: category });
     } else if (action === 'run') {
-      // 選項 1：同意執行
       pending({ approved: true });
     } else if (action === 'custom') {
-      // 選項 4：自定義回應
-      this.addMessage('system', `💭 您的回饋：${customText}`);
       pending({ approved: false, customResponse: customText });
     } else {
-      // 選項 3：拒絕
       pending({ approved: false });
     }
   }
@@ -1884,17 +2582,40 @@ class BlueMonsterSession {
 
   private async handleApplyModel(message: any) {
     const value = typeof message?.value === 'string' ? message.value.trim() : '';
+    const reasoningEffort = typeof message?.reasoningEffort === 'string' ? message.reasoningEffort.trim() : '';
     if (!value) {
       return;
     }
-    const backend = getBackend();
-    if (backend === 'cli') {
-      const result = await this.setCliModelByName(value);
-      this.addMessage('system', result);
-    } else {
-      const result = await this.setCopilotModelByName(value);
-      this.addMessage('system', result);
+    console.log(`[BlueMonster] Switching model to: ${value} (requested reasoning: ${reasoningEffort})`);
+    await vscode.workspace
+      .getConfiguration(CONFIG_SECTION)
+      .update('model', value, vscode.ConfigurationTarget.Global);
+
+    if (reasoningEffort) {
+      await vscode.workspace
+        .getConfiguration(CONFIG_SECTION)
+        .update('reasoningEffort', reasoningEffort, vscode.ConfigurationTarget.Global);
     }
+    
+    // 銷毀當前 chat 的 session，讓下次請求使用新模型
+    const chatId = this.currentChatId;
+    await copilotSDK.destroyWorker(chatId);
+    console.log(`[BlueMonster] Session destroyed, next request will use: ${value}`);
+    
+    let msg = `✅ 已切換模型為 **${value}**`;
+    if (reasoningEffort) {
+      const effortLabels: Record<string, string> = {
+        'low': '⚡',
+        'medium': '⚖️',
+        'high': '🧠',
+        'extra-high': '🔥'
+      };
+      msg += ` (${reasoningEffort} ${effortLabels[reasoningEffort] || ''})`;
+    }
+    this.addMessage('system', msg);
+    this.setModelLabel(`Model: ${value}`);
+    const modelOptions = await this.getModelOptions();
+    this.broadcast({ type: 'modelOptions', ...modelOptions });
   }
 
   async handleUserMessage(
@@ -1939,36 +2660,21 @@ class BlueMonsterSession {
 
     if (trimmed.startsWith('/model')) {
       const arg = trimmed.replace('/model', '').trim();
-      const backend = getBackend();
       if (!arg) {
-        if (backend === 'cli') {
-          const current = getCliModel();
-          this.addMessage('system', current ? `CLI model: ${current}` : 'CLI model is not set.');
-        } else {
-          const current = getPreferredModelId();
-          this.addMessage(
-            'system',
-            current ? `Copilot model id: ${current}` : 'Copilot model is not set. Use "/model list".'
-          );
-        }
+        const current = getPreferredModelId();
+        this.addMessage(
+          'system',
+          current ? `Copilot model id: ${current}` : 'Copilot model is not set. Use "/model list".'
+        );
         return;
       }
       if (arg === 'list') {
-        if (backend === 'cli') {
-          this.addMessage('system', 'CLI backend does not provide a model list. Set it with /model <name>.');
-        } else {
-          const list = await this.listCopilotModels();
-          this.addMessage('system', list);
-        }
+        const list = await this.listCopilotModels();
+        this.addMessage('system', list);
         return;
       }
-      if (backend === 'cli') {
-        const result = await this.setCliModelByName(arg);
-        this.addMessage('system', result);
-      } else {
-        const result = await this.setCopilotModelByName(arg);
-        this.addMessage('system', result);
-      }
+      const result = await this.setCopilotModelByName(arg);
+      this.addMessage('system', result);
       return;
     }
 
@@ -2005,16 +2711,19 @@ class BlueMonsterSession {
         this.addMessage('user', '', { kind: 'file', name: file.name });
       }
     }
+
+    // 在進入模型前，優先處理「模型/模式」自動控制
+    if (trimmed) {
+      const handled = await this.tryHandleSelfControl(trimmed);
+      if (handled) {
+        return;
+      }
+    }
     
     this.setBusy(true);
     this.startThinking();
 
     try {
-      const backend = getBackend();
-      if (backend === 'cli' && images && images.length > 0) {
-        this.addMessage('system', 'CLI backend does not support image input. Images were ignored.');
-      }
-
       // 將模式資訊加入 prompt
       const modePrompt = mode && mode !== 'agent' ? `[Mode: ${mode}] ` : '';
       const basePrompt =
@@ -2031,9 +2740,7 @@ class BlueMonsterSession {
       const memoryContext = trimmed ? await this.buildMemoryContext(trimmed) : '';
       const fullPrompt = modePrompt + basePrompt + fileContext;
       
-      const response = backend === 'cli'
-        ? await this.runCli(fullPrompt, memoryContext)
-        : await this.runLm(fullPrompt, images, memoryContext);
+      const response = await this.runLm(fullPrompt, images, memoryContext);
       if (this.stopRequested) {
         return;
       }
@@ -2045,6 +2752,7 @@ class BlueMonsterSession {
       this.addMessage('system', `Error: ${String(error)}`);
     } finally {
       this.stopThinking();
+      this.stopWorking();
       this.setBusy(false);
     }
   }
@@ -2054,6 +2762,9 @@ class BlueMonsterSession {
       case 'ready':
         this.broadcast({ type: 'history', messages: this.messages });
         void this.refreshModelLabel();
+        if (this.activityLines.length > 0 || this.activityStatus !== 'Idle') {
+          this.broadcast({ type: 'activity', status: this.activityStatus, lines: [...this.activityLines] });
+        }
         break;
       case 'userMessage':
         await this.handleUserMessage(
@@ -2079,8 +2790,8 @@ class BlueMonsterSession {
         if (this.messages.length > 0) {
           await this.saveCurrentChatToHistory();
         }
-        // 創建新任務（舊任務繼續在背景執行）
-        const newTask = this.createNewTask();
+        // 創建新任務（舊任務繼續在背景執行）- 等待 taskFolder 建立完成
+        const newTask = await this.createNewTask();
         // 更新 UI 顯示新任務
         this.broadcast({ type: 'history', messages: [] });
         this.broadcast({ type: 'busy', value: false });
@@ -2226,6 +2937,143 @@ class BlueMonsterSession {
       tokens.push(token);
     }
     return tokens;
+  }
+
+  private compactToken(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  private resolveModelIdFromText(text: string, models?: vscode.LanguageModelChat[]): string | undefined {
+    const lower = text.toLowerCase();
+    const compactText = this.compactToken(lower);
+    const candidates: Array<{ id: string; alias: string; compact: string }> = [];
+    const seen = new Set<string>();
+
+    const addCandidate = (id: string, alias?: string) => {
+      if (!id) return;
+      const aliasValue = (alias || id).toLowerCase().trim();
+      if (!aliasValue) return;
+      const compact = this.compactToken(aliasValue);
+      if (compact.length < 3) return;
+      const key = `${id}|${aliasValue}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      candidates.push({ id, alias: aliasValue, compact });
+    };
+
+    if (models && models.length > 0) {
+      for (const model of models) {
+        addCandidate(model.id);
+        if (model.name) addCandidate(model.id, model.name);
+      }
+    }
+
+    for (const model of SDK_MODELS) {
+      addCandidate(model.id);
+      if (model.label) addCandidate(model.id, model.label);
+    }
+
+    const ordered = candidates.sort((a, b) => b.compact.length - a.compact.length);
+    for (const candidate of ordered) {
+      if (lower.includes(candidate.alias)) {
+        return candidate.id;
+      }
+    }
+    for (const candidate of ordered) {
+      if (compactText.includes(candidate.compact)) {
+        return candidate.id;
+      }
+    }
+
+    return undefined;
+  }
+
+  private async classifySelfControlIntent(text: string): Promise<{ action: 'none' | 'listModels' | 'setModel' | 'setMode'; model?: string; reasoning?: string; mode?: string }> {
+    if (!vscode.lm?.selectChatModels) {
+      return { action: 'none' };
+    }
+    const model = await this.resolveModel();
+    if (!model) {
+      return { action: 'none' };
+    }
+    const prompt = [
+      'You are an intent classifier for a VS Code assistant.',
+      'Return JSON ONLY.',
+      'Decide if the user wants to list models, set model, set mode, or none.',
+      'Use action in ["none","listModels","setModel","setMode"].',
+      'If setMode, mode must be one of ["chat","agent","agent-full"].',
+      'If setModel, include model as the model id or name if mentioned.',
+      'If reasoning effort is mentioned, include reasoning in ["low","medium","high","extra-high"].',
+      `User: ${text}`
+    ].join('\n');
+
+    const response = await model.sendRequest(
+      [vscode.LanguageModelChatMessage.User(prompt)],
+      { tools: [], toolMode: vscode.LanguageModelChatToolMode.None }
+    );
+    let textOut = '';
+    for await (const part of response.stream) {
+      if (part instanceof vscode.LanguageModelTextPart) {
+        textOut += part.value;
+      }
+    }
+    const jsonMatch = textOut.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return { action: 'none' };
+    }
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const action = parsed.action as 'none' | 'listModels' | 'setModel' | 'setMode';
+      return {
+        action: action || 'none',
+        model: typeof parsed.model === 'string' ? parsed.model : undefined,
+        reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : undefined,
+        mode: typeof parsed.mode === 'string' ? parsed.mode : undefined
+      };
+    } catch {
+      return { action: 'none' };
+    }
+  }
+
+  // 嘗試從自然語句中解析「模型/模式」控制指令（改成先用 LLM 做意圖判斷）
+  private async tryHandleSelfControl(text: string): Promise<boolean> {
+    const raw = text.trim();
+    if (!raw) return false;
+    const hint = /(模型|model|mode|代理|計畫|安全|危險|danger|safe|chat|plan)/i;
+    if (!hint.test(raw)) {
+      return false;
+    }
+
+    const intent = await this.classifySelfControlIntent(raw);
+    if (intent.action === 'listModels') {
+      const list = await this.listModels();
+      this.addMessage('system', list);
+      return true;
+    }
+    if (intent.action === 'setMode') {
+      if (!intent.mode) {
+        this.addMessage('system', '請告訴我要切換到哪一種模式（chat / agent / agent-full）。');
+        return true;
+      }
+      const result = this.setMode(intent.mode);
+      this.addMessage('system', result);
+      return true;
+    }
+    if (intent.action === 'setModel') {
+      const modelText = intent.model?.trim();
+      if (!modelText) {
+        this.addMessage('system', '請告訴我要切換到哪個模型，或輸入「列出可用模型」。');
+        return true;
+      }
+      const reasoning = intent.reasoning && /(low|medium|high|extra-high)/i.test(intent.reasoning)
+        ? intent.reasoning.toLowerCase()
+        : '';
+      const arg = reasoning ? `${modelText} (${reasoning})` : modelText;
+      const result = await this.setModel(arg);
+      this.addMessage('system', result);
+      return true;
+    }
+    return false;
   }
 
   private buildSearchText(messages: UiMessage[]): string {
@@ -2893,6 +3741,19 @@ class BlueMonsterPanel {
 export async function activate(context: vscode.ExtensionContext) {
   const session = new BlueMonsterSession(context);
   const mcpManager = new McpManager();
+  const config = getConfig();
+  console.log('[BlueMonster] Running in SDK-only mode (CLI backend removed).');
+
+  // CLI backend 已移除：提示使用者並自動遷移 reasoning 設定
+  const legacyBackend = (config.get<string>('backend') || '').toLowerCase();
+  if (legacyBackend === 'cli') {
+    vscode.window.showWarningMessage('BlueMonster: CLI backend 已移除，將改用 Copilot SDK。請移除 blueMonster.backend 設定。');
+  }
+  const legacyReasoning = config.get<string>('cliReasoningEffort');
+  const currentReasoning = config.get<string>('reasoningEffort');
+  if (!currentReasoning && legacyReasoning) {
+    await config.update('reasoningEffort', legacyReasoning, vscode.ConfigurationTarget.Global);
+  }
 
   if (getMcpAutoStart()) {
     const servers = getMcpServers();
@@ -3114,5 +3975,7 @@ export async function deactivate() {
   if (session) {
     await session.forceSaveHistory();
   }
+  // 關閉 Copilot SDK 所有 Workers
+  await copilotSDK.shutdown();
   disposeTerminal();
 }

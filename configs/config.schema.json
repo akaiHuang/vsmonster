@@ -1,17 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "VSMONSTER Configuration",
-  "description": "VSMONSTER 配置文件格式",
+  "description": "VSMONSTER \u914d\u7f6e\u6587\u4ef6\u683c\u5f0f",
   "type": "object",
   "properties": {
     "port": {
       "type": "number",
       "default": 3000,
-      "description": "Gateway 監聽端口"
+      "description": "Gateway \u76e3\u807d\u7aef\u53e3"
     },
     "channels": {
       "type": "object",
-      "description": "社群頻道配置",
+      "description": "\u793e\u7fa4\u983b\u9053\u914d\u7f6e",
       "properties": {
         "line": {
           "type": "object",
@@ -23,9 +23,23 @@
             "channelSecret": {
               "type": "string",
               "description": "LINE Channel Secret"
+            },
+            "webhookSecret": {
+              "type": "string",
+              "description": "LINE Webhook Secret (URL path segment)"
+            },
+            "whitelist": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "LINE whitelist user IDs"
             }
           },
-          "required": ["channelAccessToken", "channelSecret"]
+          "required": [
+            "channelAccessToken",
+            "channelSecret"
+          ]
         },
         "telegram": {
           "type": "object",
@@ -36,10 +50,12 @@
             },
             "webhookUrl": {
               "type": "string",
-              "description": "Telegram Webhook URL (可選)"
+              "description": "Telegram Webhook URL (\u53ef\u9078)"
             }
           },
-          "required": ["botToken"]
+          "required": [
+            "botToken"
+          ]
         },
         "discord": {
           "type": "object",
@@ -57,18 +73,21 @@
               "description": "Discord Public Key"
             }
           },
-          "required": ["botToken", "applicationId"]
+          "required": [
+            "botToken",
+            "applicationId"
+          ]
         }
       }
     },
     "tunnel": {
       "type": "object",
-      "description": "ngrok 隧道配置",
+      "description": "ngrok \u96a7\u9053\u914d\u7f6e",
       "properties": {
         "enabled": {
           "type": "boolean",
           "default": false,
-          "description": "是否啟用 ngrok"
+          "description": "\u662f\u5426\u555f\u7528 ngrok"
         },
         "authtoken": {
           "type": "string",
@@ -76,19 +95,27 @@
         },
         "region": {
           "type": "string",
-          "enum": ["us", "eu", "ap", "au", "sa", "jp", "in"],
+          "enum": [
+            "us",
+            "eu",
+            "ap",
+            "au",
+            "sa",
+            "jp",
+            "in"
+          ],
           "default": "ap",
-          "description": "ngrok 區域"
+          "description": "ngrok \u5340\u57df"
         },
         "subdomain": {
           "type": "string",
-          "description": "ngrok 自定義子域名 (需要付費帳號)"
+          "description": "ngrok \u81ea\u5b9a\u7fa9\u5b50\u57df\u540d (\u9700\u8981\u4ed8\u8cbb\u5e33\u865f)"
         }
       }
     },
     "mcp": {
       "type": "object",
-      "description": "MCP 服務器配置",
+      "description": "MCP \u670d\u52d9\u5668\u914d\u7f6e",
       "properties": {
         "servers": {
           "type": "array",
@@ -97,32 +124,43 @@
             "properties": {
               "name": {
                 "type": "string",
-                "description": "MCP 服務器名稱"
+                "description": "MCP \u670d\u52d9\u5668\u540d\u7a31"
               },
               "command": {
                 "type": "string",
-                "description": "啟動命令"
+                "description": "\u555f\u52d5\u547d\u4ee4"
               },
               "args": {
                 "type": "array",
-                "items": { "type": "string" },
-                "description": "命令參數"
+                "items": {
+                  "type": "string"
+                },
+                "description": "\u547d\u4ee4\u53c3\u6578"
               },
               "env": {
                 "type": "object",
-                "additionalProperties": { "type": "string" },
-                "description": "環境變數"
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "\u74b0\u5883\u8b8a\u6578"
               },
               "enabled": {
                 "type": "boolean",
                 "default": true,
-                "description": "是否啟用"
+                "description": "\u662f\u5426\u555f\u7528"
               }
             },
-            "required": ["name", "command"]
+            "required": [
+              "name",
+              "command"
+            ]
           }
         }
       }
+    },
+    "publicUrl": {
+      "type": "string",
+      "description": "Public base URL (e.g. https://ufo.fawstudio.com)"
     }
   }
 }

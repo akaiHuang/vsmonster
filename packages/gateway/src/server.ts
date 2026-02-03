@@ -1,4 +1,6 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
 import { createServer } from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
 import { loadConfig, VSMONSTERConfig } from './config/loader';
@@ -10,6 +12,7 @@ import { MCPController } from './mcp/controller';
 import { WebInterface } from './web-interface';
 import { SoulManager } from './soul/manager';
 import { logger } from './utils/logger';
+import crypto from 'crypto';
 
 export class VSMONSTERGateway {
   private app: express.Application;
@@ -26,6 +29,10 @@ export class VSMONSTERGateway {
   private soulManager: SoulManager;
   
   private vsCodeConnections: Set<WebSocket> = new Set();
+  private lineHandshakeCodes: Map<string, string> = new Map();
+  private readonly lineHandshakeEmojis = ['🛸', '👾'];
+  private adminResetToken: string;
+  private ufoApprovals: Map<string, { token: string; userId: string; channel: string; taskPath: string }> = new Map();
 
   constructor() {
     this.config = loadConfig();
@@ -41,14 +48,23 @@ export class VSMONSTERGateway {
     this.mcpController = new MCPController(this.config.mcp);
     this.webInterface = new WebInterface(this.app, this.copilotBridge, this.config.port);
     this.soulManager = new SoulManager();
+    this.adminResetToken = crypto.randomBytes(8).toString('hex');
     
     this.setupMiddleware();
     this.setupRoutes();
     this.setupWebSocket();
+
+    logger.info(`UFO Admin reset token: ${this.adminResetToken}`);
   }
 
   private setupMiddleware(): void {
-    this.app.use(express.json());
+    this.app.use(
+      express.json({
+        verify: (req, _res, buf) => {
+          (req as any).rawBody = buf.toString();
+        }
+      })
+    );
     this.app.use(express.urlencoded({ extended: true }));
     
     // CORS for VS Code extension
@@ -72,6 +88,19 @@ export class VSMONSTERGateway {
     });
 
     // LINE Webhook - 使用動態安全路徑
+    this.app.get('/webhook/line/:secret', (req, res) => {
+      // Some platforms perform a GET verification. Respond 200 if the path matches.
+      const lineChannel = this.channelManager.getChannel('line') as any;
+      if (lineChannel && lineChannel.webhookPath) {
+        const expectedPath = lineChannel.webhookPath.replace('/webhook/line/', '');
+        if (req.params.secret !== expectedPath) {
+          logger.warn('LINE webhook invalid secret in URL (GET)');
+          return res.sendStatus(403);
+        }
+      }
+      return res.sendStatus(200);
+    });
+
     this.app.post('/webhook/line/:secret', async (req, res) => {
       try {
         // 驗證 webhook token header
@@ -80,9 +109,25 @@ export class VSMONSTERGateway {
           logger.warn('LINE webhook request without signature header');
           return res.sendStatus(403);
         }
-        
-        // 驗證 URL 路徑中的 secret
+
+        const rawBody = (req as any).rawBody as string | undefined;
         const lineChannel = this.channelManager.getChannel('line') as any;
+        if (!rawBody || !lineChannel?.config?.channelSecret) {
+          logger.warn('LINE webhook missing raw body or channel secret');
+          return res.sendStatus(403);
+        }
+
+        const expectedSignature = crypto
+          .createHmac('sha256', lineChannel.config.channelSecret)
+          .update(rawBody)
+          .digest('base64');
+
+        if (authToken !== expectedSignature) {
+          logger.warn('LINE webhook signature mismatch');
+          return res.sendStatus(403);
+        }
+
+        // 驗證 URL 路徑中的 secret
         if (lineChannel && lineChannel.webhookPath) {
           const expectedPath = lineChannel.webhookPath.replace('/webhook/line/', '');
           if (req.params.secret !== expectedPath) {
@@ -161,6 +206,46 @@ export class VSMONSTERGateway {
     this.app.get('/api/tunnel', (req, res) => {
       res.json(this.tunnelService.getStatus());
     });
+
+    // UFO approval pages
+    this.app.get('/ufo/approve/:taskId', (req, res) => {
+      const taskId = req.params.taskId;
+      const approval = this.ufoApprovals.get(taskId);
+      if (!approval) {
+        return res.sendStatus(404);
+      }
+
+      const token = String(req.query.token || '');
+      if (token !== approval.token) {
+        return res.sendStatus(403);
+      }
+
+      const files = this.readTaskFiles(approval.taskPath, taskId);
+      return res.send(this.renderApprovalPage(taskId, token, files));
+    });
+
+    this.app.post('/api/ufo/approve/:taskId', (req, res) => {
+      const taskId = req.params.taskId;
+      const approval = this.ufoApprovals.get(taskId);
+      if (!approval) {
+        return res.sendStatus(404);
+      }
+
+      const token = String(req.query.token || '');
+      if (token !== approval.token) {
+        return res.sendStatus(403);
+      }
+
+      this.ufoApprovals.delete(taskId);
+      this.broadcastToVSCode({
+        type: 'ufo_approved',
+        taskId,
+        userId: approval.userId,
+        channel: approval.channel,
+        taskPath: approval.taskPath
+      });
+      return res.json({ success: true });
+    });
   }
 
   private setupWebSocket(): void {
@@ -225,6 +310,20 @@ export class VSMONSTERGateway {
         );
         ws.send(JSON.stringify({ type: 'mcp_result', requestId: message.requestId, result }));
         break;
+
+      case 'ufo_request_approval': {
+        const { taskId, taskPath, channel, userId } = message;
+        if (!taskId || !taskPath || !channel || !userId) {
+          break;
+        }
+        const token = crypto.randomBytes(8).toString('hex');
+        this.ufoApprovals.set(taskId, { token, userId, channel, taskPath });
+        const base = this.getPublicUrl();
+        const approvalUrl = `${base}/ufo/approve/${encodeURIComponent(taskId)}?token=${token}`;
+        await this.sendToChannel(channel, userId, `📝 請確認需求與規格：\n${approvalUrl}`);
+        ws.send(JSON.stringify({ type: 'ufo_approval_link', taskId, url: approvalUrl }));
+        break;
+      }
     }
   }
 
@@ -233,6 +332,65 @@ export class VSMONSTERGateway {
     if (!parsed) return;
 
     const { userId, text, media } = parsed;
+
+    if (!text) {
+      return;
+    }
+
+    if (channel === 'line') {
+      const lineChannel = this.channelManager.getChannel('line') as any;
+      if (lineChannel && !lineChannel.isWhitelisted(userId)) {
+        const normalized = text.trim().toLowerCase();
+        const currentCode = this.lineHandshakeCodes.get(userId);
+        const generateCode = () => {
+          const code = Array.from({ length: 4 }, () => {
+            return this.lineHandshakeEmojis[Math.floor(Math.random() * this.lineHandshakeEmojis.length)];
+          }).join('');
+          this.lineHandshakeCodes.set(userId, code);
+          logger.info(`LINE handshake code for ${userId}: ${code}`);
+          return code;
+        };
+
+        if (!currentCode) {
+          generateCode();
+        }
+
+        if (text.trim() === currentCode) {
+          await lineChannel.addToWhitelist(userId);
+          this.lineHandshakeCodes.delete(userId);
+        } else {
+          if (normalized === '你好') {
+            generateCode();
+          }
+
+          if (normalized === `/ufo-reset ${this.adminResetToken}`) {
+            lineChannel.clearWhitelist();
+            this.lineHandshakeCodes.clear();
+            await this.sendToChannel(channel, userId, '🧹 已清空白名單與握手狀態');
+            return;
+          }
+
+          await this.sendToChannel(
+            channel,
+            userId,
+            '🔒 尚未授權。請依照後台顯示的握手符號回覆。若未看到請回覆「你好」以重新產生。'
+          );
+        }
+        return;
+      }
+    }
+
+    if (channel === 'line' && text) {
+      this.broadcastToVSCode({
+        type: 'ufo_message',
+        channel,
+        userId,
+        text,
+        messageId: parsed.messageId,
+        timestamp: parsed.timestamp.toISOString(),
+        media
+      });
+    }
 
     // 檢查是否為問候或第一次使用
     if (this.isGreeting(text)) {
@@ -301,6 +459,24 @@ export class VSMONSTERGateway {
 
   private async handleCommand(channel: string, userId: string, command: { cmd: string; args: string }): Promise<void> {
     switch (command.cmd) {
+      case 'ufo-reset': {
+        if (channel !== 'line') {
+          await this.sendToChannel(channel, userId, '❌ 此指令僅支援 LINE');
+          break;
+        }
+        const token = command.args.trim();
+        if (!token || token !== this.adminResetToken) {
+          await this.sendToChannel(channel, userId, '❌ Reset token 不正確');
+          break;
+        }
+        const lineChannel = this.channelManager.getChannel('line') as any;
+        if (lineChannel) {
+          lineChannel.clearWhitelist();
+        }
+        this.lineHandshakeCodes.clear();
+        await this.sendToChannel(channel, userId, '🧹 已清空白名單與握手狀態');
+        break;
+      }
       case 'status':
         const tasks = this.taskManager.getTasksForUser(userId);
         const status = tasks.length > 0 
@@ -379,6 +555,96 @@ export class VSMONSTERGateway {
   private broadcastToChannels(type: string, data: any): void {
     // 廣播到所有有活躍用戶的頻道
     this.channelManager.broadcastMessage(type, data);
+  }
+
+  private getPublicUrl(): string {
+    if (this.config.publicUrl) {
+      return this.config.publicUrl.replace(/\/+$/, '');
+    }
+    const tunnelStatus = this.tunnelService.getStatus();
+    if (tunnelStatus.active && tunnelStatus.url) {
+      return tunnelStatus.url.replace(/\/+$/, '');
+    }
+    return `http://localhost:${this.config.port || 3000}`;
+  }
+
+  private readTaskFiles(taskPath: string, taskId: string): { readme: string; agents: string; devSpec: string } {
+    const safeTaskPath = path.resolve(taskPath);
+    const readmePath = path.join(safeTaskPath, 'README.md');
+    const agentsPath = path.join(safeTaskPath, 'AGENTS.md');
+    const devSpecPath = path.join(safeTaskPath, `dev-spec-${taskId}.md`);
+
+    const readFileSafe = (p: string) => {
+      try {
+        return fs.readFileSync(p, 'utf8');
+      } catch {
+        return '';
+      }
+    };
+
+    return {
+      readme: readFileSafe(readmePath),
+      agents: readFileSafe(agentsPath),
+      devSpec: readFileSafe(devSpecPath)
+    };
+  }
+
+  private renderApprovalPage(
+    taskId: string,
+    token: string,
+    files: { readme: string; agents: string; devSpec: string }
+  ): string {
+    const escape = (value: string) =>
+      value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    return `<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UFO 任務確認 - ${taskId}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#0f1115; color:#e5e7eb; padding:24px; }
+    h1 { margin-bottom: 8px; }
+    pre { background:#111827; padding:16px; border-radius:8px; overflow:auto; white-space:pre-wrap; }
+    .card { margin-bottom: 24px; }
+    button { padding:12px 16px; font-size:16px; border-radius:8px; border:none; background:#22c55e; color:#0b0f14; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <h1>UFO 任務確認</h1>
+  <p>任務 ID：${taskId}</p>
+
+  <div class="card">
+    <h2>README</h2>
+    <pre>${escape(files.readme)}</pre>
+  </div>
+  <div class="card">
+    <h2>AGENTS</h2>
+    <pre>${escape(files.agents)}</pre>
+  </div>
+  <div class="card">
+    <h2>DEV SPEC</h2>
+    <pre>${escape(files.devSpec)}</pre>
+  </div>
+
+  <button id="approve">✅ 確認並開始開發</button>
+
+  <script>
+    document.getElementById('approve').addEventListener('click', async () => {
+      const res = await fetch('/api/ufo/approve/${taskId}?token=${token}', { method: 'POST' });
+      if (res.ok) {
+        alert('已確認，任務已交接。');
+      } else {
+        alert('確認失敗，請稍後再試。');
+      }
+    });
+  </script>
+</body>
+</html>`;
   }
 
   async start(): Promise<void> {

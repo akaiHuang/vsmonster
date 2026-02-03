@@ -60,6 +60,48 @@ body {
   gap: 4px;
 }
 
+/* 佇列/預算狀態列 */
+.queue-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.15);
+  border-bottom: 1px solid var(--vscode-panel-border);
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.queue-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+.queue-badge.running {
+  background: rgba(76, 175, 80, 0.2);
+  color: #81c784;
+}
+.queue-badge.waiting {
+  background: rgba(255, 193, 7, 0.2);
+  color: #ffca28;
+}
+.queue-badge.budget {
+  background: rgba(33, 150, 243, 0.2);
+  color: #64b5f6;
+}
+.queue-badge.budget-exceeded {
+  background: rgba(244, 67, 54, 0.25);
+  color: #ef5350;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 /* 自定義選擇器 */
 .custom-select {
   position: relative;
@@ -102,13 +144,14 @@ body {
   bottom: calc(100% + 4px);
   left: 0;
   min-width: 100%;
+  max-height: 400px;
+  overflow-y: auto;
   background: #2d2d2d;
   border: 1px solid #454545;
   border-radius: 8px;
   box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
   z-index: 1000;
   display: none;
-  overflow: hidden;
 }
 .custom-select-options.show {
   display: block;
@@ -134,11 +177,47 @@ body {
 }
 .custom-select-option .check-mark {
   width: 16px;
+  height: 16px;
   opacity: 0;
-  color: #4fc3f7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .custom-select-option.selected .check-mark {
   opacity: 1;
+}
+.custom-select-option .check-mark svg {
+  width: 14px;
+  height: 14px;
+}
+.custom-select-option .check-mark svg circle {
+  stroke: #4fc3f7;
+  fill: none;
+  stroke-width: 2;
+  stroke-dasharray: 50;
+  stroke-dashoffset: 50;
+  transform-origin: center;
+}
+.custom-select-option.selected .check-mark svg circle {
+  animation: checkCircle 0.4s ease forwards;
+}
+.custom-select-option .check-mark svg polyline {
+  stroke: #4fc3f7;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+}
+.custom-select-option.selected .check-mark svg polyline {
+  animation: checkMark 0.3s ease 0.2s forwards;
+}
+@keyframes checkCircle {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes checkMark {
+  to { stroke-dashoffset: 0; }
 }
 .custom-select-option .multiplier-badge {
   margin-left: auto;
@@ -153,10 +232,119 @@ body {
   background: rgba(76, 175, 80, 0.15);
   font-weight: 600;
 }
+.custom-select-option .reasoning-badge {
+  font-size: 10px;
+  color: #ff9800;
+  background: rgba(255, 152, 0, 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
 .custom-select-divider {
   height: 1px;
   background: rgba(128, 128, 128, 0.3);
   margin: 4px 8px;
+}
+/* GPT 折疊選擇器樣式 */
+.model-group {
+  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+}
+.model-group:last-child {
+  border-bottom: none;
+}
+.model-group-header {
+  padding: 8px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: background 0.15s;
+}
+.model-group-header:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.model-group-header .expand-icon {
+  margin-right: 8px;
+  font-size: 10px;
+  transition: transform 0.2s;
+  color: #888;
+}
+.model-group.expanded .expand-icon {
+  transform: rotate(90deg);
+}
+.model-group-header .model-name {
+  flex: 1;
+}
+.model-group-header .multiplier-badge {
+  margin-left: auto;
+  font-size: 10px;
+  color: #888;
+  background: rgba(128, 128, 128, 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.model-group-header .multiplier-badge.free {
+  color: #4caf50;
+  background: rgba(76, 175, 80, 0.15);
+}
+.model-group-options {
+  display: none;
+  background: rgba(0, 0, 0, 0.15);
+  padding-left: 20px;
+}
+.model-group.expanded .model-group-options {
+  display: block;
+}
+.reasoning-option {
+  padding: 6px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+.reasoning-option:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.reasoning-option.selected {
+  background: rgba(79, 195, 247, 0.1);
+}
+.reasoning-option .check-mark {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.reasoning-option.selected .check-mark {
+  opacity: 1;
+}
+.reasoning-option .check-mark svg {
+  width: 14px;
+  height: 14px;
+}
+.reasoning-option .check-mark svg circle {
+  stroke: #4fc3f7;
+  fill: none;
+  stroke-width: 2;
+  stroke-dasharray: 50;
+  stroke-dashoffset: 50;
+}
+.reasoning-option.selected .check-mark svg circle {
+  animation: checkCircle 0.4s ease forwards;
+}
+.reasoning-option .check-mark svg polyline {
+  stroke: #4fc3f7;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+}
+.reasoning-option.selected .check-mark svg polyline {
+  animation: checkMark 0.3s ease 0.2s forwards;
 }
 .select-pill {
   display: none;
@@ -384,12 +572,71 @@ body {
 }
 .activity-card .card-icon {
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .activity-card .card-icon.done {
   color: #89d185;
 }
 .activity-card .card-icon.working {
   color: var(--vscode-progressBar-background);
+}
+.activity-check-svg {
+  width: 16px;
+  height: 16px;
+}
+.activity-check-svg circle {
+  stroke: #89d185;
+  fill: none;
+  stroke-width: 2;
+  stroke-dasharray: 50;
+  stroke-dashoffset: 0;
+}
+.activity-check-svg polyline {
+  stroke: #89d185;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 20;
+  stroke-dashoffset: 0;
+}
+/* 訊息中的 check icon */
+.msg-check-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+.msg-check-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.msg-check-icon svg circle {
+  stroke: #4fc3f7;
+  fill: none;
+  stroke-width: 2;
+  stroke-dasharray: 50;
+  stroke-dashoffset: 50;
+  animation: msgCheckCircle 0.4s ease forwards;
+}
+.msg-check-icon svg polyline {
+  stroke: #4fc3f7;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+  animation: msgCheckMark 0.3s ease 0.25s forwards;
+}
+@keyframes msgCheckCircle {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes msgCheckMark {
+  to { stroke-dashoffset: 0; }
 }
 .activity-card .card-title {
   flex: 1;
@@ -697,6 +944,11 @@ body {
   align-items: center;
   gap: 6px;
 }
+.panel-meta {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-bottom: 8px;
+}
 .panel-body {
   font-family: var(--vscode-editor-font-family);
   font-size: 12px;
@@ -844,34 +1096,62 @@ body {
   opacity: 0.6;
 }
 
-/* Thinking panel - 改進動畫 */
-.thinking-panel {
+/* Activity panel - 單一狀態列 + 3 行事件紀錄 */
+.activity-panel {
   margin: 8px 12px;
-  padding: 10px 12px;
-  background: var(--vscode-textBlockQuote-background);
-  border-left: 3px solid var(--vscode-progressBar-background);
-  border-radius: 0 4px 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  background: #1f242c;
+  border: 1px solid #2a2f38;
+  border-radius: 12px;
   font-size: 12px;
+  position: relative;
 }
-.thinking-header {
+.activity-panel[hidden] {
+  display: none !important;
+}
+.activity-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 500;
+  font-weight: 600;
+  color: #c9d1d9;
 }
-.thinking-body {
-  margin-top: 6px;
-  font-size: 11px;
-  opacity: 0.8;
-  white-space: pre-wrap;
-  max-height: 120px;
-  overflow-y: auto;
+.activity-status {
+  background: linear-gradient(90deg, #9fb7d7 0%, #9fb7d7 40%, #ffffff 50%, #9fb7d7 60%, #9fb7d7 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: textShimmer 2s linear infinite;
+}
+.activity-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #9fb7d7;
+  font-size: 11.5px;
+}
+.activity-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.activity-line::before {
+  content: "•";
+  color: #4fc3f7;
+}
+@keyframes textShimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 .spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--vscode-progressBar-background);
-  border-top-color: transparent;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(102, 102, 102, 0.3);
+  border-top-color: #888;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }

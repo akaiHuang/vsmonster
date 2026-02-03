@@ -45,6 +45,20 @@ const DANGER_PATTERNS: Array<{ patterns: string[]; info: DangerInfo }> = [
   { patterns: ['reboot', 'shutdown', 'halt', 'poweroff', 'mkfs', 'fdisk', 'dd ', 'eval ', 'exec ', '> /', '>> /'], info: { category: 'system', label: '⚡ 系統操作', settingKey: 'confirmSystem' } },
 ];
 
+const DANGER_CATEGORY_TO_SETTING: Record<DangerCategory, keyof SafeModeSettings> = {
+  delete: 'confirmDelete',
+  move: 'confirmMove',
+  sudo: 'confirmSudo',
+  network: 'confirmNetwork',
+  download: 'confirmDownload',
+  package: 'confirmPackage',
+  git: 'confirmGit',
+  docker: 'confirmDocker',
+  permission: 'confirmPermission',
+  kill: 'confirmKill',
+  system: 'confirmSystem'
+};
+
 /**
  * 取得配置物件
  */
@@ -53,24 +67,15 @@ export function getConfig(): vscode.WorkspaceConfiguration {
 }
 
 /**
- * 取得 CLI 命令模板
+ * 取得 Reasoning Effort
+ * 優先使用新設定 `blueMonster.reasoningEffort`，若不存在則相容舊設定 `cliReasoningEffort`
  */
-export function getCliCommand(): string {
-  return getConfig().get<string>('cliCommand') || '';
-}
-
-/**
- * 取得 CLI 模型
- */
-export function getCliModel(): string | undefined {
-  return getConfig().get<string>('cliModel') || undefined;
-}
-
-/**
- * 取得 CLI 工作目錄
- */
-export function getCliCwd(): string | undefined {
-  return getConfig().get<string>('cliCwd') || undefined;
+export function getReasoningEffort(): string {
+  const config = getConfig();
+  const current = config.get<string>('reasoningEffort');
+  if (current) return current;
+  const legacy = config.get<string>('cliReasoningEffort');
+  return legacy || 'medium';
 }
 
 /**
@@ -97,9 +102,6 @@ export function getDangerModeEnabled(): boolean {
 /**
  * 取得後端類型
  */
-export function getBackend(): string {
-  return getConfig().get<string>('backend') || 'copilot';
-}
 
 /**
  * 取得偏好的模型 ID
@@ -173,4 +175,22 @@ export function shouldConfirmCommand(command: string, settings: SafeModeSettings
   const danger = detectDangerousCommand(command);
   if (!danger) return { confirm: false, label: '', category: '' };
   return { confirm: settings[danger.settingKey], label: danger.label, category: danger.category };
+}
+
+export function getSafeModeSettingKeyByCategory(category: string): keyof SafeModeSettings | undefined {
+  if (!category) return undefined;
+  return (DANGER_CATEGORY_TO_SETTING as Record<string, keyof SafeModeSettings | undefined>)[category];
+}
+
+export async function setSafeModeCategoryConfirmation(
+  category: string,
+  enabled: boolean,
+  target: vscode.ConfigurationTarget = vscode.ConfigurationTarget.Workspace
+): Promise<boolean> {
+  const key = getSafeModeSettingKeyByCategory(category);
+  if (!key) {
+    return false;
+  }
+  await getConfig().update(`safeMode.${key}`, enabled, target);
+  return true;
 }
