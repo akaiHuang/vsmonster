@@ -6,7 +6,7 @@ UFO 是 VSMONSTER 的新成員，定位為任務規格生成與交接的控制�
 ## 目前範圍
 - 只在 `UFO/` 內開發與管理
 - 以檔案為主的任務等待區與工具區
-- 先提供最小可用的 VS Code 擴充骨架
+- 提供 Control Center Dashboard 與任務清單 UI
 
 ## 資料夾結構
 ```
@@ -29,7 +29,8 @@ UFO/
     ├── esbuild.js
     ├── resources/
     └── src/
-        └── extension.ts
+        ├── extension.ts
+        └── dashboard.ts
 ```
 
 ## 開發路線

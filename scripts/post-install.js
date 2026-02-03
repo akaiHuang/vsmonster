@@ -78,6 +78,10 @@ const i18n = {
     langOption1: '  [1] English',
     langOption2: '  [2] 中文',
     langPrompt: 'Enter 1 or 2 (default: 1): ',
+    setupMediaCdn: '⚙️  媒體 CDN 設定（用於安全共享照片）：',
+    mediaStep1: '   1. 在 Cloudflare 創建獨立隧道用於媒體',
+    mediaStep2: '   2. 配置 VSMONSTER_MEDIA_URL 到 .env',
+    mediaStep3: '   📖 詳細步驟：docs/MEDIA-CDN-SETUP.md',
   }
 };
 
@@ -110,11 +114,95 @@ function checkMoltbot() {
   }
 }
 
+function checkNgrok() {
+  try {
+    const version = execSync('ngrok --version', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    return { installed: true, version };
+  } catch {
+    return { installed: false };
+  }
+}
+
+function checkCloudflared() {
+  try {
+    const version = execSync('cloudflared --version', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    return { installed: true, version };
+  } catch {
+    return { installed: false };
+  }
+}
+
 async function installMoltbot() {
   console.log(`\n${c.yellow}${t.installing}${c.reset}\n`);
   
   return new Promise((resolve, reject) => {
     const install = spawn('npm', ['install', '-g', 'moltbot@latest'], {
+      stdio: 'inherit',
+      shell: true
+    });
+    
+    install.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Installation failed with code ${code}`));
+      }
+    });
+  });
+}
+
+async function installCloudflared() {
+  console.log(`\n${c.yellow}📦 正在安裝 cloudflared...${c.reset}\n`);
+  
+  const isAppleSilicon = execSync('uname -m', { encoding: 'utf8' }).trim() === 'arm64';
+  const isMac = execSync('uname', { encoding: 'utf8' }).trim() === 'Darwin';
+  
+  return new Promise((resolve, reject) => {
+    let command, args;
+    
+    if (isMac) {
+      command = 'brew';
+      args = ['install', 'cloudflare/cloudflare/cloudflared'];
+    } else {
+      // Linux
+      command = 'curl';
+      args = ['-L', 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb', '-o', '/tmp/cloudflared.deb'];
+    }
+    
+    const install = spawn(command, args, {
+      stdio: 'inherit',
+      shell: true
+    });
+    
+    install.on('close', (code) => {
+      if (code === 0) {
+        if (!isMac) {
+          // Install deb on Linux
+          try {
+            execSync('sudo dpkg -i /tmp/cloudflared.deb', { stdio: 'inherit' });
+          } catch (e) {
+            reject(e);
+            return;
+          }
+        }
+        resolve();
+      } else {
+        reject(new Error(`Installation failed with code ${code}`));
+      }
+    });
+  });
+}
+
+async function installNgrok() {
+  console.log(`\n${c.yellow}📦 正在安裝 ngrok...${c.reset}\n`);
+  
+  const isMac = execSync('uname', { encoding: 'utf8' }).trim() === 'Darwin';
+  
+  return new Promise((resolve, reject) => {
+    const command = isMac ? 'brew' : 'snap';
+    const args = isMac ? ['install', 'ngrok'] : ['install', 'ngrok'];
+    
+    const install = spawn(command, args, {
       stdio: 'inherit',
       shell: true
     });
@@ -244,6 +332,42 @@ async function main() {
     }
   }
 
+  // Check tunnel tools (ngrok & cloudflared)
+  console.log(`\n${c.cyan}🚇 檢查隧道工具...${c.reset}`);
+  
+  const ngrokStatus = checkNgrok();
+  const cloudflaredStatus = checkCloudflared();
+  
+  if (ngrokStatus.installed) {
+    console.log(`${c.green}✅ ngrok 已安裝${c.reset}`);
+  } else {
+    console.log(`${c.yellow}⚠️  ngrok 未安裝 - 開發測試用${c.reset}`);
+    
+    if (!process.env.CI && !process.env.VSMONSTER_SKIP_TUNNEL_TOOLS) {
+      try {
+        await installNgrok();
+        console.log(`${c.green}✅ ngrok 安裝完成！${c.reset}`);
+      } catch (error) {
+        console.log(`${c.yellow}⚠️  ngrok 安裝失敗，請手動執行: brew install ngrok${c.reset}`);
+      }
+    }
+  }
+  
+  if (cloudflaredStatus.installed) {
+    console.log(`${c.green}✅ cloudflared 已安裝${c.reset}`);
+  } else {
+    console.log(`${c.yellow}⚠️  cloudflared 未安裝 - 正式環境用${c.reset}`);
+    
+    if (!process.env.CI && !process.env.VSMONSTER_SKIP_TUNNEL_TOOLS) {
+      try {
+        await installCloudflared();
+        console.log(`${c.green}✅ cloudflared 安裝完成！${c.reset}`);
+      } catch (error) {
+        console.log(`${c.yellow}⚠️  cloudflared 安裝失敗，請手動執行: brew install cloudflare/cloudflare/cloudflared${c.reset}`);
+      }
+    }
+  }
+
   // Show next steps
   console.log(`
 ${c.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${c.reset}
@@ -255,10 +379,15 @@ ${c.bright}${t.nextSteps}${c.reset}
   ${c.cyan}1.${c.reset} ${t.step1}
      ${c.yellow}moltbot onboard${c.reset}
 
-  ${c.cyan}2.${c.reset} ${t.step2}
+  ${c.cyan}2.${c.reset} ${t.setupMediaCdn}
+     ${t.mediaStep1}
+     ${t.mediaStep2}
+     ${t.mediaStep3}
+
+  ${c.cyan}3.${c.reset} ${t.step2}
      ${c.yellow}pnpm dev${c.reset}
 
-  ${c.cyan}3.${c.reset} ${t.step3}
+  ${c.cyan}4.${c.reset} ${t.step3}
      ${t.step3detail} ${c.yellow}Cmd+Shift+P${c.reset} ${t.step3detail2}
 
 ${c.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${c.reset}

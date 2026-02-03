@@ -12,6 +12,9 @@ import { MCPController } from './mcp/controller';
 import { WebInterface } from './web-interface';
 import { SoulManager } from './soul/manager';
 import { logger } from './utils/logger';
+import mediaRouter from './routes/media.routes';
+import { initializeMediaUrl } from './services/media.service';
+import { uploadFromLINE } from './services/media-integration';
 import crypto from 'crypto';
 
 export class VSMONSTERGateway {
@@ -246,6 +249,12 @@ export class VSMONSTERGateway {
       });
       return res.json({ success: true });
     });
+
+    // 多媒體路由
+    // 初始化媒體 URL（使用 mediaUrl 配置或預設）
+    const mediaUrl = this.config.mediaUrl || 'https://media.ufo.fawstudio.com';
+    initializeMediaUrl(mediaUrl);
+    this.app.use('/api/media', mediaRouter);
   }
 
   private setupWebSocket(): void {
@@ -331,7 +340,35 @@ export class VSMONSTERGateway {
     const parsed = this.channelManager.parseMessage(channel, event);
     if (!parsed) return;
 
-    const { userId, text, media } = parsed;
+    const { userId, text, media, messageId } = parsed;
+
+    // 自動上傳媒體檔案
+    if (media && media.length > 0) {
+      for (const mediaItem of media) {
+        if (channel === 'line' && mediaItem.type === 'image') {
+          try {
+            const fileName = `line_photo_${Date.now()}.jpg`;
+            const record = await uploadFromLINE(
+              this.channelManager.getChannel('line'),
+              mediaItem.id,
+              fileName,
+              'line'
+            );
+            
+            if (record) {
+              logger.info(`✅ LINE 照片已上傳: ${record.id}`);
+              await this.sendToChannel(
+                channel,
+                userId,
+                `📸 照片已保存\n連結: ${record.publicUrl}`
+              );
+            }
+          } catch (error) {
+            logger.error(`❌ LINE 照片上傳失敗`, error);
+          }
+        }
+      }
+    }
 
     if (!text) {
       return;

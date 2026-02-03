@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import { GatewayClient } from "./gateway-client";
+import { getDashboardHtml, type DashboardState } from "./dashboard";
 
 const STATUS_DIRS = [
   { id: "pending", label: "Pending" },
@@ -78,10 +79,16 @@ class TaskQueueProvider implements vscode.TreeDataProvider<TaskItem> {
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<TaskItem | undefined>();
   public readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 
-  constructor(private readonly tasksRoot: string) {}
+  constructor(
+    private readonly tasksRoot: string,
+    private readonly onRefresh?: () => void
+  ) {}
 
   refresh(): void {
     this.onDidChangeTreeDataEmitter.fire(undefined);
+    if (this.onRefresh) {
+      this.onRefresh();
+    }
   }
 
   getTreeItem(element: TaskItem): vscode.TreeItem {
@@ -124,6 +131,45 @@ class TaskQueueProvider implements vscode.TreeDataProvider<TaskItem> {
   }
 }
 
+class UfoDashboardProvider implements vscode.WebviewViewProvider {
+  private view?: vscode.WebviewView;
+
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly getState: () => DashboardState,
+    private readonly onCommand: (command: string) => void
+  ) {}
+
+  resolveWebviewView(view: vscode.WebviewView): void {
+    this.view = view;
+    view.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this.context.extensionUri]
+    };
+    console.log('[UFO] Dashboard view resolved');
+    view.webview.html = getDashboardHtml(view.webview, this.getState());
+    view.webview.onDidReceiveMessage((message) => {
+      if (!message || typeof message !== "object") {
+        return;
+      }
+      if (message.type === "command" && typeof message.command === "string") {
+        console.log(`[UFO] Dashboard action: ${message.command}`);
+        this.onCommand(message.command);
+      }
+    });
+  }
+
+  update(): void {
+    if (!this.view) {
+      return;
+    }
+    this.view.webview.postMessage({
+      type: "state",
+      state: this.getState()
+    });
+  }
+}
+
 function getUfoRoot(context: vscode.ExtensionContext): string {
   return path.resolve(context.extensionPath, "..");
 }
@@ -155,6 +201,77 @@ function ensureUfoDirectories(context: vscode.ExtensionContext): void {
   for (const status of STATUS_DIRS) {
     ensureDirectory(path.join(tasksRoot, status.id));
   }
+}
+
+function countTaskFolders(dirPath: string): number {
+  if (!fs.existsSync(dirPath)) {
+    return 0;
+  }
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  return entries.filter((entry) => entry.isDirectory()).length;
+}
+
+function getTaskCounts(context: vscode.ExtensionContext): DashboardState["tasks"] {
+  const tasksRoot = getTasksRoot(context);
+  const pending = countTaskFolders(path.join(tasksRoot, "pending"));
+  const approved = countTaskFolders(path.join(tasksRoot, "approved"));
+  const inProgress = countTaskFolders(path.join(tasksRoot, "in-progress"));
+  const done = countTaskFolders(path.join(tasksRoot, "done"));
+  return {
+    pending,
+    approved,
+    inProgress,
+    done,
+    total: pending + approved + inProgress + done
+  };
+}
+
+function buildDashboardState(
+  context: vscode.ExtensionContext,
+  connected: boolean
+): DashboardState {
+  const config = vscode.workspace.getConfiguration("ufo");
+  const gatewayUrl = config.get<string>("gatewayUrl", "ws://localhost:3000");
+  const publicUrl = config.get<string>("publicUrl", "") || "";
+  const envAutoSync = config.get<boolean>("env.autoSync", true);
+  const chatModel = config.get<string>("models.chat", "gpt-5-mini");
+  const specModel = config.get<string>("models.spec", "gpt-5-mini");
+  const opusModel = config.get<string>("models.opus", "opus-4.5");
+
+  const lineAccessToken = config.get<string>("line.channelAccessToken", "");
+  const lineSecret = config.get<string>("line.channelSecret", "");
+  const telegramBotToken = config.get<string>("telegram.botToken", "");
+  const discordBotToken = config.get<string>("discord.botToken", "");
+  const discordPublicKey = config.get<string>("discord.publicKey", "");
+
+  const lineConfigured =
+    !!lineAccessToken && !isPlaceholder(lineAccessToken) &&
+    !!lineSecret && !isPlaceholder(lineSecret);
+  const telegramConfigured =
+    !!telegramBotToken && !isPlaceholder(telegramBotToken);
+  const discordConfigured =
+    !!discordBotToken && !isPlaceholder(discordBotToken) &&
+    !!discordPublicKey && !isPlaceholder(discordPublicKey);
+
+  return {
+    connected,
+    gatewayUrl,
+    publicUrl,
+    envAutoSync,
+    tasksRoot: getTasksRoot(context),
+    tasks: getTaskCounts(context),
+    models: {
+      chat: chatModel,
+      spec: specModel,
+      opus: opusModel
+    },
+    channels: {
+      line: lineConfigured,
+      telegram: telegramConfigured,
+      discord: discordConfigured
+    },
+    lastUpdated: new Date().toLocaleTimeString()
+  };
 }
 
 function slugify(value: string): string {
@@ -723,7 +840,7 @@ export function activate(context: vscode.ExtensionContext): void {
   ensureUfoDirectories(context);
 
   const tasksRoot = getTasksRoot(context);
-  const provider = new TaskQueueProvider(tasksRoot);
+  let gatewayConnected = false;
   const output = vscode.window.createOutputChannel("UFO");
   const recentMessageIds = new Set<string>();
   const recentMessageIdQueue: string[] = [];
@@ -734,6 +851,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const config = vscode.workspace.getConfiguration("ufo");
   const gatewayUrl = config.get<string>("gatewayUrl", "ws://localhost:3000");
   const gatewayClient = new GatewayClient(gatewayUrl);
+
+  const buildState = () => buildDashboardState(context, gatewayConnected);
+  const dashboardProvider = new UfoDashboardProvider(
+    context,
+    buildState,
+    (command) => vscode.commands.executeCommand(command)
+  );
+  const provider = new TaskQueueProvider(tasksRoot, () => dashboardProvider.update());
 
   const sessions = new Map<string, UfoSession>();
   const maxHistory = 20;
@@ -778,7 +903,9 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!normalizedText) {
       return;
     }
+    console.log(`[UFO] Incoming message (${meta.channel}): ${normalizedText}`);
     if (!rememberMessageId(meta.messageId, recentMessageIds, recentMessageIdQueue)) {
+      console.log(`[UFO] Duplicate message ignored: ${meta.messageId ?? 'unknown'}`);
       return;
     }
 
@@ -829,25 +956,37 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   gatewayClient.on("connected", () => {
+    gatewayConnected = true;
     output.appendLine(`Gateway connected: ${gatewayUrl}`);
+    console.log(`[UFO] Gateway connected: ${gatewayUrl}`);
+    dashboardProvider.update();
   });
 
   gatewayClient.on("disconnected", () => {
+    gatewayConnected = false;
     output.appendLine("Gateway disconnected");
+    console.log("[UFO] Gateway disconnected");
+    dashboardProvider.update();
   });
 
   gatewayClient.on("reconnect_failed", () => {
+    gatewayConnected = false;
     output.appendLine("Gateway reconnect failed");
+    console.log("[UFO] Gateway reconnect failed");
+    dashboardProvider.update();
   });
 
   gatewayClient.on("error", (error) => {
     output.appendLine(`Gateway error: ${String(error)}`);
+    console.log("[UFO] Gateway error", error);
+    dashboardProvider.update();
   });
 
   gatewayClient.on("message", (message: any) => {
     if (!message || typeof message !== "object") {
       return;
     }
+    console.log(`[UFO] Gateway message: ${message.type ?? 'unknown'}`);
 
     if (message.type === "ufo_approved") {
       const taskId = message.taskId as string | undefined;
@@ -925,15 +1064,29 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("ufo")) {
         syncEnvFromSettings(context, output);
+        dashboardProvider.update();
       }
     }),
+    vscode.window.registerWebviewViewProvider("ufoDashboard", dashboardProvider),
     vscode.window.registerTreeDataProvider("ufoTasks", provider),
     vscode.commands.registerCommand("ufo.createTaskSpec", () =>
       createTaskSpec(context, provider)
     ),
     vscode.commands.registerCommand("ufo.openTools", () => openTools(context)),
-    vscode.commands.registerCommand("ufo.refreshQueue", () => provider.refresh())
+    vscode.commands.registerCommand("ufo.refreshQueue", () => provider.refresh()),
+    vscode.commands.registerCommand("ufo.openTasksRoot", () =>
+      vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(getTasksRoot(context)))
+    ),
+    vscode.commands.registerCommand("ufo.openSettings", () =>
+      vscode.commands.executeCommand("workbench.action.openSettings", "ufo")
+    ),
+    vscode.commands.registerCommand("ufo.syncEnv", () => {
+      syncEnvFromSettings(context, output);
+      dashboardProvider.update();
+    })
   );
+
+  dashboardProvider.update();
 }
 
 export function deactivate(): void {}

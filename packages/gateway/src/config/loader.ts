@@ -12,6 +12,7 @@ export interface VSMONSTERConfig {
   mcp?: MCPConfig;
   moltbotGatewayUrl?: string;
   publicUrl?: string;
+  mediaUrl?: string;
 }
 
 const DEFAULT_CONFIG: VSMONSTERConfig = {
@@ -106,6 +107,10 @@ function applyConfigFromEnv(config: VSMONSTERConfig): VSMONSTERConfig {
 
   if (!isPlaceholder(process.env.VSMONSTER_PUBLIC_URL)) {
     merged.publicUrl = process.env.VSMONSTER_PUBLIC_URL as string;
+  }
+
+  if (!isPlaceholder(process.env.VSMONSTER_MEDIA_URL)) {
+    merged.mediaUrl = process.env.VSMONSTER_MEDIA_URL as string;
   }
 
   // LINE

@@ -15,10 +15,14 @@
     "AI"
   ],
   "activationEvents": [
+    "onView:ufoDashboard",
     "onView:ufoTasks",
     "onCommand:ufo.createTaskSpec",
     "onCommand:ufo.openTools",
-    "onCommand:ufo.refreshQueue"
+    "onCommand:ufo.refreshQueue",
+    "onCommand:ufo.openTasksRoot",
+    "onCommand:ufo.openSettings",
+    "onCommand:ufo.syncEnv"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -34,6 +38,18 @@
       {
         "command": "ufo.refreshQueue",
         "title": "UFO: Refresh Task Queue"
+      },
+      {
+        "command": "ufo.openTasksRoot",
+        "title": "UFO: Open Tasks Folder"
+      },
+      {
+        "command": "ufo.openSettings",
+        "title": "UFO: Open Settings"
+      },
+      {
+        "command": "ufo.syncEnv",
+        "title": "UFO: Sync Settings to .env"
       }
     ],
     "viewsContainers": {
@@ -47,6 +63,10 @@
     },
     "views": {
       "ufo": [
+        {
+          "id": "ufoDashboard",
+          "name": "Control Center"
+        },
         {
           "id": "ufoTasks",
           "name": "Tasks"
