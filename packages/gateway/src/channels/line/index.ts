@@ -111,6 +111,14 @@ export class LineChannel implements ChannelAdapter {
     this.saveWhitelist();
   }
 
+  removeFromWhitelist(userId: string): void {
+    if (this.config.whitelist) {
+      this.config.whitelist = this.config.whitelist.filter(id => id !== userId);
+      this.saveWhitelist();
+      logger.info(`Removed LINE user ${userId} from whitelist`);
+    }
+  }
+
   async initialize(): Promise<void> {
     // 驗證 Token
     try {

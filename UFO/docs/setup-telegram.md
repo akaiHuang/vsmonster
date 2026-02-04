@@ -1,0 +1,196 @@
+# 🤖 Telegram 設定指南
+
+> **推薦使用 Telegram！** 相比 LINE（每月 500 則免費訊息限制），Telegram 沒有訊息數量限制，完全免費。
+
+## 為什麼選擇 Telegram？
+
+| 平台 | 免費額度 | 訊息限制 | 設定難度 |
+|------|---------|---------|---------|
+| **Telegram** ✅ | 無限 | 無 | ⭐ 簡單 |
+| LINE | 500 則/月 | Reply Token 30秒 | ⭐⭐ 中等 |
+| Discord | 無限 | 3秒內需回應 | ⭐⭐⭐ 複雜 |
+
+---
+
+## 快速設定（5 分鐘）
+
+### 步驟 1：創建 Telegram Bot
+
+1. 在 Telegram 搜尋 **@BotFather**
+2. 發送 `/newbot`
+3. 輸入 Bot 名稱（例如：`My UFO Assistant`）
+4. 輸入 Bot 用戶名（必須以 `bot` 結尾，例如：`MyUFOAssistantBot`）
+5. **複製 Bot Token**（格式：`123456789:ABCdefGHIjklMNOpqrsTUVwxyz`）
+
+### 步驟 2：在 VS Code 設定（唯一設定點）
+
+> 💡 **重點**：只需要在 VS Code 設定中填寫，UFO 會自動同步到 `.env` 檔案！
+
+按 `Cmd+,`（Mac）或 `Ctrl+,`（Windows），搜尋 `ufo.telegram`：
+
+| 設定項目 | 說明 | 必填 |
+|---------|-----|-----|
+| `ufo.telegram.botToken` | Bot Token（從 BotFather 取得） | ✅ |
+| `ufo.telegram.webhookSecret` | Webhook 密鑰（留空會自動產生） | ⚪ |
+| `ufo.telegram.webhookUrl` | Webhook URL（留空會自動產生） | ⚪ |
+
+**或者直接編輯 `.vscode/settings.json`**：
+
+```json
+{
+  "ufo.telegram.botToken": "你的_BOT_TOKEN"
+}
+```
+
+### 步驟 3：自動同步到 .env
+
+當你儲存 VS Code 設定時，UFO 會**自動同步**到 `.env` 檔案：
+
+```
+✅ VS Code 設定變更
+   ↓ 自動觸發
+✅ 同步到 .env
+   ↓ Gateway 讀取
+✅ Telegram Bot 啟動
+```
+
+你也可以手動點擊 UFO Dashboard 的 **🔄 SYNC** 按鈕強制同步。
+
+### 步驟 4：啟動 Gateway
+
+```bash
+pnpm dev:gateway
+```
+
+成功時會看到：
+```
+[INFO] Telegram Bot initialized (curl mode): @你的BotName
+[INFO] Telegram webhook set to: https://你的網域/webhook/telegram/xxx
+[INFO] 📡 Active channels: telegram
+```
+
+### 步驟 5：測試連線
+
+1. 打開 UFO Control Center（VS Code 側邊欄）
+2. 確認 **Telegram** 顯示 `READY`
+3. 在 Telegram 找到你的 Bot，發送任意訊息
+4. UFO 應該會收到並回覆！
+
+---
+
+## 設定架構說明
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  VS Code 設定 (唯一設定點)                                │
+│  ├─ ufo.telegram.botToken     ← 你只需要填這裡            │
+│  ├─ ufo.telegram.webhookSecret (可選)                    │
+│  └─ ufo.telegram.webhookUrl    (可選)                    │
+└────────────────────┬────────────────────────────────────┘
+                     │ 自動同步 (Auto-Sync ON)
+                     ▼
+┌─────────────────────────────────────────────────────────┐
+│  .env 檔案 (自動產生，不需手動編輯)                        │
+│  ├─ TELEGRAM_BOT_TOKEN=xxx                              │
+│  ├─ TELEGRAM_WEBHOOK_SECRET=xxx                         │
+│  └─ TELEGRAM_WEBHOOK_URL=xxx                            │
+└────────────────────┬────────────────────────────────────┘
+                     │ Gateway 啟動時讀取
+                     ▼
+┌─────────────────────────────────────────────────────────┐
+│  Gateway + Telegram Bot                                 │
+│  └─ UFO Extension / BlueMonster 都會使用相同設定         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**優點**：
+- ✅ 只需要在一個地方設定
+- ✅ UFO 和 BlueMonster 共用設定
+- ✅ 不會有設定不同步的問題
+- ✅ 敏感資訊不會被 commit（.env 在 .gitignore）
+
+---
+
+## 常見問題
+
+### Q: Dashboard 顯示 Telegram 為 NONE
+
+**原因**：VS Code 設定中沒有填入 Bot Token
+
+**解決**：
+1. 按 `Cmd+,` 打開設定
+2. 搜尋 `ufo.telegram.botToken`
+3. 填入你的 Telegram Bot Token
+4. 點擊 UFO Dashboard 的 **↻ REFRESH**
+
+### Q: Gateway 啟動時顯示 "grammy API failed, trying curl fallback..."
+
+**原因**：Node.js 無法連線到 Telegram API（網路問題）
+
+**解決**：這是正常的！Gateway 會自動切換到 curl 模式，功能完全正常。
+
+### Q: Bot 收到訊息但 UFO 沒反應
+
+**檢查清單**：
+1. Gateway 是否在運行？（`pnpm dev:gateway`）
+2. UFO Dashboard 的 Gateway 是否顯示 `OK`？
+3. Cloudflare Tunnel 是否正常？（或其他公開網址服務）
+
+---
+
+## 進階設定
+
+### 使用 Cloudflare Tunnel
+
+如果你沒有公開伺服器，可以用 Cloudflare Tunnel：
+
+```bash
+# 安裝 cloudflared
+brew install cloudflared
+
+# 登入（首次）
+cloudflared tunnel login
+
+# 創建 tunnel
+cloudflared tunnel create ufo
+
+# 啟動 tunnel
+cloudflared tunnel run --url http://localhost:3000 ufo
+```
+
+### Webhook 安全性
+
+Gateway 內建兩層安全機制：
+
+1. **Secret Path**：Webhook URL 包含隨機字串，只有 Telegram 知道
+2. **IP 白名單**：僅接受來自 Telegram 官方 IP 的請求
+
+---
+
+## 完整範例
+
+### .vscode/settings.json（你只需要編輯這個）
+```json
+{
+  "ufo.telegram.botToken": "REDACTED_TELEGRAM_BOT_TOKEN"
+}
+```
+
+### .env 檔案（自動產生，不需手動編輯）
+```bash
+# === 以下由 UFO 自動同步 ===
+TELEGRAM_BOT_TOKEN=REDACTED_TELEGRAM_BOT_TOKEN
+TELEGRAM_WEBHOOK_SECRET=REDACTED_WEBHOOK_SECRET
+TELEGRAM_WEBHOOK_URL=https://ufo.fawstudio.com/webhook/telegram/REDACTED_WEBHOOK_SECRET
+```
+
+---
+
+## 下一步
+
+設定完成後，你可以：
+- 📱 用手機隨時隨地與 UFO 對話
+- 📋 建立任務、查詢進度
+- 🔄 讓 UFO 幫你執行開發工作
+
+享受與 AI 助手的無限對話吧！ 🚀

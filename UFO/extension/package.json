@@ -61,6 +61,26 @@
         "command": "ufo.openPromptStudio",
         "title": "UFO: Prompt",
         "icon": "$(edit)"
+      },
+      {
+        "command": "ufo.approveTask",
+        "title": "Approve Task",
+        "icon": "$(check)"
+      },
+      {
+        "command": "ufo.startTask",
+        "title": "Start Task",
+        "icon": "$(play)"
+      },
+      {
+        "command": "ufo.completeTask",
+        "title": "Complete Task",
+        "icon": "$(pass)"
+      },
+      {
+        "command": "ufo.rejectTask",
+        "title": "Reject Task",
+        "icon": "$(trash)"
       }
     ],
     "viewsContainers": {
@@ -119,6 +139,28 @@
           "when": "view == ufoTasksPending",
           "group": "navigation@4"
         }
+      ],
+      "view/item/context": [
+        {
+          "command": "ufo.approveTask",
+          "when": "view == ufoTasksPending && viewItem == taskFolder",
+          "group": "inline@1"
+        },
+        {
+          "command": "ufo.startTask",
+          "when": "view == ufoTasksApproved && viewItem == taskFolder",
+          "group": "inline@1"
+        },
+        {
+          "command": "ufo.completeTask",
+          "when": "view == ufoTasksRunning && viewItem == taskFolder",
+          "group": "inline@1"
+        },
+        {
+          "command": "ufo.rejectTask",
+          "when": "(view == ufoTasksPending || view == ufoTasksApproved) && viewItem == taskFolder",
+          "group": "inline@2"
+        }
       ]
     },
     "configuration": {
@@ -162,7 +204,12 @@
         "ufo.telegram.webhookUrl": {
           "type": "string",
           "default": "",
-          "description": "Telegram Webhook URL (optional)"
+          "description": "Telegram Webhook URL (optional, auto-generated if empty)"
+        },
+        "ufo.telegram.webhookSecret": {
+          "type": "string",
+          "default": "",
+          "description": "Telegram Webhook Secret (auto-generated if empty)"
         },
         "ufo.discord.botToken": {
           "type": "string",

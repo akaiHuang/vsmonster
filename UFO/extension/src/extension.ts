@@ -64,6 +64,7 @@ const ENV_KEYS = {
   lineWebhookSecret: "LINE_WEBHOOK_SECRET",
   telegramBotToken: "TELEGRAM_BOT_TOKEN",
   telegramWebhookUrl: "TELEGRAM_WEBHOOK_URL",
+  telegramWebhookSecret: "TELEGRAM_WEBHOOK_SECRET",
   discordBotToken: "DISCORD_BOT_TOKEN",
   discordApplicationId: "DISCORD_APPLICATION_ID",
   discordPublicKey: "DISCORD_PUBLIC_KEY"
@@ -91,6 +92,7 @@ class TaskItem extends vscode.TreeItem {
     // 設定圖示
     if (isDirectory) {
       this.iconPath = new vscode.ThemeIcon("folder");
+      this.contextValue = "taskFolder"; // 用於顯示 inline 按鈕
     } else if (fullPath) {
       this.iconPath = new vscode.ThemeIcon("file-text");
       this.resourceUri = vscode.Uri.file(fullPath);
@@ -382,6 +384,83 @@ function countTaskFolders(dirPath: string): number {
   return entries.filter((entry) => entry.isDirectory()).length;
 }
 
+/**
+ * 移動任務到新的狀態資料夾
+ */
+async function moveTask(
+  tasksRoot: string,
+  taskPath: string,
+  fromStatus: string,
+  toStatus: string,
+  output: vscode.OutputChannel
+): Promise<string> {
+  const taskName = path.basename(taskPath);
+  const destPath = path.join(tasksRoot, toStatus, taskName);
+  
+  try {
+    await fs.promises.rename(taskPath, destPath);
+    output.appendLine(`Task moved: ${fromStatus} → ${toStatus}: ${taskName}`);
+    vscode.window.showInformationMessage(`✅ 任務已移至 ${toStatus}: ${taskName}`);
+    return destPath;
+  } catch (error) {
+    output.appendLine(`Failed to move task: ${String(error)}`);
+    vscode.window.showErrorMessage(`❌ 移動任務失敗: ${String(error)}`);
+    return taskPath;
+  }
+}
+
+/**
+ * 自動執行任務 - 讀取 README.md 並發送給 Copilot Chat
+ */
+async function executeTaskWithCopilot(
+  taskPath: string,
+  output: vscode.OutputChannel
+): Promise<void> {
+  const readmePath = path.join(taskPath, "README.md");
+  
+  if (!fs.existsSync(readmePath)) {
+    output.appendLine(`Task README not found: ${readmePath}`);
+    vscode.window.showWarningMessage("找不到任務規格 README.md");
+    return;
+  }
+
+  try {
+    const content = fs.readFileSync(readmePath, "utf-8");
+    output.appendLine(`Executing task from: ${readmePath}`);
+    
+    // 打開 README.md 讓用戶看到
+    const doc = await vscode.workspace.openTextDocument(readmePath);
+    await vscode.window.showTextDocument(doc);
+    
+    // 發送到 Copilot Chat
+    const prompt = `請根據以下任務規格開始執行：\n\n${content}`;
+    
+    // 嘗試使用 Copilot Chat API
+    try {
+      await vscode.commands.executeCommand(
+        "workbench.action.chat.open",
+        { query: prompt }
+      );
+      output.appendLine("Task sent to Copilot Chat");
+    } catch (chatError) {
+      // 如果 Chat API 不可用，顯示提示
+      output.appendLine(`Chat API error: ${String(chatError)}`);
+      vscode.window.showInformationMessage(
+        "請在 Copilot Chat 中輸入任務規格開始執行",
+        "複製規格"
+      ).then((selection) => {
+        if (selection === "複製規格") {
+          vscode.env.clipboard.writeText(prompt);
+          vscode.window.showInformationMessage("已複製到剪貼簿");
+        }
+      });
+    }
+  } catch (error) {
+    output.appendLine(`Failed to execute task: ${String(error)}`);
+    vscode.window.showErrorMessage(`執行任務失敗: ${String(error)}`);
+  }
+}
+
 function getTaskCounts(context: vscode.ExtensionContext): DashboardState["tasks"] {
   const tasksRoot = getTasksRoot(context);
   const pending = countTaskFolders(path.join(tasksRoot, "pending"));
@@ -570,6 +649,7 @@ function syncEnvFromSettings(
   const lineWebhookSecret = config.get<string>("line.webhookSecret", "");
   const telegramBotToken = config.get<string>("telegram.botToken", "");
   const telegramWebhookUrl = config.get<string>("telegram.webhookUrl", "");
+  const telegramWebhookSecret = config.get<string>("telegram.webhookSecret", "");
   const discordBotToken = config.get<string>("discord.botToken", "");
   const discordApplicationId = config.get<string>("discord.applicationId", "");
   const discordPublicKey = config.get<string>("discord.publicKey", "");
@@ -614,6 +694,11 @@ function syncEnvFromSettings(
   if (telegramWebhookUrl && !isPlaceholder(telegramWebhookUrl)) {
     if (upsertEnvLine(lines, ENV_KEYS.telegramWebhookUrl, telegramWebhookUrl)) {
       updatedKeys.push(ENV_KEYS.telegramWebhookUrl);
+    }
+  }
+  if (telegramWebhookSecret && !isPlaceholder(telegramWebhookSecret)) {
+    if (upsertEnvLine(lines, ENV_KEYS.telegramWebhookSecret, telegramWebhookSecret)) {
+      updatedKeys.push(ENV_KEYS.telegramWebhookSecret);
     }
   }
 
@@ -1088,39 +1173,64 @@ function getBlueMonsterTasksSummary(projectRoot: string): string | null {
 
 function splitMessage(text: string, maxLength: number): string[] {
   const chunks: string[] = [];
-  const lines = text.split("\n");
+  
+  // 先按段落分隔（雙換行或分隔線）
+  const paragraphs = text.split(/\n{2,}|\n-{3,}\n/);
   let buffer = "";
 
-  const pushBuffer = () => {
-    if (buffer.trim().length > 0 || buffer.length > 0) {
+  for (const para of paragraphs) {
+    const trimmedPara = para.trim();
+    if (!trimmedPara) continue;
+    
+    // 如果加入這段不會超過限制，就合併
+    const nextBuffer = buffer.length === 0 ? trimmedPara : `${buffer}\n\n${trimmedPara}`;
+    
+    if (nextBuffer.length <= maxLength) {
+      buffer = nextBuffer;
+      continue;
+    }
+    
+    // 超過限制，先推出 buffer
+    if (buffer.trim()) {
       chunks.push(buffer);
       buffer = "";
     }
-  };
-
-  for (const line of lines) {
-    const nextLine = buffer.length === 0 ? line : `${buffer}\n${line}`;
-    if (nextLine.length <= maxLength) {
-      buffer = nextLine;
-      continue;
+    
+    // 如果這段本身就超過限制，按行分割
+    if (trimmedPara.length > maxLength) {
+      const lines = trimmedPara.split("\n");
+      let lineBuffer = "";
+      
+      for (const line of lines) {
+        const nextLine = lineBuffer.length === 0 ? line : `${lineBuffer}\n${line}`;
+        if (nextLine.length <= maxLength) {
+          lineBuffer = nextLine;
+        } else {
+          if (lineBuffer.trim()) chunks.push(lineBuffer);
+          // 如果單行超長，硬切
+          if (line.length > maxLength) {
+            let start = 0;
+            while (start < line.length) {
+              chunks.push(line.slice(start, start + maxLength));
+              start += maxLength;
+            }
+            lineBuffer = "";
+          } else {
+            lineBuffer = line;
+          }
+        }
+      }
+      if (lineBuffer.trim()) buffer = lineBuffer;
+    } else {
+      buffer = trimmedPara;
     }
-
-    pushBuffer();
-    if (line.length <= maxLength) {
-      buffer = line;
-      continue;
-    }
-
-    let start = 0;
-    while (start < line.length) {
-      chunks.push(line.slice(start, start + maxLength));
-      start += maxLength;
-    }
-    buffer = "";
   }
 
-  pushBuffer();
-  return chunks;
+  if (buffer.trim()) {
+    chunks.push(buffer);
+  }
+  
+  return chunks.filter(c => c.trim().length > 0);
 }
 
 function getCurrentTodoQuestion(session: UfoSession): string | null {
@@ -1431,7 +1541,13 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const sendToUser = (channel: string, userId: string, content: string) => {
-    const chunks = splitMessage(content, 100);
+    // 在選項前加分隔線（偵測「方案」「選擇」「選項」等關鍵字）
+    const formattedContent = content.replace(
+      /(\n)(方案\s*[A-Z]|選項\s*[A-Z0-9]|[A-Z]\s*[—–-]\s*|[A-Z]\)\s*)/g,
+      '\n\n──────────────\n$2'
+    );
+    
+    const chunks = splitMessage(formattedContent, 800);
     for (const chunk of chunks) {
       gatewayClient.send({ type: "copilot_response", channel, userId, content: chunk });
     }
@@ -1479,22 +1595,31 @@ export function activate(context: vscode.ExtensionContext): void {
     const randomEmojis = ['✨', '🤔', '🙂‍↔️', '🛸', '🤩', '😮', '🤭', '🥕', '🥦', '🌟', '💓', '👀'];
     const getRandomEmoji = () => randomEmojis[Math.floor(Math.random() * randomEmojis.length)];
     
+    // 思考階段訊息（5 個循環，每 10 秒一次）
+    const thinkingPhases = [
+      'Thinking...',
+      'Planning...',
+      'Working...',
+      "It's difficult... I'm just an AI...",
+      'I have some ideas now...'
+    ];
+    
     // 發送初始思考訊息
-    sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} Thinking... 👾`);
-    let thinkingCount = 1;
+    let phaseIndex = 0;
+    sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} ${thinkingPhases[phaseIndex]} 👾`);
     let hasTimedOut = false;
     
-    // 每 2 秒發送思考中訊息
+    // 每 10 秒發送下一階段訊息
     const thinkingInterval = setInterval(() => {
-      thinkingCount++;
-      sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} Thinking... 👾 (${thinkingCount})`);
-    }, 5000);
+      phaseIndex = (phaseIndex + 1) % thinkingPhases.length;
+      sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} ${thinkingPhases[phaseIndex]} 👾`);
+    }, 10000);
     
     // 在 58 秒時發送最後警告（LINE Reply Token 60 秒後失效）
     const timeoutWarning = setTimeout(() => {
       hasTimedOut = true;
       clearInterval(thinkingInterval);
-      sendToUser(meta.channel, meta.userId, "👾👾 我可能還需要思考久一點，你等等問我進度 👾👾");
+      sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} 我可能還需要思考久一點，你等等問我進度 👾`);
     }, 58000);
     
     try {
@@ -1584,9 +1709,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
     if (message.type === "ufo_message") {
       hasUfoRouting = true;
-      if (message.channel === "line" && typeof message.text === "string") {
+      // 支援所有頻道：line, telegram, discord
+      if (typeof message.text === "string") {
         handleIncomingText(message.text, {
-          channel: message.channel,
+          channel: message.channel || "unknown",
           userId: message.userId,
           messageId: message.messageId,
           timestamp: message.timestamp
@@ -1599,9 +1725,10 @@ export function activate(context: vscode.ExtensionContext): void {
       if (hasUfoRouting) {
         return;
       }
-      if (message.channel === "line" && typeof message.message === "string") {
+      // 支援所有頻道：line, telegram, discord
+      if (typeof message.message === "string") {
         handleIncomingText(message.message, {
-          channel: message.channel,
+          channel: message.channel || "unknown",
           userId: message.userId,
           messageId: message.messageId,
           timestamp: message.timestamp
@@ -1614,9 +1741,10 @@ export function activate(context: vscode.ExtensionContext): void {
       if (hasUfoRouting) {
         return;
       }
-      if (message.task?.channel === "line" && typeof message.instruction === "string") {
+      // 支援所有頻道：line, telegram, discord
+      if (message.task && typeof message.instruction === "string") {
         handleIncomingText(message.instruction, {
-          channel: message.task.channel,
+          channel: message.task.channel || "unknown",
           userId: message.task.userId,
           messageId: message.task.id,
           timestamp: message.task.createdAt
@@ -1659,7 +1787,69 @@ export function activate(context: vscode.ExtensionContext): void {
       syncEnvFromSettings(context, output);
       dashboardProvider.update();
     }),
-    vscode.commands.registerCommand("ufo.openPromptStudio", () => promptStudioPanel.show())
+    vscode.commands.registerCommand("ufo.openPromptStudio", () => promptStudioPanel.show()),
+    // 任務狀態移動命令
+    vscode.commands.registerCommand("ufo.approveTask", async (item: TaskItem) => {
+      if (item?.fullPath && item.isDirectory) {
+        await moveTask(tasksRoot, item.fullPath, "pending", "approved", output);
+        refreshAllProviders();
+        // 通知 Gateway（同步到 Telegram）
+        const taskName = path.basename(item.fullPath);
+        gatewayClient.send({
+          type: "task_status_change",
+          taskId: taskName,
+          from: "pending",
+          to: "approved",
+          message: `✅ 任務已批准: ${taskName}`
+        });
+      }
+    }),
+    vscode.commands.registerCommand("ufo.startTask", async (item: TaskItem) => {
+      if (item?.fullPath && item.isDirectory) {
+        await moveTask(tasksRoot, item.fullPath, "approved", "in-progress", output);
+        refreshAllProviders();
+        // 通知 Gateway（同步到 Telegram）
+        const taskName = path.basename(item.fullPath);
+        gatewayClient.send({
+          type: "task_status_change",
+          taskId: taskName,
+          from: "approved",
+          to: "in-progress",
+          message: `🚀 任務開始執行: ${taskName}`
+        });
+        // 自動觸發 Copilot 執行任務
+        await executeTaskWithCopilot(item.fullPath, output);
+      }
+    }),
+    vscode.commands.registerCommand("ufo.completeTask", async (item: TaskItem) => {
+      if (item?.fullPath && item.isDirectory) {
+        await moveTask(tasksRoot, item.fullPath, "in-progress", "done", output);
+        refreshAllProviders();
+        // 通知 Gateway（同步到 Telegram）
+        const taskName = path.basename(item.fullPath);
+        gatewayClient.send({
+          type: "task_status_change",
+          taskId: taskName,
+          from: "in-progress",
+          to: "done",
+          message: `✨ 任務已完成: ${taskName}`
+        });
+      }
+    }),
+    vscode.commands.registerCommand("ufo.rejectTask", async (item: TaskItem) => {
+      if (item?.fullPath && item.isDirectory) {
+        const confirm = await vscode.window.showWarningMessage(
+          `確定要刪除任務嗎？`,
+          { modal: true },
+          "刪除"
+        );
+        if (confirm === "刪除") {
+          await fs.promises.rm(item.fullPath, { recursive: true, force: true });
+          output.appendLine(`Task deleted: ${item.fullPath}`);
+          refreshAllProviders();
+        }
+      }
+    })
   );
 
   dashboardProvider.update();

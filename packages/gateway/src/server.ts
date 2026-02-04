@@ -34,9 +34,21 @@ export class VSMONSTERGateway {
   private vsCodeConnections: Set<WebSocket> = new Set();
   private ufoConnections: Set<WebSocket> = new Set();
   private lineHandshakeCodes: Map<string, string> = new Map();
-  private readonly lineHandshakeEmojis = ['🛸', '👾'];
+  private telegramHandshakeCodes: Map<string, string> = new Map();
+  private readonly handshakeEmojis = ['🛸', '👾', '🚀', '✨', '🌟'];
   private adminResetToken: string;
   private ufoApprovals: Map<string, { token: string; userId: string; channel: string; taskPath: string }> = new Map();
+
+  // 用戶管理：記錄所有驗證過的用戶
+  private verifiedUsers: Map<string, {
+    id: string;
+    channel: string;
+    ip: string;
+    verifiedAt: Date;
+    lastActiveAt: Date;
+    messageCount: number;
+    displayName?: string;
+  }> = new Map();
 
   constructor() {
     this.config = loadConfig();
@@ -151,10 +163,63 @@ export class VSMONSTERGateway {
       }
     });
 
-    // Telegram Webhook
+    // Telegram Webhook（帶 secret token 的路由）
     this.app.post('/webhook/telegram', async (req, res) => {
       try {
+        // 驗證 Telegram IP 白名單（Telegram 官方 IP 範圍）
+        const telegramIPs = [
+          '149.154.160.0/20',  // Telegram 官方 IP 範圍
+          '91.108.4.0/22',
+          '91.108.8.0/22',
+          '91.108.12.0/22',
+          '91.108.16.0/22',
+          '91.108.56.0/22',
+          '127.0.0.1',         // localhost（開發用）
+          '::1',
+        ];
+        
+        const clientIP = req.headers['cf-connecting-ip'] || 
+                         req.headers['x-forwarded-for']?.toString().split(',')[0] || 
+                         req.socket.remoteAddress || '';
+        
+        // 簡化的 IP 檢查（生產環境建議使用完整的 CIDR 檢查）
+        const isFromTelegram = telegramIPs.some(ip => 
+          clientIP.includes(ip.split('/')[0].split('.').slice(0, 2).join('.')) ||
+          clientIP === ip ||
+          clientIP === '127.0.0.1' ||
+          clientIP === '::1' ||
+          clientIP.includes('149.154') ||
+          clientIP.includes('91.108')
+        );
+        
+        if (!isFromTelegram && process.env.NODE_ENV === 'production') {
+          logger.warn(`🚫 Telegram webhook rejected from IP: ${clientIP}`);
+          res.sendStatus(403);
+          return;
+        }
+        
+        logger.info('📩 Telegram webhook received:', JSON.stringify(req.body).substring(0, 200));
         await this.handleChannelMessage('telegram', req.body);
+        res.sendStatus(200);
+      } catch (error) {
+        logger.error('Telegram webhook error:', error);
+        res.sendStatus(500);
+      }
+    });
+
+    // Telegram Webhook（帶 secret token 的路由）
+    this.app.post('/webhook/telegram/:secret', async (req, res) => {
+      try {
+        const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+        if (expectedSecret && req.params.secret !== expectedSecret) {
+          logger.warn(`🚫 Telegram webhook secret mismatch`);
+          res.sendStatus(403);
+          return;
+        }
+        
+        const clientIp = req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip'] || req.socket.remoteAddress || 'unknown';
+        logger.info('📩 Telegram webhook (secret) received:', JSON.stringify(req.body).substring(0, 200));
+        await this.handleChannelMessage('telegram', req.body, String(clientIp));
         res.sendStatus(200);
       } catch (error) {
         logger.error('Telegram webhook error:', error);
@@ -236,8 +301,68 @@ export class VSMONSTERGateway {
     this.app.get('/api/channels', (req, res) => {
       res.json({
         channels: this.channelManager.getActiveChannels(),
-        users: [] // 用戶列表需要額外實現
+        users: Array.from(this.lastActiveUsers.entries()).map(([key, channel]) => ({
+          channel,
+          userId: key.split(':')[1]
+        }))
       });
+    });
+
+    // POST /api/send - 發送訊息到指定頻道
+    this.app.post('/api/send', async (req, res) => {
+      const { channel, userId, message } = req.body;
+      
+      if (!channel || !message) {
+        return res.status(400).json({ error: 'channel and message are required' });
+      }
+
+      try {
+        if (userId) {
+          // 發送給指定用戶
+          await this.sendToChannel(channel, userId, message);
+          res.json({ success: true, sent: { channel, userId, message } });
+        } else {
+          // 廣播給該頻道所有活躍用戶
+          await this.broadcastToChannelUsers(channel, message);
+          const users = this.getActiveUsersForChannel(channel);
+          res.json({ success: true, broadcast: { channel, users: users.length, message } });
+        }
+      } catch (error) {
+        logger.error('Failed to send message via API:', error);
+        res.status(500).json({ error: String(error) });
+      }
+    });
+
+    // GET /api/users - 取得所有已驗證用戶
+    this.app.get('/api/users', (req, res) => {
+      const users = Array.from(this.verifiedUsers.values()).map(u => ({
+        ...u,
+        verifiedAt: u.verifiedAt.toISOString(),
+        lastActiveAt: u.lastActiveAt.toISOString()
+      }));
+      res.json({ users, total: users.length });
+    });
+
+    // DELETE /api/users/:channel/:userId - 移除用戶
+    this.app.delete('/api/users/:channel/:userId', (req, res) => {
+      const { channel, userId } = req.params;
+      const key = `${channel}:${userId}`;
+      
+      if (this.verifiedUsers.has(key)) {
+        this.verifiedUsers.delete(key);
+        this.lastActiveUsers.delete(key);
+        
+        // 同時從白名單移除
+        const channelInstance = this.channelManager.getChannel(channel) as any;
+        if (channelInstance?.removeFromWhitelist) {
+          channelInstance.removeFromWhitelist(userId);
+        }
+        
+        logger.info(`🗑️ 用戶已移除: ${key}`);
+        res.json({ success: true, removed: key });
+      } else {
+        res.status(404).json({ error: 'User not found' });
+      }
     });
 
     // 發送訊息測試頁面
@@ -290,6 +415,61 @@ export class VSMONSTERGateway {
     const mediaUrl = this.config.mediaUrl || 'https://media.ufo.fawstudio.com';
     initializeMediaUrl(mediaUrl);
     this.app.use('/api/media', mediaRouter);
+  }
+
+  private getVerifiedUsersPath(): string {
+    const dataDir = path.join(__dirname, '..', '..', 'gateway', 'data');
+    return path.join(dataDir, 'verified-users.json');
+  }
+
+  private loadVerifiedUsers(): void {
+    try {
+      const filePath = this.getVerifiedUsersPath();
+      if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath, 'utf-8');
+        const users = JSON.parse(data);
+        
+        // 轉換日期字串回 Date 物件
+        for (const [key, user] of Object.entries(users)) {
+          const userData = user as any;
+          this.verifiedUsers.set(key, {
+            ...userData,
+            verifiedAt: new Date(userData.verifiedAt),
+            lastActiveAt: new Date(userData.lastActiveAt)
+          });
+        }
+        
+        logger.info(`✅ 已載入 ${this.verifiedUsers.size} 個已驗證用戶`);
+      }
+    } catch (err) {
+      logger.error(`⚠️ 無法載入已驗證用戶: ${err}`);
+    }
+  }
+
+  private saveVerifiedUsers(): void {
+    try {
+      const dataDir = path.dirname(this.getVerifiedUsersPath());
+      
+      // 確保目錄存在
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      
+      // 轉換 Map 為 Object，並處理 Date 序列化
+      const data: Record<string, any> = {};
+      for (const [key, user] of this.verifiedUsers) {
+        data[key] = {
+          ...user,
+          verifiedAt: user.verifiedAt.toISOString(),
+          lastActiveAt: user.lastActiveAt.toISOString()
+        };
+      }
+      
+      const filePath = this.getVerifiedUsersPath();
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err) {
+      logger.error(`⚠️ 無法保存已驗證用戶: ${err}`);
+    }
   }
 
   private setupWebSocket(): void {
@@ -351,6 +531,22 @@ export class VSMONSTERGateway {
         this.taskManager.updateTask(message.taskId, message.status, message.progress);
         this.broadcastToChannels('task_progress', message);
         break;
+
+      case 'task_status_change':
+        // UFO 任務狀態變更，通知所有活躍用戶
+        logger.info(`Task status change: ${message.taskId} ${message.from} → ${message.to}`);
+        await this.broadcastTaskStatusToAllChannels(message);
+        break;
+
+      case 'send_message':
+        // 發送訊息到指定頻道和用戶
+        if (message.channel && message.userId && message.content) {
+          await this.sendToChannel(message.channel, message.userId, message.content);
+        } else if (message.channel && message.content) {
+          // 廣播到該頻道的所有活躍用戶
+          await this.broadcastToChannelUsers(message.channel, message.content);
+        }
+        break;
         
       case 'tunnel_url':
         // ngrok URL 更新
@@ -383,11 +579,17 @@ export class VSMONSTERGateway {
     }
   }
 
-  private async handleChannelMessage(channel: string, event: any): Promise<void> {
+  private async handleChannelMessage(channel: string, event: any, clientIp: string = 'unknown'): Promise<void> {
     const parsed = this.channelManager.parseMessage(channel, event);
     if (!parsed) return;
 
     const { userId, text, media, messageId } = parsed;
+    
+    // 取得用戶顯示名稱
+    const displayName = this.extractDisplayName(channel, event);
+
+    // 記錄活躍用戶（用於廣播通知）
+    this.recordActiveUser(channel, userId);
 
     // 自動上傳媒體檔案
     if (media && media.length > 0) {
@@ -421,6 +623,29 @@ export class VSMONSTERGateway {
       return;
     }
 
+    // === 自助重置命令（所有用戶都可以用） ===
+    if (text.trim().toLowerCase() === '/reset') {
+      const lineChannel = this.channelManager.getChannel('line') as any;
+      const telegramChannel = this.channelManager.getChannel('telegram') as any;
+      
+      if (channel === 'line' && lineChannel) {
+        lineChannel.removeFromWhitelist(userId);
+        this.lineHandshakeCodes.delete(userId);
+        this.verifiedUsers.delete(`${channel}:${userId}`);
+        this.saveVerifiedUsers();
+        await this.sendToChannel(channel, userId, '🔄 重置成功！請發送「你好」開始重新握手驗證。');
+        return;
+      } else if (channel === 'telegram' && telegramChannel) {
+        telegramChannel.removeFromWhitelist(userId);
+        this.telegramHandshakeCodes.delete(userId);
+        this.verifiedUsers.delete(`${channel}:${userId}`);
+        this.saveVerifiedUsers();
+        await this.sendToChannel(channel, userId, '🔄 重置成功！請發送「你好」開始重新握手驗證。');
+        return;
+      }
+    }
+
+    // === LINE 白名單握手 ===
     if (channel === 'line') {
       const lineChannel = this.channelManager.getChannel('line') as any;
       if (lineChannel && !lineChannel.isWhitelisted(userId)) {
@@ -428,7 +653,7 @@ export class VSMONSTERGateway {
         const currentCode = this.lineHandshakeCodes.get(userId);
         const generateCode = () => {
           const code = Array.from({ length: 4 }, () => {
-            return this.lineHandshakeEmojis[Math.floor(Math.random() * this.lineHandshakeEmojis.length)];
+            return this.handshakeEmojis[Math.floor(Math.random() * this.handshakeEmojis.length)];
           }).join('');
           this.lineHandshakeCodes.set(userId, code);
           logger.info(`LINE handshake code for ${userId}: ${code}`);
@@ -442,6 +667,22 @@ export class VSMONSTERGateway {
         if (text.trim() === currentCode) {
           await lineChannel.addToWhitelist(userId);
           this.lineHandshakeCodes.delete(userId);
+          this.recordActiveUser(channel, userId);
+          
+          // 記錄已驗證用戶的完整資訊
+          this.verifiedUsers.set(`${channel}:${userId}`, {
+            id: userId,
+            channel,
+            ip: clientIp,
+            verifiedAt: new Date(),
+            lastActiveAt: new Date(),
+            messageCount: 1,
+            displayName
+          });
+          logger.info(`✅ 用戶已驗證: ${channel}:${userId} (IP: ${clientIp}, 名稱: ${displayName || 'N/A'})`);
+          
+          // 保存到檔案
+          this.saveVerifiedUsers();
         } else {
           if (normalized === '你好') {
             generateCode();
@@ -464,7 +705,95 @@ export class VSMONSTERGateway {
       }
     }
 
-    if (channel === 'line' && text) {
+    // === Telegram 白名單握手 ===
+    if (channel === 'telegram') {
+      const telegramChannel = this.channelManager.getChannel('telegram') as any;
+      if (telegramChannel && !telegramChannel.isWhitelisted(userId)) {
+        const normalized = text.trim().toLowerCase();
+        const currentCode = this.telegramHandshakeCodes.get(userId);
+        
+        const generateCode = () => {
+          const code = Array.from({ length: 4 }, () => {
+            return this.handshakeEmojis[Math.floor(Math.random() * this.handshakeEmojis.length)];
+          }).join('');
+          this.telegramHandshakeCodes.set(userId, code);
+          
+          // 只在終端機顯示驗證碼（安全）
+          logger.info(`🔐 Telegram 握手驗證碼: ${code} (用戶: ${userId})`);
+          
+          // 也發送到 VS Code
+          this.broadcastToVSCode({
+            type: 'handshake_code',
+            channel: 'telegram',
+            userId,
+            code,
+            message: `🔐 Telegram 握手驗證碼: ${code} (用戶 ID: ${userId})`
+          });
+          
+          return code;
+        };
+
+        // 驗證握手碼
+        if (currentCode && text.trim() === currentCode) {
+          await telegramChannel.addToWhitelist(userId);
+          this.telegramHandshakeCodes.delete(userId);
+          this.recordActiveUser(channel, userId);
+          
+          // 記錄已驗證用戶的完整資訊
+          this.verifiedUsers.set(`${channel}:${userId}`, {
+            id: userId,
+            channel,
+            ip: clientIp,
+            verifiedAt: new Date(),
+            lastActiveAt: new Date(),
+            messageCount: 1,
+            displayName
+          });
+          logger.info(`✅ 用戶已驗證: ${channel}:${userId} (IP: ${clientIp}, 名稱: ${displayName || 'N/A'})`);
+          
+          // 保存到檔案
+          this.saveVerifiedUsers();
+          
+          await this.sendToChannel(channel, userId, '✅ 驗證成功！歡迎使用 UFO 🛸');
+          return;
+        }
+        
+        // 特殊命令：重新產生驗證碼
+        if (normalized === '你好' || normalized === 'hi' || normalized === 'hello' || normalized === '/start') {
+          generateCode();
+          await this.sendToChannel(
+            channel,
+            userId,
+            '🔒 請查看 VS Code 終端機中的驗證碼，然後在這裡輸入。'
+          );
+          return;
+        }
+
+        // 管理員重置命令
+        if (normalized === `/ufo-reset ${this.adminResetToken}`) {
+          telegramChannel.clearWhitelist();
+          this.telegramHandshakeCodes.clear();
+          await this.sendToChannel(channel, userId, '🧹 已清空白名單與握手狀態');
+          return;
+        }
+
+        // 如果還沒有驗證碼，產生一個
+        if (!currentCode) {
+          generateCode();
+        }
+        
+        // 提示用戶查看終端機
+        await this.sendToChannel(
+          channel,
+          userId,
+          '🔒 尚未授權\n\n請查看 VS Code 終端機中的驗證碼，然後在這裡輸入相同的符號。\n\n💡 輸入「你好」可重新產生驗證碼。'
+        );
+        return;
+      }
+    }
+
+    // 發送訊息給 UFO extension（支援所有 channel）
+    if (text) {
       this.broadcastToVSCode({
         type: 'ufo_message',
         channel,
@@ -634,6 +963,93 @@ export class VSMONSTERGateway {
     }
   }
 
+  /**
+   * 廣播任務狀態變更到所有活躍頻道的用戶
+   */
+  private async broadcastTaskStatusToAllChannels(message: {
+    taskId: string;
+    from: string;
+    to: string;
+    message: string;
+  }): Promise<void> {
+    const channels = this.channelManager.getActiveChannels();
+    for (const channel of channels) {
+      try {
+        // 取得該頻道最近活躍的用戶
+        const activeUsers = this.getActiveUsersForChannel(channel);
+        for (const userId of activeUsers) {
+          await this.sendToChannel(channel, userId, message.message);
+        }
+      } catch (error) {
+        logger.error(`Failed to broadcast to ${channel}:`, error);
+      }
+    }
+  }
+
+  /**
+   * 廣播訊息到指定頻道的所有活躍用戶
+   */
+  private async broadcastToChannelUsers(channel: string, content: string): Promise<void> {
+    const activeUsers = this.getActiveUsersForChannel(channel);
+    for (const userId of activeUsers) {
+      await this.sendToChannel(channel, userId, content);
+    }
+  }
+
+  /**
+   * 取得頻道的活躍用戶列表
+   */
+  private getActiveUsersForChannel(channel: string): string[] {
+    const users: string[] = [];
+    this.lastActiveUsers.forEach((userChannel, key) => {
+      if (userChannel === channel) {
+        const userId = key.split(':')[1];
+        if (userId) users.push(userId);
+      }
+    });
+    return users;
+  }
+
+  // 記錄活躍用戶
+  private lastActiveUsers = new Map<string, string>(); // key: "channel:userId", value: channel
+
+  private recordActiveUser(channel: string, userId: string): void {
+    this.lastActiveUsers.set(`${channel}:${userId}`, channel);
+    
+    // 更新已驗證用戶的活躍時間和訊息計數
+    const key = `${channel}:${userId}`;
+    const user = this.verifiedUsers.get(key);
+    if (user) {
+      user.lastActiveAt = new Date();
+      user.messageCount++;
+      
+      // 每次活躍時自動保存
+      this.saveVerifiedUsers();
+    }
+  }
+
+  /**
+   * 從事件中提取用戶顯示名稱
+   */
+  private extractDisplayName(channel: string, event: any): string | undefined {
+    try {
+      if (channel === 'telegram' && event.message?.from) {
+        const from = event.message.from;
+        return [from.first_name, from.last_name].filter(Boolean).join(' ') || from.username;
+      }
+      if (channel === 'line' && event.source?.userId) {
+        // LINE 需要額外 API 呼叫取得名稱，這裡先回傳 undefined
+        return undefined;
+      }
+      if (channel === 'discord' && event.member?.user) {
+        return event.member.user.username;
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+
   private broadcastToVSCode(message: object): void {
     const data = JSON.stringify(message);
     this.vsCodeConnections.forEach(ws => {
@@ -740,6 +1156,9 @@ export class VSMONSTERGateway {
 
   async start(): Promise<void> {
     const port = this.config.port || 3000;
+    
+    // 載入已驗證用戶（從持久化存儲）
+    this.loadVerifiedUsers();
     
     // 初始化頻道
     await this.channelManager.initialize();
@@ -869,33 +1288,82 @@ export class VSMONSTERGateway {
     .users-list h3 {
       color: #aaa;
       margin-bottom: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .users-list h3 button {
+      background: rgba(0,212,255,0.2);
+      border: 1px solid rgba(0,212,255,0.3);
+      color: #0af;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .users-list h3 button:hover {
+      background: rgba(0,212,255,0.3);
     }
     .user-item {
       display: flex;
       align-items: center;
-      padding: 10px;
+      padding: 12px;
       background: rgba(0,0,0,0.2);
       border-radius: 8px;
-      margin-bottom: 8px;
-      cursor: pointer;
+      margin-bottom: 10px;
       transition: background 0.2s;
     }
     .user-item:hover {
       background: rgba(0,212,255,0.1);
     }
+    .user-main {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+    }
     .user-item .channel {
       padding: 4px 8px;
       border-radius: 4px;
-      font-size: 12px;
-      margin-right: 10px;
+      font-size: 11px;
+      margin-right: 12px;
+      font-weight: bold;
     }
     .user-item .channel.line { background: #06c755; }
     .user-item .channel.telegram { background: #0088cc; }
     .user-item .channel.discord { background: #5865f2; }
-    .user-item .id { 
-      color: #888; 
-      font-size: 12px;
-      margin-left: auto;
+    .user-info {
+      flex: 1;
+    }
+    .user-name {
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+    .user-meta {
+      display: flex;
+      gap: 15px;
+      font-size: 11px;
+      color: #888;
+      margin-bottom: 2px;
+    }
+    .user-time {
+      display: flex;
+      gap: 15px;
+      font-size: 10px;
+      color: #666;
+    }
+    .delete-btn {
+      background: rgba(255,100,100,0.2);
+      border: 1px solid rgba(255,100,100,0.3);
+      color: #f66;
+      padding: 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-left: 10px;
+    }
+    .delete-btn:hover {
+      background: rgba(255,100,100,0.4);
     }
   </style>
 </head>
@@ -930,7 +1398,7 @@ export class VSMONSTERGateway {
     <div id="result" class="result"></div>
     
     <div class="users-list">
-      <h3>📋 已註冊的用戶</h3>
+      <h3>📋 已驗證的用戶 <button onclick="loadUsers()">🔄 刷新</button></h3>
       <div id="usersList">載入中...</div>
     </div>
   </div>
@@ -946,28 +1414,63 @@ export class VSMONSTERGateway {
     // 載入用戶列表
     async function loadUsers() {
       try {
-        const res = await fetch('/api/channels');
+        const res = await fetch('/api/users');
         const data = await res.json();
         
         if (data.users && data.users.length > 0) {
-          usersList.innerHTML = data.users.map(u => \`
-            <div class="user-item" onclick="selectUser('\${u.channel}', '\${u.userId}')">
-              <span class="channel \${u.channel}">\${u.channel.toUpperCase()}</span>
-              <span>\${u.displayName || '未知用戶'}</span>
-              <span class="id">\${u.userId.substring(0, 20)}...</span>
+          usersList.innerHTML = data.users.map(u => {
+            const verifiedDate = new Date(u.verifiedAt).toLocaleString('zh-TW');
+            const lastActive = new Date(u.lastActiveAt).toLocaleString('zh-TW');
+            const idShort = u.id.length > 15 ? u.id.substring(0, 15) + '...' : u.id;
+            return \`
+            <div class="user-item">
+              <div class="user-main" onclick="selectUser('\${u.channel}', '\${u.id}')">
+                <span class="channel \${u.channel}">\${u.channel.toUpperCase()}</span>
+                <div class="user-info">
+                  <div class="user-name">\${u.displayName || '未知用戶'}</div>
+                  <div class="user-meta">
+                    <span>🆔 \${idShort}</span>
+                    <span>🌐 \${u.ip}</span>
+                    <span>💬 \${u.messageCount} 則</span>
+                  </div>
+                  <div class="user-time">
+                    <span>✅ 驗證: \${verifiedDate}</span>
+                    <span>⏰ 活躍: \${lastActive}</span>
+                  </div>
+                </div>
+              </div>
+              <button class="delete-btn" onclick="deleteUser('\${u.channel}', '\${u.id}')" title="移除用戶">🗑️</button>
             </div>
-          \`).join('');
+          \`}).join('');
         } else {
-          usersList.innerHTML = '<p style="color:#666">尚無已註冊的用戶。請先用 LINE/Telegram/Discord 發送訊息給 UFO。</p>';
+          usersList.innerHTML = '<p style="color:#666">尚無已驗證的用戶。請先完成握手驗證。</p>';
         }
       } catch (err) {
-        usersList.innerHTML = '<p style="color:#f66">無法載入用戶列表</p>';
+        console.error('loadUsers error:', err);
+        usersList.innerHTML = '<p style="color:#f66">無法載入用戶列表: ' + (err.message || err) + '</p>';
       }
     }
 
     function selectUser(channel, userId) {
       channelSelect.value = channel;
       userIdInput.value = userId;
+    }
+
+    async function deleteUser(channel, userId) {
+      if (!confirm('確定要移除此用戶嗎？\\n移除後需要重新握手驗證。')) return;
+      
+      try {
+        const res = await fetch(\`/api/users/\${channel}/\${userId}\`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          alert('✅ 用戶已移除');
+          loadUsers();
+        } else {
+          alert('❌ ' + (data.error || '移除失敗'));
+        }
+      } catch (err) {
+        alert('❌ 網路錯誤');
+      }
     }
 
     form.addEventListener('submit', async (e) => {
@@ -1012,7 +1515,9 @@ export class VSMONSTERGateway {
       }
     });
 
+    // 載入並每 30 秒自動刷新
     loadUsers();
+    setInterval(loadUsers, 30000);
   </script>
 </body>
 </html>`;
