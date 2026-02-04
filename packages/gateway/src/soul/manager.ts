@@ -107,7 +107,7 @@ export class SoulManager {
         '你好',
         '嗨',
       ],
-      greetingTemplate: '嗨！我是 VSMONSTER 🦞，你的智能編程助手。有什麼我可以幫忙的嗎？',
+      greetingTemplate: '嗨！我是BlueMonster👾，現在我和UFO🛸失聯中，請稍後再試。',
       taskResponseTemplate: '好的，我理解了。讓我幫你完成這個任務。',
       generalResponseTemplate: '關於你的問題：',
     };

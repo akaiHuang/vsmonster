@@ -1,21 +1,42 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
+import { CopilotClient, CopilotSession } from "@github/copilot-sdk";
 import { GatewayClient } from "./gateway-client";
 import { getDashboardHtml, type DashboardState } from "./dashboard";
+import {
+  getPromptStudioHtml,
+  loadPromptStudioState,
+  savePromptStudioState,
+  type PromptStudioState
+} from "./prompt-studio";
 
 const STATUS_DIRS = [
-  { id: "pending", label: "Pending" },
-  { id: "approved", label: "Approved" },
-  { id: "in-progress", label: "In Progress" },
-  { id: "done", label: "Done" }
+  { id: "pending", label: "⏳ Pending", icon: "clock" },
+  { id: "approved", label: "✅ Approved", icon: "pass" },
+  { id: "in-progress", label: "🔄 Running", icon: "sync~spin" },
+  { id: "done", label: "✨ Done", icon: "check-all" }
 ] as const;
+
+// Suppress noisy Node.js warnings in Extension Host console
+const originalEmitWarning = process.emitWarning;
+process.emitWarning = (warning, ...args) => {
+  if (typeof warning === "string") {
+    if (warning.includes("punycode") || warning.includes("SQLite")) {
+      return;
+    }
+  } else if (typeof warning === "object" && warning?.message) {
+    if (warning.message.includes("punycode") || warning.message.includes("SQLite")) {
+      return;
+    }
+  }
+  return (originalEmitWarning as any).call(process, warning, ...args);
+};
 
 type TaskStatus = (typeof STATUS_DIRS)[number]["id"];
 const MAX_RECENT_MESSAGE_IDS = 200;
 const DEFAULT_TASK_FOLDER = "pending";
-
-type UfoMode = "chat" | "planning" | "awaiting_approval";
 
 type UfoRole = "user" | "assistant";
 
@@ -28,12 +49,13 @@ interface UfoSession {
   key: string;
   userId: string;
   channel: string;
-  mode: UfoMode;
   history: UfoChatEntry[];
   taskTitle?: string;
   taskId?: string;
   taskDir?: string;
 }
+
+let promptStudioState: PromptStudioState | null = null;
 const ENV_KEYS = {
   port: "VSMONSTER_PORT",
   publicUrl: "VSMONSTER_PUBLIC_URL",
@@ -59,19 +81,67 @@ class TaskItem extends vscode.TreeItem {
     status?: TaskStatus,
     isDirectory: boolean = false
   ) {
-    super(label, collapsibleState);
+    // 解析任務名稱，讓顯示更友善
+    const displayLabel = TaskItem.formatLabel(label, isDirectory);
+    super(displayLabel, collapsibleState);
     this.fullPath = fullPath;
     this.status = status;
     this.isDirectory = isDirectory;
 
-    if (fullPath && !isDirectory) {
+    // 設定圖示
+    if (isDirectory) {
+      this.iconPath = new vscode.ThemeIcon("folder");
+    } else if (fullPath) {
+      this.iconPath = new vscode.ThemeIcon("file-text");
       this.resourceUri = vscode.Uri.file(fullPath);
       this.command = {
         command: "vscode.open",
         title: "Open",
         arguments: [vscode.Uri.file(fullPath)]
       };
+      // 加入說明文字（顯示在右側）
+      this.description = TaskItem.formatDescription(label);
     }
+  }
+
+  // 將檔名轉換成友善的顯示名稱
+  private static formatLabel(label: string, isDirectory: boolean): string {
+    if (isDirectory) {
+      // 如果是資料夾，試著提取任務名稱
+      const parts = label.split("-");
+      if (parts.length > 4) {
+        // 格式: 2026-02-03T05-31-08-171Z-hello-world
+        // 提取最後部分作為任務名
+        const taskName = parts.slice(4).join("-");
+        return taskName || label;
+      }
+      return label;
+    }
+    
+    // 如果是 .md 檔案
+    if (label.endsWith(".md")) {
+      const nameWithoutExt = label.slice(0, -3);
+      // 嘗試提取有意義的名稱
+      const parts = nameWithoutExt.split("-");
+      if (parts.length > 4) {
+        const taskName = parts.slice(4).join(" ");
+        return taskName || nameWithoutExt;
+      }
+      return nameWithoutExt;
+    }
+    
+    return label;
+  }
+
+  // 產生說明文字（顯示時間或其他資訊）
+  private static formatDescription(label: string): string {
+    // 嘗試從檔名提取時間
+    const match = label.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})/);
+    if (match) {
+      const [, year, month, day, hour, minute] = match;
+      return `${month}/${day} ${hour}:${minute}`;
+    }
+    return "";
   }
 }
 
@@ -98,7 +168,9 @@ class TaskQueueProvider implements vscode.TreeDataProvider<TaskItem> {
   getChildren(element?: TaskItem): TaskItem[] {
     if (!element) {
       return STATUS_DIRS.map((status) => {
-        return new TaskItem(status.label, vscode.TreeItemCollapsibleState.Collapsed, undefined, status.id);
+        const item = new TaskItem(status.label, vscode.TreeItemCollapsibleState.Collapsed, undefined, status.id);
+        item.iconPath = new vscode.ThemeIcon(status.icon);
+        return item;
       });
     }
 
@@ -131,6 +203,60 @@ class TaskQueueProvider implements vscode.TreeDataProvider<TaskItem> {
   }
 }
 
+// 單一狀態的 TaskProvider（用於獨立視窗）
+class SingleStatusTaskProvider implements vscode.TreeDataProvider<TaskItem> {
+  private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<TaskItem | undefined>();
+  public readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
+
+  constructor(
+    private readonly tasksRoot: string,
+    private readonly status: TaskStatus,
+    private readonly onRefresh?: () => void
+  ) {}
+
+  refresh(): void {
+    this.onDidChangeTreeDataEmitter.fire(undefined);
+    if (this.onRefresh) {
+      this.onRefresh();
+    }
+  }
+
+  getTreeItem(element: TaskItem): vscode.TreeItem {
+    return element;
+  }
+
+  getChildren(element?: TaskItem): TaskItem[] {
+    const dirPath = element?.fullPath ?? path.join(this.tasksRoot, this.status);
+    
+    if (!fs.existsSync(dirPath)) {
+      return [];
+    }
+
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    const items: TaskItem[] = [];
+
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        items.push(
+          new TaskItem(entry.name, vscode.TreeItemCollapsibleState.Collapsed, fullPath, this.status, true)
+        );
+      } else if (entry.isFile() && entry.name.endsWith(".md")) {
+        items.push(new TaskItem(entry.name, vscode.TreeItemCollapsibleState.None, fullPath, this.status));
+      }
+    }
+
+    // 按時間排序（最新的在前）
+    items.sort((a, b) => {
+      const nameA = a.label?.toString() || "";
+      const nameB = b.label?.toString() || "";
+      return nameB.localeCompare(nameA);
+    });
+
+    return items;
+  }
+}
+
 class UfoDashboardProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
 
@@ -146,14 +272,12 @@ class UfoDashboardProvider implements vscode.WebviewViewProvider {
       enableScripts: true,
       localResourceRoots: [this.context.extensionUri]
     };
-    console.log('[UFO] Dashboard view resolved');
     view.webview.html = getDashboardHtml(view.webview, this.getState());
     view.webview.onDidReceiveMessage((message) => {
       if (!message || typeof message !== "object") {
         return;
       }
       if (message.type === "command" && typeof message.command === "string") {
-        console.log(`[UFO] Dashboard action: ${message.command}`);
         this.onCommand(message.command);
       }
     });
@@ -166,6 +290,53 @@ class UfoDashboardProvider implements vscode.WebviewViewProvider {
     this.view.webview.postMessage({
       type: "state",
       state: this.getState()
+    });
+  }
+}
+
+class PromptStudioPanel {
+  private panel?: vscode.WebviewPanel;
+
+  constructor(private readonly context: vscode.ExtensionContext) {}
+
+  show(): void {
+    if (this.panel) {
+      this.panel.reveal();
+      this.panel.webview.postMessage({ type: "state", state: promptStudioState });
+      return;
+    }
+
+    this.panel = vscode.window.createWebviewPanel(
+      "ufoPromptStudio",
+      "UFO Prompt Studio",
+      vscode.ViewColumn.Beside,
+      { enableScripts: true }
+    );
+    this.panel.webview.html = getPromptStudioHtml(
+      this.panel.webview,
+      promptStudioState || loadPromptStudioState(this.context)
+    );
+    this.panel.webview.onDidReceiveMessage((message) => {
+      if (!message || typeof message !== "object") return;
+      if (message.type === "save") {
+        const payload = message.payload as Partial<PromptStudioState>;
+        const merged: PromptStudioState = {
+          systemPrompt: payload.systemPrompt ?? promptStudioState?.systemPrompt ?? "",
+          updatedAt: new Date().toISOString()
+        };
+        promptStudioState = merged;
+        savePromptStudioState(this.context, merged);
+        this.panel?.webview.postMessage({ type: "state", state: merged });
+        vscode.window.showInformationMessage("UFO Prompt Studio 已儲存");
+      }
+      if (message.type === "reload") {
+        const state = loadPromptStudioState(this.context);
+        promptStudioState = state;
+        this.panel?.webview.postMessage({ type: "state", state });
+      }
+    });
+    this.panel.onDidDispose(() => {
+      this.panel = undefined;
     });
   }
 }
@@ -228,7 +399,8 @@ function getTaskCounts(context: vscode.ExtensionContext): DashboardState["tasks"
 
 function buildDashboardState(
   context: vscode.ExtensionContext,
-  connected: boolean
+  connected: boolean,
+  connectionState: "connected" | "reconnecting" | "disconnected"
 ): DashboardState {
   const config = vscode.workspace.getConfiguration("ufo");
   const gatewayUrl = config.get<string>("gatewayUrl", "ws://localhost:3000");
@@ -255,6 +427,7 @@ function buildDashboardState(
 
   return {
     connected,
+    connectionState,
     gatewayUrl,
     publicUrl,
     envAutoSync,
@@ -468,89 +641,247 @@ function syncEnvFromSettings(
   output.appendLine(`Synced UFO settings to .env (updated: ${updatedKeys.join(", ")})`);
 }
 
-async function selectChatModel(
-  preferredId: string,
-  output: vscode.OutputChannel
-): Promise<vscode.LanguageModelChat | undefined> {
-  if (!vscode.lm?.selectChatModels) {
-    output.appendLine("Copilot LM API not available in this VS Code version.");
-    return undefined;
+class UfoCopilotSdkManager {
+  private client: CopilotClient | null = null;
+  private sessions = new Map<string, { session: CopilotSession; model: string }>();
+  private initPromise: Promise<void> | null = null;
+  private output: vscode.OutputChannel | null = null;
+
+  setOutput(output: vscode.OutputChannel): void {
+    this.output = output;
   }
 
-  if (preferredId) {
-    const matches = await vscode.lm.selectChatModels({ vendor: "copilot", id: preferredId });
-    if (matches.length > 0) {
-      return matches[0];
+  private log(message: string): void {
+    if (this.output) {
+      this.output.appendLine(`[UFO] ${message}`);
+    }
+    console.log(`[UFO] ${message}`);
+  }
+
+  async initialize(): Promise<void> {
+    if (this.client) {
+      return;
+    }
+    if (this.initPromise) {
+      return this.initPromise;
+    }
+    this.initPromise = (async () => {
+      this.log("🚀 Initializing Copilot SDK...");
+      this.client = new CopilotClient({
+        autoStart: true,
+        autoRestart: true,
+        useLoggedInUser: true,
+        logLevel: "warning"
+      });
+      await this.client.start();
+      this.log("✅ Copilot SDK client started");
+    })();
+    return this.initPromise;
+  }
+
+  async getSession(sessionKey: string, model: string): Promise<CopilotSession> {
+    await this.initialize();
+    if (!this.client) {
+      throw new Error("Copilot SDK client not initialized");
+    }
+    const existing = this.sessions.get(sessionKey);
+    if (existing && existing.model === model) {
+      return existing.session;
+    }
+    if (existing) {
+      try {
+        await existing.session.destroy();
+      } catch {}
+      this.sessions.delete(sessionKey);
+    }
+    // 移除 sessionKey 中的非法字元（冒號等），確保 sessionId 合法
+    const sanitizedKey = sessionKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+    this.log(`🔵 Creating session for ${sanitizedKey}, model: ${model}`);
+    const session = await this.client.createSession({
+      sessionId: `ufo-${sanitizedKey}-${Date.now()}`,
+      model,
+      streaming: true,
+      infiniteSessions: { enabled: true }
+    });
+    
+    // 監聽 SDK 事件來顯示 AI 狀態
+    session.on((event: any) => {
+      this.handleSdkEvent(event, sessionKey);
+    });
+    
+    this.sessions.set(sessionKey, { session, model });
+    return session;
+  }
+
+  private handleSdkEvent(event: any, sessionKey: string): void {
+    if (!event) return;
+    const type = event.type;
+    switch (type) {
+      case 'assistant.turn_start':
+        this.log(`🧠 [${sessionKey}] Thinking...`);
+        break;
+      case 'assistant.intent':
+        if (event.intent) {
+          this.log(`📋 [${sessionKey}] Intent: ${event.intent}`);
+        }
+        break;
+      case 'assistant.reasoning_delta':
+        // 顯示推理過程的片段
+        if (event.delta) {
+          const snippet = event.delta.substring(0, 80).replace(/\n/g, ' ');
+          this.log(`💭 [${sessionKey}] ${snippet}...`);
+        }
+        break;
+      case 'assistant.message_delta':
+        // 回應正在生成中
+        break;
+      case 'assistant.message':
+        this.log(`✅ [${sessionKey}] Response generated`);
+        break;
+      case 'assistant.turn_end':
+      case 'session.idle':
+        this.log(`🔵 [${sessionKey}] Idle`);
+        break;
+      case 'tool.execution_start':
+        if (event.tool) {
+          this.log(`🔧 [${sessionKey}] Tool: ${event.tool}`);
+        }
+        break;
+      case 'tool.execution_end':
+        this.log(`🔧 [${sessionKey}] Tool completed`);
+        break;
+      default:
+        // 其他事件不顯示
+        break;
     }
   }
 
-  const models = await vscode.lm.selectChatModels({ vendor: "copilot" });
-  if (models.length === 0) {
-    output.appendLine("No Copilot models available.");
-    return undefined;
+  async sendPrompt(sessionKey: string, model: string, prompt: string, timeoutMs = 300000): Promise<string> {
+    this.log(`📤 [${sessionKey}] Sending prompt (${prompt.length} chars)...`);
+    const session = await this.getSession(sessionKey, model);
+    try {
+      const response = await session.sendAndWait({ prompt }, timeoutMs);
+      const content = response?.data?.content?.trim() ?? "";
+      this.log(`📥 [${sessionKey}] Received response (${content.length} chars)`);
+      return content;
+    } catch (error) {
+      this.log(`❌ [${sessionKey}] Error: ${String(error)}`);
+      const existing = this.sessions.get(sessionKey);
+      if (existing) {
+        try {
+          await existing.session.destroy();
+        } catch {}
+        this.sessions.delete(sessionKey);
+      }
+      throw error;
+    }
   }
-  return models[0];
+
+  async shutdown(): Promise<void> {
+    for (const { session } of this.sessions.values()) {
+      try {
+        await session.destroy();
+      } catch {}
+    }
+    this.sessions.clear();
+    if (this.client) {
+      try {
+        await this.client.stop();
+      } catch {}
+    }
+    this.client = null;
+  }
 }
 
-async function runChatModel(
-  model: vscode.LanguageModelChat,
-  systemPrompt: string,
-  history: UfoChatEntry[],
-  userInput: string,
-  output: vscode.OutputChannel
-): Promise<string> {
-  const messages: vscode.LanguageModelChatMessage[] = [
-    vscode.LanguageModelChatMessage.User(systemPrompt)
+const copilotSdk = new UfoCopilotSdkManager();
+
+function findExecutableInPath(name: string): string | null {
+  const envPath = process.env.PATH || "";
+  const parts = envPath.split(path.delimiter).filter(Boolean);
+  for (const dir of parts) {
+    const candidate = path.join(dir, name);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function ensureCopilotCliOnPath(output: vscode.OutputChannel): void {
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, ".copilot", "bin"),
+    path.join(home, ".local", "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin"
   ];
-
-  for (const entry of history) {
-    if (entry.role === "user") {
-      messages.push(vscode.LanguageModelChatMessage.User(entry.content));
-    } else {
-      messages.push(vscode.LanguageModelChatMessage.Assistant(entry.content));
-    }
+  const envPath = process.env.PATH || "";
+  const parts = envPath.split(path.delimiter).filter(Boolean);
+  const additions = candidates.filter((dir) => {
+    const candidate = path.join(dir, "copilot");
+    return fs.existsSync(candidate) && !parts.includes(dir);
+  });
+  if (additions.length > 0) {
+    process.env.PATH = `${additions.join(path.delimiter)}${path.delimiter}${envPath}`;
+    output.appendLine(`[UFO] PATH extended for copilot: ${additions.join(", ")}`);
   }
-
-  messages.push(vscode.LanguageModelChatMessage.User(userInput));
-
-  const response = await model.sendRequest(
-    messages,
-    {},
-    new vscode.CancellationTokenSource().token
-  );
-
-  let text = "";
-  for await (const part of response.stream) {
-    if (part instanceof vscode.LanguageModelTextPart) {
-      text += part.value;
-    }
+  const found = findExecutableInPath("copilot");
+  if (found) {
+    output.appendLine(`[UFO] Copilot CLI found: ${found}`);
+  } else {
+    output.appendLine("[UFO] Copilot CLI not found in PATH.");
   }
-
-  const trimmed = text.trim();
-  if (!trimmed) {
-    output.appendLine("Copilot returned empty response.");
-  }
-  return trimmed;
 }
 
 function buildChatSystemPrompt(): string {
-  return [
-    "你是 UFO（任務規格協助員）。",
-    "目標：與使用者討論需求，協助釐清範圍、功能、限制、驗收條件。",
-    "如果使用者想開始一個任務，請提醒他輸入 /task 開始任務流程。",
-    "在任務流程中，請逐步提問、整理需求。",
-    "使用中文、清楚、精簡。"
-  ].join("\n");
+  const studio = promptStudioState?.systemPrompt;
+  if (!studio) {
+    return "";
+  }
+  return studio.trim();
 }
 
-function buildPlanningSystemPrompt(): string {
-  return [
-    "你是 UFO（需求釐清助理）。",
-    "目前正在任務規格討論中。",
-    "請提出需要的問題，並適時整理目前已知需求。",
-    "當你認為需求足夠時，請提示使用者輸入 /confirm 進行確認。"
-  ].join("\n");
+function loadCopilotInstructions(context: vscode.ExtensionContext): string {
+  const instructionsPath = path.join(getUfoRoot(context), "copilot-instructions.md");
+  if (!fs.existsSync(instructionsPath)) {
+    return "";
+  }
+  const content = fs.readFileSync(instructionsPath, "utf8").trim();
+  if (!content) {
+    return "";
+  }
+  return `<copilot_instructions>\n${content}\n</copilot_instructions>`;
 }
+
+async function runSdkPrompt(
+  sessionKey: string,
+  modelId: string,
+  prompt: string,
+  output: vscode.OutputChannel
+): Promise<string> {
+  // 確保 SDK manager 有 output channel
+  copilotSdk.setOutput(output);
+  
+  output.appendLine(`[UFO] 📤 Sending to Copilot SDK (model: ${modelId})...`);
+  try {
+    const response = await copilotSdk.sendPrompt(sessionKey, modelId, prompt);
+    if (!response) {
+      output.appendLine("[UFO] ⚠️ Copilot SDK returned empty response.");
+    } else {
+      output.appendLine(`[UFO] 📥 Response received (${response.length} chars)`);
+    }
+    return response;
+  } catch (error) {
+    const message = `Copilot SDK failed: ${String(error)}`;
+    output.appendLine(`[UFO] ❌ ${message}`);
+    console.error("[UFO] Copilot SDK failed:", error);
+    if (error instanceof Error && error.stack) {
+      output.appendLine(error.stack);
+    }
+    return "❌ Copilot SDK 無法回應，請確認 Copilot CLI 已登入並可用。";
+  }
+}
+
 
 function buildSpecSystemPrompt(conversation: string): string {
   return [
@@ -611,6 +942,206 @@ function buildConversationLog(history: UfoChatEntry[]): string {
   return history
     .map((entry) => `${entry.role === "user" ? "User" : "Assistant"}: ${entry.content}`)
     .join("\n");
+}
+
+
+
+function getUfoPersonaPaths(context: vscode.ExtensionContext): { mePath: string; youPath: string } {
+  const root = getUfoRoot(context);
+  return {
+    mePath: path.join(root, "me.md"),
+    youPath: path.join(root, "you.md")
+  };
+}
+
+function getSuperPowerPath(context: vscode.ExtensionContext): string {
+  return path.join(getUfoRoot(context), "superPower.md");
+}
+
+function ensurePersonaFiles(context: vscode.ExtensionContext): void {
+  const { mePath, youPath } = getUfoPersonaPaths(context);
+  const defaultMe = [
+    "# UFO 個性檔案",
+    "",
+    "## 角色定位",
+    "- 我是 UFO，負責協助使用者完成開發與任務調度。",
+    "- 回覆自然、簡潔，不使用固定模板或指令式話術。",
+    "",
+    "## 核心技能",
+    "- 檔案操作與任務建立",
+    "- 查詢 BlueMonster 任務狀態",
+    "- 需要更深入的開發時可交由 BlueMonster 處理",
+    "",
+    "## 語氣",
+    "- 精準、直接、專業",
+    "- 避免冗長清單"
+  ].join("\n");
+  const legacyMarkers = [
+    "需求釐清、規格整理與任務交接",
+    "建立任務規格與交接包",
+    "回覆自然、不機械"
+  ];
+  const shouldReplaceLegacy = (content: string) =>
+    legacyMarkers.every((marker) => content.includes(marker));
+
+  if (!fs.existsSync(mePath)) {
+    fs.writeFileSync(mePath, defaultMe, "utf8");
+  } else {
+    const current = fs.readFileSync(mePath, "utf8");
+    if (shouldReplaceLegacy(current)) {
+      fs.writeFileSync(mePath, defaultMe, "utf8");
+    }
+  }
+  if (!fs.existsSync(youPath)) {
+    fs.writeFileSync(
+      youPath,
+      [
+        "# 使用者檔案",
+        "",
+        "## 背景",
+        "- 使用者偏好與需求會在對話中逐步整理",
+        "",
+        "## 偏好",
+        "- （待補充）",
+        "",
+        "## 需求模式",
+        "- （待補充）"
+      ].join("\n"),
+      "utf8"
+    );
+  }
+  
+  // 確保 superPower.md 存在
+  const superPowerPath = getSuperPowerPath(context);
+  if (!fs.existsSync(superPowerPath)) {
+    fs.writeFileSync(
+      superPowerPath,
+      [
+        "# UFO & BlueMonster 技能庫",
+        "",
+        "> 這個檔案記錄所有已開發過的專案技能，可重複調用避免重複造輪子。",
+        "",
+        "## 📦 技能清單",
+        "",
+        "### 1. 範例技能",
+        "",
+        "**功能描述**：",
+        "- （技能說明）",
+        "",
+        "**適用場景**：",
+        "- （使用時機）",
+        "",
+        "**檔案位置**：",
+        "- （檔案路徑）",
+        "",
+        "**建立時間**：" + new Date().toISOString().split('T')[0],
+        "",
+        "---",
+        "",
+        "## 💡 使用建議",
+        "",
+        "1. **優先搜尋**：用戶提出需求時，先搜尋此檔案是否有類似技能",
+        "2. **組合使用**：多個技能可以組合使用",
+        "3. **持續更新**：每次完成新功能都要記錄"
+      ].join("\n"),
+      "utf8"
+    );
+  }
+}
+
+function loadPersonaContext(context: vscode.ExtensionContext): string {
+  const { mePath, youPath } = getUfoPersonaPaths(context);
+  const superPowerPath = getSuperPowerPath(context);
+  const sections: string[] = [];
+  if (fs.existsSync(mePath)) {
+    sections.push(`<me>\n${fs.readFileSync(mePath, "utf8")}\n</me>`);
+  }
+  if (fs.existsSync(youPath)) {
+    sections.push(`<you>\n${fs.readFileSync(youPath, "utf8")}\n</you>`);
+  }
+  if (fs.existsSync(superPowerPath)) {
+    sections.push(`<superPower>\n${fs.readFileSync(superPowerPath, "utf8")}\n</superPower>`);
+  }
+  return sections.join("\n\n");
+}
+
+function appendUserProfile(context: vscode.ExtensionContext, text: string): void {
+  const { youPath } = getUfoPersonaPaths(context);
+  const line = `- ${new Date().toISOString()} ${text.trim()}`;
+  fs.appendFileSync(youPath, `\n${line}`, "utf8");
+}
+
+function getBlueMonsterTasksSummary(projectRoot: string): string | null {
+  const tasksRoot = path.join(projectRoot, ".bluemonster", "tasks");
+  if (!fs.existsSync(tasksRoot)) {
+    return null;
+  }
+  const entries = fs.readdirSync(tasksRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  if (entries.length === 0) {
+    return "目前沒有 BlueMonster 任務。";
+  }
+  const recent = entries.slice(-5).join(", ");
+  return `BlueMonster 任務數量：${entries.length}\n最近任務：${recent}`;
+}
+
+function splitMessage(text: string, maxLength: number): string[] {
+  const chunks: string[] = [];
+  const lines = text.split("\n");
+  let buffer = "";
+
+  const pushBuffer = () => {
+    if (buffer.trim().length > 0 || buffer.length > 0) {
+      chunks.push(buffer);
+      buffer = "";
+    }
+  };
+
+  for (const line of lines) {
+    const nextLine = buffer.length === 0 ? line : `${buffer}\n${line}`;
+    if (nextLine.length <= maxLength) {
+      buffer = nextLine;
+      continue;
+    }
+
+    pushBuffer();
+    if (line.length <= maxLength) {
+      buffer = line;
+      continue;
+    }
+
+    let start = 0;
+    while (start < line.length) {
+      chunks.push(line.slice(start, start + maxLength));
+      start += maxLength;
+    }
+    buffer = "";
+  }
+
+  pushBuffer();
+  return chunks;
+}
+
+function getCurrentTodoQuestion(session: UfoSession): string | null {
+  const items = session.todoItems || [];
+  const idx = session.todoIndex ?? 0;
+  if (idx >= items.length) {
+    return null;
+  }
+  return items[idx]?.question ?? null;
+}
+
+function recordTodoAnswer(session: UfoSession, answer: string): void {
+  if (!session.todoItems || session.todoItems.length === 0) {
+    return;
+  }
+  const idx = session.todoIndex ?? 0;
+  if (idx >= session.todoItems.length) {
+    return;
+  }
+  session.todoItems[idx].answer = answer;
+  session.todoIndex = Math.min(idx + 1, session.todoItems.length);
 }
 
 function rememberMessageId(
@@ -738,20 +1269,17 @@ async function createTaskBundleFromConversation(options: {
   ensureDirectory(taskDir);
 
   const conversationLog = buildConversationLog(session.history);
-  const specModel = await selectChatModel(specModelId, output);
   let readme = "";
   let agents = "";
   let devSpec = "";
 
-  if (specModel) {
-    const specPrompt = buildSpecSystemPrompt(conversationLog);
-    const raw = await runChatModel(specModel, specPrompt, [], "", output);
-    const parsed = extractJsonPayload(raw);
-    if (parsed) {
-      readme = parsed.readme;
-      agents = parsed.agents;
-      devSpec = parsed.devSpec;
-    }
+  const specPrompt = buildSpecSystemPrompt(conversationLog);
+  const specRaw = await runSdkPrompt(`spec:${taskId}`, specModelId, specPrompt, output);
+  const parsed = extractJsonPayload(specRaw);
+  if (parsed) {
+    readme = parsed.readme;
+    agents = parsed.agents;
+    devSpec = parsed.devSpec;
   }
 
   if (!readme) {
@@ -793,16 +1321,13 @@ async function createTaskBundleFromConversation(options: {
     readme += `\n\n## 討論紀錄\n${conversationLog}\n`;
   }
 
-  const opusModel = await selectChatModel(opusModelId, output);
-  if (opusModel) {
-    const opusPrompt = buildOpusSystemPrompt(readme, agents, devSpec);
-    const raw = await runChatModel(opusModel, opusPrompt, [], "", output);
-    const refined = extractJsonPayload(raw);
-    if (refined) {
-      readme = refined.readme || readme;
-      agents = refined.agents || agents;
-      devSpec = refined.devSpec || devSpec;
-    }
+  const opusPrompt = buildOpusSystemPrompt(readme, agents, devSpec);
+  const opusRaw = await runSdkPrompt(`opus:${taskId}`, opusModelId, opusPrompt, output);
+  const refined = extractJsonPayload(opusRaw);
+  if (refined) {
+    readme = refined.readme || readme;
+    agents = refined.agents || agents;
+    devSpec = refined.devSpec || devSpec;
   }
 
   fs.writeFileSync(path.join(taskDir, "README.md"), readme, "utf8");
@@ -838,27 +1363,47 @@ async function openTools(context: vscode.ExtensionContext): Promise<void> {
 
 export function activate(context: vscode.ExtensionContext): void {
   ensureUfoDirectories(context);
+  ensurePersonaFiles(context);
+
+  promptStudioState = loadPromptStudioState(context);
 
   const tasksRoot = getTasksRoot(context);
   let gatewayConnected = false;
+  let gatewayConnectionState: "connected" | "reconnecting" | "disconnected" = "disconnected";
   const output = vscode.window.createOutputChannel("UFO");
   const recentMessageIds = new Set<string>();
   const recentMessageIdQueue: string[] = [];
   let hasUfoRouting = false;
 
+  ensureCopilotCliOnPath(output);
   syncEnvFromSettings(context, output);
 
   const config = vscode.workspace.getConfiguration("ufo");
   const gatewayUrl = config.get<string>("gatewayUrl", "ws://localhost:3000");
   const gatewayClient = new GatewayClient(gatewayUrl);
 
-  const buildState = () => buildDashboardState(context, gatewayConnected);
+  const buildState = () => buildDashboardState(context, gatewayConnected, gatewayConnectionState);
   const dashboardProvider = new UfoDashboardProvider(
     context,
     buildState,
     (command) => vscode.commands.executeCommand(command)
   );
-  const provider = new TaskQueueProvider(tasksRoot, () => dashboardProvider.update());
+  const promptStudioPanel = new PromptStudioPanel(context);
+  
+  // 建立四個獨立的任務視窗 Provider
+  const pendingProvider = new SingleStatusTaskProvider(tasksRoot, "pending", () => dashboardProvider.update());
+  const approvedProvider = new SingleStatusTaskProvider(tasksRoot, "approved", () => dashboardProvider.update());
+  const runningProvider = new SingleStatusTaskProvider(tasksRoot, "in-progress", () => dashboardProvider.update());
+  const doneProvider = new SingleStatusTaskProvider(tasksRoot, "done", () => dashboardProvider.update());
+  
+  // 統一刷新所有 Provider
+  const refreshAllProviders = () => {
+    pendingProvider.refresh();
+    approvedProvider.refresh();
+    runningProvider.refresh();
+    doneProvider.refresh();
+    dashboardProvider.update();
+  };
 
   const sessions = new Map<string, UfoSession>();
   const maxHistory = 20;
@@ -871,7 +1416,6 @@ export function activate(context: vscode.ExtensionContext): void {
         key,
         userId: meta.userId,
         channel: meta.channel,
-        mode: "chat",
         history: []
       };
       sessions.set(key, session);
@@ -887,7 +1431,10 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const sendToUser = (channel: string, userId: string, content: string) => {
-    gatewayClient.send({ type: "copilot_response", channel, userId, content });
+    const chunks = splitMessage(content, 100);
+    for (const chunk of chunks) {
+      gatewayClient.send({ type: "copilot_response", channel, userId, content: chunk });
+    }
   };
 
   const handleIncomingText = async (
@@ -903,82 +1450,107 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!normalizedText) {
       return;
     }
-    console.log(`[UFO] Incoming message (${meta.channel}): ${normalizedText}`);
+    output.appendLine(`[UFO] Incoming message (${meta.channel}): ${normalizedText.substring(0, 50)}...`);
     if (!rememberMessageId(meta.messageId, recentMessageIds, recentMessageIdQueue)) {
-      console.log(`[UFO] Duplicate message ignored: ${meta.messageId ?? 'unknown'}`);
       return;
     }
 
     const session = getSession(meta);
     const config = vscode.workspace.getConfiguration("ufo");
     const chatModelId = config.get<string>("models.chat", "gpt-5-mini");
-    const specModelId = config.get<string>("models.spec", "gpt-5-mini");
-    const opusModelId = config.get<string>("models.opus", "opus-4.5");
-
-    if (normalizedText.startsWith("/task")) {
-      session.mode = "planning";
-      session.taskTitle = normalizedText.replace("/task", "").trim() || "task";
-      recordHistory(session, "user", normalizedText);
-      sendToUser(meta.channel, meta.userId, "✅ 已進入任務規格討論。請描述需求，完成後輸入 /confirm。");
-      return;
-    }
-
-    if (session.mode === "planning" && normalizedText === "/confirm") {
-      recordHistory(session, "user", normalizedText);
-      await createTaskBundleFromConversation({
-        context,
-        provider,
-        output,
-        session,
-        chatModelId,
-        specModelId,
-        opusModelId,
-        gatewayClient
-      });
-      sendToUser(
-        meta.channel,
-        meta.userId,
-        "📌 已產生規格草案，請透過確認連結審核。"
-      );
-      return;
-    }
 
     recordHistory(session, "user", normalizedText);
+    appendUserProfile(context, normalizedText);
 
-    const systemPrompt = session.mode === "planning" ? buildPlanningSystemPrompt() : buildChatSystemPrompt();
-    const model = await selectChatModel(chatModelId, output);
-    const response = model
-      ? await runChatModel(model, systemPrompt, session.history, normalizedText, output)
-      : "❌ Copilot 模型不可用，請確認已安裝並登入 Copilot。";
-
-    recordHistory(session, "assistant", response);
-    sendToUser(meta.channel, meta.userId, response);
+    const systemPrompt = [
+      loadCopilotInstructions(context),
+      loadPersonaContext(context),
+      buildChatSystemPrompt()
+    ]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join("\n\n");
+    const fullPrompt = systemPrompt
+      ? `${systemPrompt}\n\nUser: ${normalizedText}`
+      : `User: ${normalizedText}`;
+    const sessionKey = `${meta.channel}:${meta.userId}`;
+    
+    // 隨機 emoji 陣列
+    const randomEmojis = ['✨', '🤔', '🙂‍↔️', '🛸', '🤩', '😮', '🤭', '🥕', '🥦', '🌟', '💓', '👀'];
+    const getRandomEmoji = () => randomEmojis[Math.floor(Math.random() * randomEmojis.length)];
+    
+    // 發送初始思考訊息
+    sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} Thinking... 👾`);
+    let thinkingCount = 1;
+    let hasTimedOut = false;
+    
+    // 每 2 秒發送思考中訊息
+    const thinkingInterval = setInterval(() => {
+      thinkingCount++;
+      sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} Thinking... 👾 (${thinkingCount})`);
+    }, 5000);
+    
+    // 在 58 秒時發送最後警告（LINE Reply Token 60 秒後失效）
+    const timeoutWarning = setTimeout(() => {
+      hasTimedOut = true;
+      clearInterval(thinkingInterval);
+      sendToUser(meta.channel, meta.userId, "👾👾 我可能還需要思考久一點，你等等問我進度 👾👾");
+    }, 58000);
+    
+    try {
+      const response = await runSdkPrompt(sessionKey, chatModelId, fullPrompt, output);
+      
+      // 清理計時器
+      clearInterval(thinkingInterval);
+      clearTimeout(timeoutWarning);
+      
+      if (!hasTimedOut) {
+        recordHistory(session, "assistant", response);
+        sendToUser(meta.channel, meta.userId, response);
+      } else {
+        // 已超時，回應需要用新的 Push Message（會計費）
+        output.appendLine(`[UFO] ⚠️ Reply token likely expired, response may require push message`);
+        recordHistory(session, "assistant", response);
+        sendToUser(meta.channel, meta.userId, response);
+      }
+    } catch (error) {
+      clearInterval(thinkingInterval);
+      clearTimeout(timeoutWarning);
+      const errorMsg = `❌ 發生錯誤: ${String(error)}`;
+      sendToUser(meta.channel, meta.userId, errorMsg);
+    }
   };
 
   gatewayClient.on("connected", () => {
     gatewayConnected = true;
-    output.appendLine(`Gateway connected: ${gatewayUrl}`);
-    console.log(`[UFO] Gateway connected: ${gatewayUrl}`);
+    gatewayConnectionState = "connected";
+    output.appendLine(`[UFO] Gateway connected: ${gatewayUrl}`);
     dashboardProvider.update();
   });
 
   gatewayClient.on("disconnected", () => {
     gatewayConnected = false;
-    output.appendLine("Gateway disconnected");
-    console.log("[UFO] Gateway disconnected");
+    gatewayConnectionState = "disconnected";
+    output.appendLine("[UFO] Gateway disconnected");
+    dashboardProvider.update();
+  });
+
+  gatewayClient.on("reconnecting", (payload: { attempt: number; delayMs: number }) => {
+    gatewayConnected = false;
+    gatewayConnectionState = "reconnecting";
+    output.appendLine(`[UFO] Gateway reconnecting (attempt ${payload.attempt}, ${payload.delayMs}ms)`);
     dashboardProvider.update();
   });
 
   gatewayClient.on("reconnect_failed", () => {
     gatewayConnected = false;
-    output.appendLine("Gateway reconnect failed");
-    console.log("[UFO] Gateway reconnect failed");
+    gatewayConnectionState = "disconnected";
+    output.appendLine("[UFO] Gateway reconnect failed");
     dashboardProvider.update();
   });
 
   gatewayClient.on("error", (error) => {
-    output.appendLine(`Gateway error: ${String(error)}`);
-    console.log("[UFO] Gateway error", error);
+    output.appendLine(`[UFO] Gateway error: ${String(error)}`);
     dashboardProvider.update();
   });
 
@@ -986,7 +1558,6 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!message || typeof message !== "object") {
       return;
     }
-    console.log(`[UFO] Gateway message: ${message.type ?? 'unknown'}`);
 
     if (message.type === "ufo_approved") {
       const taskId = message.taskId as string | undefined;
@@ -1002,7 +1573,7 @@ export function activate(context: vscode.ExtensionContext): void {
             status: "ready-for-bluemonster"
           };
           fs.writeFileSync(path.join(approvedDir, "handoff.json"), JSON.stringify(handoff, null, 2));
-          provider.refresh();
+          refreshAllProviders();
           sendToUser(message.channel || "line", message.userId, "✅ 已確認，任務交接給 BlueMonster 進行開發。");
         } catch (error) {
           output.appendLine(`Failed to move task ${taskId} to approved: ${String(error)}`);
@@ -1068,12 +1639,16 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.window.registerWebviewViewProvider("ufoDashboard", dashboardProvider),
-    vscode.window.registerTreeDataProvider("ufoTasks", provider),
+    // 註冊四個獨立的任務視窗
+    vscode.window.registerTreeDataProvider("ufoTasksPending", pendingProvider),
+    vscode.window.registerTreeDataProvider("ufoTasksApproved", approvedProvider),
+    vscode.window.registerTreeDataProvider("ufoTasksRunning", runningProvider),
+    vscode.window.registerTreeDataProvider("ufoTasksDone", doneProvider),
     vscode.commands.registerCommand("ufo.createTaskSpec", () =>
-      createTaskSpec(context, provider)
+      createTaskSpec(context, { refresh: refreshAllProviders } as any)
     ),
     vscode.commands.registerCommand("ufo.openTools", () => openTools(context)),
-    vscode.commands.registerCommand("ufo.refreshQueue", () => provider.refresh()),
+    vscode.commands.registerCommand("ufo.refreshQueue", () => refreshAllProviders()),
     vscode.commands.registerCommand("ufo.openTasksRoot", () =>
       vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(getTasksRoot(context)))
     ),
@@ -1083,10 +1658,13 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("ufo.syncEnv", () => {
       syncEnvFromSettings(context, output);
       dashboardProvider.update();
-    })
+    }),
+    vscode.commands.registerCommand("ufo.openPromptStudio", () => promptStudioPanel.show())
   );
 
   dashboardProvider.update();
 }
 
-export function deactivate(): void {}
+export function deactivate(): void {
+  void copilotSdk.shutdown();
+}

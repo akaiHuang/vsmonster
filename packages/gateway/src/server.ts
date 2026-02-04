@@ -32,6 +32,7 @@ export class VSMONSTERGateway {
   private soulManager: SoulManager;
   
   private vsCodeConnections: Set<WebSocket> = new Set();
+  private ufoConnections: Set<WebSocket> = new Set();
   private lineHandshakeCodes: Map<string, string> = new Map();
   private readonly lineHandshakeEmojis = ['🛸', '👾'];
   private adminResetToken: string;
@@ -210,6 +211,40 @@ export class VSMONSTERGateway {
       res.json(this.tunnelService.getStatus());
     });
 
+    // ========== 發送訊息 API ==========
+    // POST /api/send - 發送訊息給指定用戶
+    this.app.post('/api/send', async (req, res) => {
+      try {
+        const { channel, userId, message } = req.body;
+        
+        if (!channel || !userId || !message) {
+          return res.status(400).json({ 
+            error: 'Missing required fields: channel, userId, message' 
+          });
+        }
+        
+        await this.channelManager.sendMessage(channel, userId, message);
+        logger.info(`📤 Message sent to ${channel}:${userId}: ${message.substring(0, 50)}...`);
+        res.json({ success: true, channel, userId });
+      } catch (error) {
+        logger.error('Send message error:', error);
+        res.status(500).json({ error: String(error) });
+      }
+    });
+
+    // GET /api/channels - 取得可用頻道列表
+    this.app.get('/api/channels', (req, res) => {
+      res.json({
+        channels: this.channelManager.getActiveChannels(),
+        users: [] // 用戶列表需要額外實現
+      });
+    });
+
+    // 發送訊息測試頁面
+    this.app.get('/send', (req, res) => {
+      res.send(this.renderSendMessagePage());
+    });
+
     // UFO approval pages
     this.app.get('/ufo/approve/:taskId', (req, res) => {
       const taskId = req.params.taskId;
@@ -259,11 +294,18 @@ export class VSMONSTERGateway {
 
   private setupWebSocket(): void {
     this.wss.on('connection', (ws: WebSocket, req) => {
-      const clientType = req.url?.includes('vscode') ? 'vscode' : 'unknown';
+      const isVsCode = req.url?.includes('vscode') ?? false;
+      const isUfo = req.url?.includes('client=ufo') ?? false;
+      const clientType = isVsCode ? 'vscode' : 'unknown';
       
       if (clientType === 'vscode') {
         this.vsCodeConnections.add(ws);
-        logger.info('VS Code extension connected');
+        if (isUfo) {
+          this.ufoConnections.add(ws);
+          logger.info('UFO extension connected');
+        } else {
+          logger.info('VS Code extension connected');
+        }
         
         // 發送當前狀態
         ws.send(JSON.stringify({
@@ -287,7 +329,12 @@ export class VSMONSTERGateway {
 
       ws.on('close', () => {
         this.vsCodeConnections.delete(ws);
-        logger.info('VS Code extension disconnected');
+        if (this.ufoConnections.has(ws)) {
+          this.ufoConnections.delete(ws);
+          logger.info('UFO extension disconnected');
+        } else {
+          logger.info('VS Code extension disconnected');
+        }
       });
     });
   }
@@ -431,6 +478,9 @@ export class VSMONSTERGateway {
 
     // 檢查是否為問候或第一次使用
     if (this.isGreeting(text)) {
+      if (this.ufoConnections.size > 0) {
+        return;
+      }
       const greeting = this.soulManager.getGreeting();
       await this.sendToChannel(channel, userId, greeting);
       return;
@@ -514,6 +564,10 @@ export class VSMONSTERGateway {
         await this.sendToChannel(channel, userId, '🧹 已清空白名單與握手狀態');
         break;
       }
+      case 'task':
+      case 'confirm':
+        // UFO 專用指令：交由 UFO 擴充處理，不在 Gateway 端提示未知指令
+        break;
       case 'status':
         const tasks = this.taskManager.getTasksForUser(userId);
         const status = tasks.length > 0 
@@ -702,11 +756,266 @@ export class VSMONSTERGateway {
     this.server.listen(port, () => {
       logger.info(`🚀 VSMONSTER Gateway running on port ${port}`);
       logger.info(`📡 Active channels: ${this.channelManager.getActiveChannels().join(', ')}`);
+      logger.info(`📬 Send message page: http://localhost:${port}/send`);
       
       if (this.tunnelService.getStatus().active) {
         logger.info(`🌐 Public URL: ${this.tunnelService.getStatus().url}`);
       }
     });
+  }
+
+  private renderSendMessagePage(): string {
+    return `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UFO - 發送訊息</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      padding: 20px;
+      color: #fff;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: rgba(255,255,255,0.05);
+      border-radius: 16px;
+      padding: 30px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+      font-size: 28px;
+    }
+    h1 span { font-size: 40px; }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #aaa;
+    }
+    select, input, textarea {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      background: rgba(0,0,0,0.3);
+      color: #fff;
+      font-size: 16px;
+    }
+    select:focus, input:focus, textarea:focus {
+      outline: none;
+      border-color: #00d4ff;
+      box-shadow: 0 0 0 3px rgba(0,212,255,0.2);
+    }
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    button {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #00d4ff 0%, #00a8cc 100%);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 20px rgba(0,212,255,0.4);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .result {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 8px;
+      display: none;
+    }
+    .result.success {
+      background: rgba(0,255,100,0.1);
+      border: 1px solid rgba(0,255,100,0.3);
+      color: #0f0;
+      display: block;
+    }
+    .result.error {
+      background: rgba(255,100,100,0.1);
+      border: 1px solid rgba(255,100,100,0.3);
+      color: #f66;
+      display: block;
+    }
+    .users-list {
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+    .users-list h3 {
+      color: #aaa;
+      margin-bottom: 15px;
+    }
+    .user-item {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .user-item:hover {
+      background: rgba(0,212,255,0.1);
+    }
+    .user-item .channel {
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      margin-right: 10px;
+    }
+    .user-item .channel.line { background: #06c755; }
+    .user-item .channel.telegram { background: #0088cc; }
+    .user-item .channel.discord { background: #5865f2; }
+    .user-item .id { 
+      color: #888; 
+      font-size: 12px;
+      margin-left: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1><span>🛸</span> UFO 發送訊息</h1>
+    
+    <form id="sendForm">
+      <div class="form-group">
+        <label for="channel">頻道</label>
+        <select id="channel" required>
+          <option value="">選擇頻道...</option>
+          <option value="line">LINE</option>
+          <option value="telegram">Telegram</option>
+          <option value="discord">Discord</option>
+        </select>
+      </div>
+      
+      <div class="form-group">
+        <label for="userId">用戶 ID</label>
+        <input type="text" id="userId" placeholder="輸入用戶 ID" required>
+      </div>
+      
+      <div class="form-group">
+        <label for="message">訊息內容</label>
+        <textarea id="message" placeholder="輸入要發送的訊息..." required></textarea>
+      </div>
+      
+      <button type="submit" id="sendBtn">📤 發送訊息</button>
+    </form>
+    
+    <div id="result" class="result"></div>
+    
+    <div class="users-list">
+      <h3>📋 已註冊的用戶</h3>
+      <div id="usersList">載入中...</div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('sendForm');
+    const result = document.getElementById('result');
+    const usersList = document.getElementById('usersList');
+    const channelSelect = document.getElementById('channel');
+    const userIdInput = document.getElementById('userId');
+    const sendBtn = document.getElementById('sendBtn');
+
+    // 載入用戶列表
+    async function loadUsers() {
+      try {
+        const res = await fetch('/api/channels');
+        const data = await res.json();
+        
+        if (data.users && data.users.length > 0) {
+          usersList.innerHTML = data.users.map(u => \`
+            <div class="user-item" onclick="selectUser('\${u.channel}', '\${u.userId}')">
+              <span class="channel \${u.channel}">\${u.channel.toUpperCase()}</span>
+              <span>\${u.displayName || '未知用戶'}</span>
+              <span class="id">\${u.userId.substring(0, 20)}...</span>
+            </div>
+          \`).join('');
+        } else {
+          usersList.innerHTML = '<p style="color:#666">尚無已註冊的用戶。請先用 LINE/Telegram/Discord 發送訊息給 UFO。</p>';
+        }
+      } catch (err) {
+        usersList.innerHTML = '<p style="color:#f66">無法載入用戶列表</p>';
+      }
+    }
+
+    function selectUser(channel, userId) {
+      channelSelect.value = channel;
+      userIdInput.value = userId;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const channel = channelSelect.value;
+      const userId = userIdInput.value.trim();
+      const message = document.getElementById('message').value.trim();
+      
+      if (!channel || !userId || !message) {
+        result.className = 'result error';
+        result.textContent = '請填寫所有欄位';
+        return;
+      }
+      
+      sendBtn.disabled = true;
+      sendBtn.textContent = '發送中...';
+      
+      try {
+        const res = await fetch('/api/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channel, userId, message })
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+          result.className = 'result success';
+          result.textContent = '✅ 訊息已發送！';
+          document.getElementById('message').value = '';
+        } else {
+          result.className = 'result error';
+          result.textContent = '❌ ' + (data.error || '發送失敗');
+        }
+      } catch (err) {
+        result.className = 'result error';
+        result.textContent = '❌ 網路錯誤: ' + err.message;
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.textContent = '📤 發送訊息';
+      }
+    });
+
+    loadUsers();
+  </script>
+</body>
+</html>`;
   }
 
   async stop(): Promise<void> {

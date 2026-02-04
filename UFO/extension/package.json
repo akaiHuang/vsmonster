@@ -29,27 +29,38 @@
     "commands": [
       {
         "command": "ufo.createTaskSpec",
-        "title": "UFO: Create Task Spec"
+        "title": "UFO: + Task",
+        "icon": "$(add)"
       },
       {
         "command": "ufo.openTools",
-        "title": "UFO: Open Tools"
+        "title": "UFO: Tools",
+        "icon": "$(tools)"
       },
       {
         "command": "ufo.refreshQueue",
-        "title": "UFO: Refresh Task Queue"
+        "title": "UFO: Refresh",
+        "icon": "$(refresh)"
       },
       {
         "command": "ufo.openTasksRoot",
-        "title": "UFO: Open Tasks Folder"
+        "title": "UFO: Folder",
+        "icon": "$(folder-opened)"
       },
       {
         "command": "ufo.openSettings",
-        "title": "UFO: Open Settings"
+        "title": "UFO: Config",
+        "icon": "$(gear)"
       },
       {
         "command": "ufo.syncEnv",
-        "title": "UFO: Sync Settings to .env"
+        "title": "UFO: Sync .env",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "ufo.openPromptStudio",
+        "title": "UFO: Prompt",
+        "icon": "$(edit)"
       }
     ],
     "viewsContainers": {
@@ -65,11 +76,24 @@
       "ufo": [
         {
           "id": "ufoDashboard",
-          "name": "Control Center"
+          "name": "Control Center",
+          "type": "webview"
         },
         {
-          "id": "ufoTasks",
-          "name": "Tasks"
+          "id": "ufoTasksPending",
+          "name": "⏳ Pending"
+        },
+        {
+          "id": "ufoTasksApproved",
+          "name": "✅ Approved"
+        },
+        {
+          "id": "ufoTasksRunning",
+          "name": "🔄 Running"
+        },
+        {
+          "id": "ufoTasksDone",
+          "name": "✨ Done"
         }
       ]
     },
@@ -77,18 +101,23 @@
       "view/title": [
         {
           "command": "ufo.createTaskSpec",
-          "when": "view == ufoTasks",
+          "when": "view == ufoTasksPending",
           "group": "navigation@1"
         },
         {
           "command": "ufo.refreshQueue",
-          "when": "view == ufoTasks",
+          "when": "view == ufoTasksPending || view == ufoTasksApproved || view == ufoTasksRunning || view == ufoTasksDone",
           "group": "navigation@2"
         },
         {
           "command": "ufo.openTools",
-          "when": "view == ufoTasks",
+          "when": "view == ufoTasksPending",
           "group": "navigation@3"
+        },
+        {
+          "command": "ufo.openPromptStudio",
+          "when": "view == ufoTasksPending",
+          "group": "navigation@4"
         }
       ]
     },
@@ -186,6 +215,7 @@
     "typescript": "^5.x"
   },
   "dependencies": {
+    "@github/copilot-sdk": "0.1.20",
     "ws": "8.19.0"
   }
 }

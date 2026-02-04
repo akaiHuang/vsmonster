@@ -5,9 +5,12 @@ export class GatewayClient extends EventEmitter {
   private ws: WebSocket | null = null;
   private url: string;
   private reconnectAttempts = 0;
-  private readonly maxReconnectAttempts = 5;
-  private readonly reconnectDelayMs = 3000;
+  private readonly maxReconnectAttempts = Number.POSITIVE_INFINITY;
+  private readonly baseReconnectDelayMs = 1500;
+  private readonly maxReconnectDelayMs = 30000;
   private pingInterval: NodeJS.Timer | null = null;
+  private shouldReconnect = true;
+  private isReconnecting = false;
 
   constructor(baseUrl: string) {
     super();
@@ -19,12 +22,14 @@ export class GatewayClient extends EventEmitter {
   }
 
   async connect(): Promise<void> {
+    this.shouldReconnect = true;
     return new Promise((resolve, reject) => {
       try {
         this.ws = new WebSocket(this.url);
 
         this.ws.on("open", () => {
           this.reconnectAttempts = 0;
+          this.isReconnecting = false;
           this.startPingInterval();
           this.emit("connected");
           resolve();
@@ -47,6 +52,7 @@ export class GatewayClient extends EventEmitter {
 
         this.ws.on("error", (error) => {
           this.emit("error", error);
+          this.attemptReconnect().catch(() => undefined);
           reject(error);
         });
       } catch (error) {
@@ -58,6 +64,7 @@ export class GatewayClient extends EventEmitter {
   disconnect(): void {
     this.stopPingInterval();
     this.reconnectAttempts = this.maxReconnectAttempts;
+    this.shouldReconnect = false;
 
     if (this.ws) {
       this.ws.close();
@@ -91,18 +98,30 @@ export class GatewayClient extends EventEmitter {
   }
 
   private async attemptReconnect(): Promise<void> {
+    if (!this.shouldReconnect) {
+      return;
+    }
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       this.emit("reconnect_failed");
       return;
     }
 
     this.reconnectAttempts += 1;
-    await new Promise((resolve) => setTimeout(resolve, this.reconnectDelayMs));
+    const delay = this.computeReconnectDelayMs(this.reconnectAttempts);
+    this.isReconnecting = true;
+    this.emit("reconnecting", { attempt: this.reconnectAttempts, delayMs: delay });
+    await new Promise((resolve) => setTimeout(resolve, delay));
 
     try {
       await this.connect();
     } catch {
       // Retry again on next close event.
     }
+  }
+
+  private computeReconnectDelayMs(attempt: number): number {
+    const exponential = this.baseReconnectDelayMs * Math.pow(2, Math.max(0, attempt - 1));
+    const jitter = Math.random() * 500;
+    return Math.min(this.maxReconnectDelayMs, exponential + jitter);
   }
 }

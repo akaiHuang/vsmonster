@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 
 interface DashboardState {
   connected: boolean;
+  connectionState: "connected" | "reconnecting" | "disconnected";
   gatewayUrl: string;
   publicUrl: string;
   envAutoSync: boolean;
@@ -56,206 +57,351 @@ export function getDashboardHtml(
     <style>
       :root {
         color-scheme: light dark;
-        --bg: #0f1115;
-        --panel: #181b21;
-        --panel-2: #1f232b;
-        --border: #2c313c;
-        --text: #e6e9ef;
-        --muted: #98a2b3;
-        --accent: #7f5af0;
-        --accent-2: #2dd4bf;
-        --danger: #f87171;
-        --warning: #facc15;
+        /* 8-bit 像素風格配色 */
+        --bg: #1a1c23;
+        --panel: #252834;
+        --panel-highlight: #2f3546;
+        --border-dark: #1a1c23;
+        --border-light: #3d4153;
+        --text: #f0f0f0;
+        --text-bright: #ffffff;
+        --muted: #8b92a8;
+        --accent: #ff6b9d;
+        --accent-2: #4ecdc4;
+        --success: #95e1d3;
+        --warning: #ffd93d;
+        --danger: #ff6b6b;
+        --shadow: rgba(0, 0, 0, 0.4);
       }
+      
+      @keyframes pixel-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+      }
+      
       body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family: 'Courier New', monospace;
         background: var(--bg);
         color: var(--text);
         margin: 0;
-        padding: 20px;
+        padding: 16px;
+        font-size: 13px;
       }
+      
       .header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 16px;
+        margin-bottom: 20px;
+        padding: 12px;
+        background: var(--panel);
+        border: 3px solid var(--border-dark);
+        box-shadow: 4px 4px 0 var(--border-dark);
       }
+      
       .title {
-        font-size: 20px;
+        font-size: 16px;
         font-weight: 700;
-        letter-spacing: 0.3px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--text-bright);
+        text-shadow: 2px 2px 0 var(--border-dark);
       }
+      
       .status-pill {
-        padding: 4px 10px;
-        border-radius: 999px;
-        font-size: 12px;
-        font-weight: 600;
-        background: var(--panel-2);
-        border: 1px solid var(--border);
+        padding: 6px 12px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        background: var(--panel-highlight);
+        border: 2px solid var(--border-dark);
+        box-shadow: 2px 2px 0 var(--border-dark);
+        letter-spacing: 1px;
       }
+      
       .status-pill.connected {
-        color: var(--accent-2);
-        border-color: rgba(45, 212, 191, 0.4);
+        color: var(--success);
+        background: rgba(149, 225, 211, 0.15);
+        border-color: var(--success);
+        animation: pixel-pulse 2s ease-in-out infinite;
       }
+      
+      .status-pill.reconnecting {
+        color: var(--warning);
+        background: rgba(255, 217, 61, 0.15);
+        border-color: var(--warning);
+      }
+      
       .status-pill.disconnected {
         color: var(--danger);
-        border-color: rgba(248, 113, 113, 0.4);
+        background: rgba(255, 107, 107, 0.15);
+        border-color: var(--danger);
       }
+      
       .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+        margin-bottom: 16px;
       }
+      
       .card {
         background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 14px;
+        border: 3px solid var(--border-dark);
+        box-shadow: 4px 4px 0 var(--border-dark);
+        padding: 16px;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 12px;
+        position: relative;
       }
+      
+      .card::before {
+        content: '';
+        position: absolute;
+        top: -3px;
+        left: -3px;
+        right: -3px;
+        height: 3px;
+        background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
+      }
+      
       .card h3 {
         margin: 0;
-        font-size: 14px;
-        color: var(--muted);
+        font-size: 11px;
+        color: var(--accent);
         text-transform: uppercase;
-        letter-spacing: 0.1em;
+        letter-spacing: 2px;
+        font-weight: 700;
+        padding-bottom: 8px;
+        border-bottom: 2px solid var(--border-light);
       }
+      
       .card .value {
-        font-size: 18px;
-        font-weight: 600;
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--text-bright);
       }
+      
       .muted {
         color: var(--muted);
-        font-size: 12px;
+        font-size: 10px;
+        font-family: monospace;
       }
+      
       .actions {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        gap: 8px;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        padding: 16px;
+        background: var(--panel);
+        border: 3px solid var(--border-dark);
+        box-shadow: 4px 4px 0 var(--border-dark);
+        margin-bottom: 16px;
       }
+      
+      .actions::before {
+        content: '⚡ QUICK ACTIONS';
+        position: absolute;
+        top: -12px;
+        left: 12px;
+        background: var(--panel);
+        padding: 0 8px;
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--warning);
+        letter-spacing: 1px;
+      }
+      
       button.action {
-        background: var(--panel-2);
-        color: var(--text);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 8px 10px;
-        font-size: 13px;
+        background: var(--panel-highlight);
+        color: var(--text-bright);
+        border: 3px solid var(--border-light);
+        padding: 10px 14px;
+        font-size: 11px;
+        font-weight: 700;
+        font-family: 'Courier New', monospace;
+        text-transform: uppercase;
+        letter-spacing: 1px;
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: all 0.1s ease;
+        box-shadow: 2px 2px 0 var(--border-dark);
+        position: relative;
       }
+      
       button.action:hover {
+        background: var(--accent);
         border-color: var(--accent);
-        color: white;
+        color: var(--bg);
+        transform: translate(-2px, -2px);
+        box-shadow: 4px 4px 0 var(--border-dark);
       }
+      
+      button.action:active {
+        transform: translate(0, 0);
+        box-shadow: 1px 1px 0 var(--border-dark);
+      }
+      
       .task-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
         font-size: 13px;
+        padding: 6px 0;
       }
+      
+      .task-row span:last-child {
+        font-weight: 700;
+        font-size: 16px;
+        color: var(--text-bright);
+      }
+      
       .tag {
-        padding: 2px 8px;
-        border-radius: 999px;
-        font-size: 11px;
-        border: 1px solid var(--border);
-        background: var(--panel-2);
+        padding: 4px 10px;
+        font-size: 10px;
+        font-weight: 700;
+        border: 2px solid;
+        letter-spacing: 1px;
+        text-transform: uppercase;
       }
-      .tag.pending { color: var(--warning); border-color: rgba(250, 204, 21, 0.4); }
-      .tag.approved { color: var(--accent-2); border-color: rgba(45, 212, 191, 0.4); }
-      .tag.in-progress { color: var(--accent); border-color: rgba(127, 90, 240, 0.4); }
-      .tag.done { color: #a3e635; border-color: rgba(163, 230, 53, 0.4); }
+      
+      .tag.pending {
+        color: var(--warning);
+        background: rgba(255, 217, 61, 0.15);
+        border-color: var(--warning);
+      }
+      
+      .tag.approved {
+        color: var(--accent-2);
+        background: rgba(78, 205, 196, 0.15);
+        border-color: var(--accent-2);
+      }
+      
+      .tag.in-progress {
+        color: var(--accent);
+        background: rgba(255, 107, 157, 0.15);
+        border-color: var(--accent);
+        animation: pixel-pulse 2s ease-in-out infinite;
+      }
+      
+      .tag.done {
+        color: var(--success);
+        background: rgba(149, 225, 211, 0.15);
+        border-color: var(--success);
+      }
+      
       .divider {
-        height: 1px;
-        background: var(--border);
-        margin: 6px 0;
+        height: 2px;
+        background: var(--border-light);
+        margin: 8px 0;
       }
+      
       .list {
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: 8px;
       }
+      
+      .list > div {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+      }
+      
       .badge {
-        font-size: 11px;
-        padding: 2px 6px;
-        border-radius: 6px;
-        border: 1px solid var(--border);
-        background: var(--panel-2);
+        font-size: 9px;
+        padding: 4px 8px;
+        border: 2px solid;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        margin-left: auto;
       }
-      .badge.ok { color: var(--accent-2); }
-      .badge.missing { color: var(--danger); }
+      
+      .badge.ok {
+        color: var(--success);
+        background: rgba(149, 225, 211, 0.15);
+        border-color: var(--success);
+      }
+      
+      .badge.missing {
+        color: var(--danger);
+        background: rgba(255, 107, 107, 0.15);
+        border-color: var(--danger);
+      }
+      
       .footer {
-        margin-top: 12px;
-        font-size: 11px;
+        margin-top: 16px;
+        padding: 8px;
+        font-size: 10px;
         color: var(--muted);
-        text-align: right;
+        text-align: center;
+        border-top: 2px solid var(--border-light);
+        font-family: monospace;
       }
     </style>
   </head>
   <body>
     <div class="header">
-      <div class="title">UFO Control Center</div>
-      <div class="status-pill ${state.connected ? "connected" : "disconnected"}" id="gatewayStatus">
-        ${state.connected ? "Gateway Connected" : "Gateway Disconnected"}
+      <div class="title">👾 UFO CONTROL</div>
+      <div class="status-pill ${state.connectionState}" id="gatewayStatus">
+        ${state.connectionState === "connected" ? "● ONLINE" : state.connectionState === "reconnecting" ? "◐ SYNC..." : "○ OFFLINE"}
       </div>
     </div>
 
-    <div class="card">
-      <h3>Quick Actions</h3>
-      <div class="actions">
-        <button class="action" data-command="ufo.createTaskSpec">Create Task Spec</button>
-        <button class="action" data-command="ufo.refreshQueue">Refresh Queue</button>
-        <button class="action" data-command="ufo.openTools">Open Tools</button>
-        <button class="action" data-command="ufo.openTasksRoot">Open Tasks Folder</button>
-        <button class="action" data-command="ufo.openSettings">UFO Settings</button>
-        <button class="action" data-command="ufo.syncEnv">Sync .env</button>
-      </div>
+    <div class="actions" style="position: relative;">
+      <button class="action" data-command="ufo.createTaskSpec">+ Task</button>
+      <button class="action" data-command="ufo.refreshQueue">↻ Refresh</button>
+      <button class="action" data-command="ufo.openTools">⚙ Tools</button>
+      <button class="action" data-command="ufo.openTasksRoot">📁 Folder</button>
+      <button class="action" data-command="ufo.openSettings">⚡ Config</button>
+      <button class="action" data-command="ufo.syncEnv">🔄 Sync</button>
     </div>
 
     <div class="grid">
       <div class="card">
-        <h3>Tasks Overview</h3>
+        <h3>📦 Tasks</h3>
         <div class="task-row"><span class="tag pending">Pending</span><span id="countPending">${state.tasks.pending}</span></div>
         <div class="task-row"><span class="tag approved">Approved</span><span id="countApproved">${state.tasks.approved}</span></div>
-        <div class="task-row"><span class="tag in-progress">In Progress</span><span id="countProgress">${state.tasks.inProgress}</span></div>
+        <div class="task-row"><span class="tag in-progress">Running</span><span id="countProgress">${state.tasks.inProgress}</span></div>
         <div class="task-row"><span class="tag done">Done</span><span id="countDone">${state.tasks.done}</span></div>
         <div class="divider"></div>
-        <div class="task-row"><span>Total</span><span id="countTotal">${state.tasks.total}</span></div>
+        <div class="task-row"><span style="text-transform: uppercase; letter-spacing: 1px; font-weight: 700;">Total</span><span id="countTotal">${state.tasks.total}</span></div>
         <div class="muted" id="tasksRoot">${state.tasksRoot}</div>
       </div>
 
       <div class="card">
-        <h3>Connection</h3>
+        <h3>🔌 Connection</h3>
         <div class="list">
-          <div>Gateway: <span class="badge ${state.connected ? "ok" : "missing"}" id="gatewayBadge">${state.connected ? "Connected" : "Disconnected"}</span></div>
-          <div class="muted" id="gatewayUrl">${state.gatewayUrl}</div>
-          <div>Public URL: <span class="badge ${state.publicUrl ? "ok" : "missing"}" id="publicUrlBadge">${state.publicUrl ? "Set" : "Missing"}</span></div>
-          <div class="muted" id="publicUrl">${state.publicUrl || "—"}</div>
-          <div>Env Auto-Sync: <span class="badge ${state.envAutoSync ? "ok" : "missing"}" id="envSyncBadge">${state.envAutoSync ? "On" : "Off"}</span></div>
+          <div>Gateway <span class="badge ${state.connectionState === "connected" ? "ok" : "missing"}" id="gatewayBadge">${state.connectionState === "connected" ? "OK" : state.connectionState === "reconnecting" ? "WAIT" : "DOWN"}</span></div>
+          <div class="muted" id="gatewayUrl" style="padding-left: 0; margin-top: -4px;">${state.gatewayUrl}</div>
+          <div>Public <span class="badge ${state.publicUrl ? "ok" : "missing"}" id="publicUrlBadge">${state.publicUrl ? "SET" : "NONE"}</span></div>
+          <div class="muted" id="publicUrl" style="padding-left: 0; margin-top: -4px;">${state.publicUrl || "—"}</div>
+          <div>Auto-Sync <span class="badge ${state.envAutoSync ? "ok" : "missing"}" id="envSyncBadge">${state.envAutoSync ? "ON" : "OFF"}</span></div>
         </div>
       </div>
 
       <div class="card">
-        <h3>Models</h3>
+        <h3>🤖 Models</h3>
         <div class="list">
-          <div>Chat: <span class="badge ok" id="modelChat">${state.models.chat}</span></div>
-          <div>Spec: <span class="badge ok" id="modelSpec">${state.models.spec}</span></div>
-          <div>Opus: <span class="badge ${state.models.opus ? "ok" : "missing"}" id="modelOpus">${state.models.opus || "—"}</span></div>
+          <div>Chat <span class="badge ok" id="modelChat">${state.models.chat}</span></div>
+          <div>Spec <span class="badge ok" id="modelSpec">${state.models.spec}</span></div>
+          <div>Opus <span class="badge ${state.models.opus ? "ok" : "missing"}" id="modelOpus">${state.models.opus || "—"}</span></div>
         </div>
       </div>
 
       <div class="card">
-        <h3>Channels</h3>
+        <h3>📡 Channels</h3>
         <div class="list">
-          <div>LINE <span class="badge ${state.channels.line ? "ok" : "missing"}" id="channelLine">${state.channels.line ? "Configured" : "Missing"}</span></div>
-          <div>Telegram <span class="badge ${state.channels.telegram ? "ok" : "missing"}" id="channelTelegram">${state.channels.telegram ? "Configured" : "Missing"}</span></div>
-          <div>Discord <span class="badge ${state.channels.discord ? "ok" : "missing"}" id="channelDiscord">${state.channels.discord ? "Configured" : "Missing"}</span></div>
+          <div>LINE <span class="badge ${state.channels.line ? "ok" : "missing"}" id="channelLine">${state.channels.line ? "READY" : "NONE"}</span></div>
+          <div>Telegram <span class="badge ${state.channels.telegram ? "ok" : "missing"}" id="channelTelegram">${state.channels.telegram ? "READY" : "NONE"}</span></div>
+          <div>Discord <span class="badge ${state.channels.discord ? "ok" : "missing"}" id="channelDiscord">${state.channels.discord ? "READY" : "NONE"}</span></div>
         </div>
       </div>
     </div>
 
-    <div class="footer" id="lastUpdated">Updated: ${state.lastUpdated}</div>
+    <div class="footer" id="lastUpdated">⏱ ${state.lastUpdated}</div>
 
     <script nonce="${nonce}">
       const vscode = acquireVsCodeApi();
@@ -290,18 +436,23 @@ export function getDashboardHtml(
         setText('modelChat', state.models.chat);
         setText('modelSpec', state.models.spec);
         setText('modelOpus', state.models.opus || "—");
-        setText('lastUpdated', 'Updated: ' + state.lastUpdated);
-        setBadge('gatewayBadge', state.connected, 'Connected', 'Disconnected');
-        setBadge('publicUrlBadge', !!state.publicUrl, 'Set', 'Missing');
-        setBadge('envSyncBadge', state.envAutoSync, 'On', 'Off');
-        setBadge('channelLine', state.channels.line, 'Configured', 'Missing');
-        setBadge('channelTelegram', state.channels.telegram, 'Configured', 'Missing');
-        setBadge('channelDiscord', state.channels.discord, 'Configured', 'Missing');
+        setText('lastUpdated', '⏱ ' + state.lastUpdated);
+        setBadge('gatewayBadge', state.connectionState === 'connected', 'OK', state.connectionState === 'reconnecting' ? 'WAIT' : 'DOWN');
+        setBadge('publicUrlBadge', !!state.publicUrl, 'SET', 'NONE');
+        setBadge('envSyncBadge', state.envAutoSync, 'ON', 'OFF');
+        setBadge('channelLine', state.channels.line, 'READY', 'NONE');
+        setBadge('channelTelegram', state.channels.telegram, 'READY', 'NONE');
+        setBadge('channelDiscord', state.channels.discord, 'READY', 'NONE');
         const status = byId('gatewayStatus');
         if (status) {
-          status.textContent = state.connected ? 'Gateway Connected' : 'Gateway Disconnected';
-          status.classList.toggle('connected', state.connected);
-          status.classList.toggle('disconnected', !state.connected);
+          status.textContent = state.connectionState === 'connected'
+            ? '● ONLINE'
+            : state.connectionState === 'reconnecting'
+              ? '◐ SYNC...'
+              : '○ OFFLINE';
+          status.classList.toggle('connected', state.connectionState === 'connected');
+          status.classList.toggle('reconnecting', state.connectionState === 'reconnecting');
+          status.classList.toggle('disconnected', state.connectionState === 'disconnected');
         }
       });
     </script>
