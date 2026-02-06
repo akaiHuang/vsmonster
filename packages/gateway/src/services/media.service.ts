@@ -13,7 +13,7 @@ const MEDIA_STORAGE_PATH = process.env.MEDIA_STORAGE_PATH || path.join(process.c
 const MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1GB
 
 // 媒體 URL 配置（預設值，會被 setMediaUrl 覆蓋）
-let MEDIA_URL_BASE = process.env.VSMONSTER_MEDIA_URL || 'https://media.ufo.fawstudio.com';
+let MEDIA_URL_BASE = process.env.VSMONSTER_MEDIA_URL || 'http://localhost:3000';
 
 // 確保目錄存在
 if (!fs.existsSync(MEDIA_STORAGE_PATH)) {

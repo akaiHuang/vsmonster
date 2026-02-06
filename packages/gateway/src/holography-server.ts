@@ -153,7 +153,7 @@ export class HolographyGateway {
     });
 
     // 多媒體路由
-    const mediaUrl = this.config.mediaUrl || 'https://media.ufo.fawstudio.com';
+    const mediaUrl = this.config.mediaUrl || `http://localhost:${this.config.port || 3000}`;
     initializeMediaUrl(mediaUrl);
     app.use('/api/media', mediaRouter);
 

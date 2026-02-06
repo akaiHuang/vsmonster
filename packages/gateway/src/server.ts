@@ -412,7 +412,7 @@ export class VSMONSTERGateway {
 
     // 多媒體路由
     // 初始化媒體 URL（使用 mediaUrl 配置或預設）
-    const mediaUrl = this.config.mediaUrl || 'https://media.ufo.fawstudio.com';
+    const mediaUrl = this.config.mediaUrl || `http://localhost:${this.config.port || 3000}`;
     initializeMediaUrl(mediaUrl);
     this.app.use('/api/media', mediaRouter);
   }

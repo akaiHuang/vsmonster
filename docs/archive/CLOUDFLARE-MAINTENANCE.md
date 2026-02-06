@@ -17,7 +17,7 @@ cloudflared tunnel list
 **結果**：
 - ✅ 已登入
 - 隧道名稱：`moltbot`
-- 隧道 ID：`REDACTED_TUNNEL_ID`
+- 隧道 ID：`<your-tunnel-id>`
 - 建立時間：2026-01-29 08:35:48
 
 ---
@@ -51,11 +51,11 @@ cat ~/.cloudflared/config.yml
 
 **配置內容**：
 ```yaml
-tunnel: REDACTED_TUNNEL_ID
-credentials-file: /Users/akaihuangm1/.cloudflared/REDACTED_TUNNEL_ID.json
+tunnel: <your-tunnel-id>
+credentials-file: ~/.cloudflared/<your-tunnel-id>.json
 
 ingress:
-  - hostname: ufo.fawstudio.com
+  - hostname: your-domain.com
     service: http://localhost:3000
   - service: http_status:404
 ```

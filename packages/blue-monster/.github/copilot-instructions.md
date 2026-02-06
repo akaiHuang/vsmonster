@@ -471,9 +471,9 @@ pnpm dev
 
 **隧道配置**：
 - **隧道名稱**：moltbot
-- **隧道 ID**：REDACTED_TUNNEL_ID
-- **綁定網域**：ufo.fawstudio.com → http://localhost:3000
-- **維護文檔**：[CLOUDFLARE-MAINTENANCE.md](../../../../CLOUDFLARE-MAINTENANCE.md)
+- **隧道 ID**：見 .env 或 cloudflared config
+- **綁定網域**：見 .env VSMONSTER_PUBLIC_URL
+- **維護文檔**：docs/archive/CLOUDFLARE-MAINTENANCE.md
 
 **常用命令**：
 | 命令 | 說明 |

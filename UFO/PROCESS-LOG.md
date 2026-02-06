@@ -16,18 +16,18 @@
    - `.env` 內的設定覆蓋 `configs/config.json`
 
 3. **Cloudflare Tunnel 已設定 DNS**
-   - Tunnel ID: `REDACTED_TUNNEL_ID`
+   - Tunnel ID: `<your-tunnel-id>`
    - Tunnel 名稱: `moltbot`
-   - 子網域: `ufo.fawstudio.com`
+   - 子網域: `your-domain.com`
    - DNS 已執行：
-     - `cloudflared tunnel route dns moltbot ufo.fawstudio.com`
+     - `cloudflared tunnel route dns <tunnel-name> your-domain.com`
 
 4. **LINE Webhook Secret 已建立並寫入 `.env`**
    - `LINE_WEBHOOK_SECRET` 已設定
 
 ## 目前使用的 Webhook URL
 ```
-https://ufo.fawstudio.com/webhook/line/REDACTED_LINE_WEBHOOK_SECRET
+https://your-domain.com/webhook/line/<webhook-secret>
 ```
 
 > 注意：請於 LINE Developers 後台設定此 URL。
