@@ -1,7 +1,7 @@
 {
   "name": "@vsmonster/gateway",
   "version": "0.1.0",
-  "description": "VSMONSTER Gateway - 社群軟體到 VS Code Copilot 的橋接服務 (Powered by 🦞 Moltbot)",
+  "description": "VSMONSTER Gateway - 社群軟體到 VS Code Copilot 的橋接服務",
   "main": "dist/server.js",
   "bin": {
     "vsmonster": "./bin/cli.js"
@@ -9,7 +9,9 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
+    "start:holography": "node dist/holography-server.js",
     "dev": "ts-node-dev --respawn src/server.ts",
+    "dev:holography": "ts-node-dev --respawn src/holography-server.ts",
     "lint": "eslint src --ext ts",
     "test": "vitest"
   },
@@ -25,6 +27,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@vsmonster/holography": "workspace:*",
     "@line/bot-sdk": "^9.3.0",
     "@discordjs/rest": "^2.2.0",
     "discord-api-types": "^0.37.61",

@@ -1,0 +1,37 @@
+{
+  "name": "@vsmonster/holography",
+  "version": "0.1.0",
+  "description": "VSMonster 獨立通訊模組 - LINE/Telegram/Discord 整合",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "vsmonster",
+    "holography",
+    "line",
+    "telegram",
+    "discord",
+    "messaging"
+  ],
+  "author": "akaiHuang",
+  "license": "MIT",
+  "dependencies": {
+    "@line/bot-sdk": "^9.8.0",
+    "grammy": "^1.35.0",
+    "discord.js": "^14.18.0",
+    "express": "^4.22.1",
+    "ws": "^8.18.0",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.x",
+    "@types/ws": "^8.18.0",
+    "@types/cors": "^2.8.17",
+    "typescript": "^5.9.3"
+  }
+}
