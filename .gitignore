@@ -3,6 +3,7 @@
 # ============================================
 node_modules/
 .pnpm-store/
+package-lock.json
 
 # ============================================
 # 🏗️ Build outputs
@@ -13,14 +14,12 @@ out/
 *.vsix
 
 # ============================================
-# 🧪 開發測試（不上傳）
+# 🧪 開發測試
 # ============================================
 dev-test-results/
 test-results/
 playwright-report/
 *.log
-
-# 測試腳本（保留範本，忽略執行結果）
 scripts/*.local.sh
 
 # ============================================
@@ -32,13 +31,15 @@ configs/line-whitelist.json
 .env
 .env.local
 .env.*.local
-UFO/tasks/
 
-# Gateway data (用戶驗證紀錄，含敏感資訊)
+# Gateway data (含敏感資訊)
 packages/gateway/data/
 
+# UFO tasks (開發任務追蹤)
+UFO/tasks/
+
 # ============================================
-# 💻 IDE
+# 💻 IDE & OS
 # ============================================
 .idea/
 .vscode/settings.json
@@ -46,12 +47,6 @@ packages/gateway/data/
 *.swp
 *.swo
 .DS_Store
-
-# ============================================
-# 🐳 Docker (test only)
-# ============================================
-# 保留 docker-compose.yml 和 Dockerfile
-# 忽略測試用的臨時文件
 
 # ============================================
 # 📊 Misc
