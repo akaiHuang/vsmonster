@@ -72,7 +72,7 @@ const mediaRecord = await getMedia(mediaId);
 ```typescript
 await sendToChannel(channel, userId, `
   📸 你的照片已保存
-  連結: https://ufo.fawstudio.com${mediaRecord.publicUrl}
+  連結: https://your-domain.com${mediaRecord.publicUrl}
 `);
 ```
 
@@ -95,8 +95,8 @@ const editedRecord = await uploadMedia(
 // 現在有了編輯版本的連結
 await sendToChannel(channel, userId, `
   ✅ 處理完成！
-  原圖: https://ufo.fawstudio.com${mediaRecord.publicUrl}
-  編輯版: https://ufo.fawstudio.com${editedRecord.publicUrl}
+  原圖: https://your-domain.com${mediaRecord.publicUrl}
+  編輯版: https://your-domain.com${editedRecord.publicUrl}
 `);
 ```
 
@@ -194,7 +194,7 @@ private async handleChannelMessage(channel: string, event: any): Promise<void> {
 📸 照片已接收並保存！
 - 檔案: ${record.originalFilename}
 - 大小: ${(record.fileSize / 1024 / 1024).toFixed(2)} MB
-- 預覽: https://ufo.fawstudio.com${record.publicUrl}
+- 預覽: https://your-domain.com${record.publicUrl}
 
 你可以直接點擊連結查看或下載。
       `.trim();
@@ -220,7 +220,7 @@ async function handlePhotoListCommand(userId: string) {
   allPhotos.forEach((photo, idx) => {
     const size = (photo.fileSize / 1024).toFixed(0);
     reply += `${idx + 1}. ${photo.originalFilename} (${size}KB)\n`;
-    reply += `   連結: https://ufo.fawstudio.com${photo.publicUrl}\n\n`;
+    reply += `   連結: https://your-domain.com${photo.publicUrl}\n\n`;
   });
   
   return reply;
@@ -258,8 +258,8 @@ async function editAndUploadPhoto(originalMediaId: string) {
   );
   
   return {
-    original: `https://ufo.fawstudio.com${original.publicUrl}`,
-    edited: `https://ufo.fawstudio.com${editedRecord.publicUrl}`
+    original: `https://your-domain.com${original.publicUrl}`,
+    edited: `https://your-domain.com${editedRecord.publicUrl}`
   };
 }
 ```
@@ -287,7 +287,7 @@ if (mediaRecord) {
 ```typescript
 await sendToChannel(channel, userId, `
   ✅ 完成！
-  連結: https://ufo.fawstudio.com${record.publicUrl}
+  連結: https://your-domain.com${record.publicUrl}
 `);
 ```
 
@@ -309,17 +309,17 @@ await sendToChannel(channel, userId, `
 
 ### 預覽（在瀏覽器中打開）
 ```
-https://ufo.fawstudio.com/api/media/{mediaId}/view
+https://your-domain.com/api/media/{mediaId}/view
 ```
 
 ### 下載（強制下載）
 ```
-https://ufo.fawstudio.com/api/media/{mediaId}/download
+https://your-domain.com/api/media/{mediaId}/download
 ```
 
 ### 影片縮圖
 ```
-https://ufo.fawstudio.com/api/media/{mediaId}/thumbnail
+https://your-domain.com/api/media/{mediaId}/thumbnail
 ```
 
 ### 本機開發
@@ -343,7 +343,7 @@ const { media } = parsed;
 const record = getMedia(media[0].id);
 
 // 3️⃣ 生成連結
-const url = `https://ufo.fawstudio.com${record.publicUrl}`;
+const url = `https://your-domain.com${record.publicUrl}`;
 
 // 4️⃣ 回覆用戶
 await sendMessage(`📸 已保存: ${url}`);

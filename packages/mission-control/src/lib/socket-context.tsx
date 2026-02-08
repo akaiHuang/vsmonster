@@ -1,16 +1,13 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { io, Socket } from 'socket.io-client';
-import { useMissionStore, TaskStatus } from './store';
+import { createContext, useContext, useEffect, useState, useRef, ReactNode, useCallback } from 'react';
+import { useMissionStore } from './store';
 
 interface SocketContextType {
-  socket: Socket | null;
   isConnected: boolean;
 }
 
 const SocketContext = createContext<SocketContextType>({
-  socket: null,
   isConnected: false,
 });
 
@@ -22,82 +19,101 @@ interface SocketProviderProps {
   children: ReactNode;
 }
 
+const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || 'http://localhost:3000';
+
+/** Map Gateway task status to kanban column */
+function mapStatus(gatewayStatus: string) {
+  switch (gatewayStatus) {
+    case 'pending': return 'backlog' as const;
+    case 'running': return 'in_progress' as const;
+    case 'completed':
+    case 'delivered':
+    case 'approved': return 'completed' as const;
+    case 'rejected': return 'review' as const;
+    case 'failed':
+    case 'cancelled': return 'blocked' as const;
+    default: return 'backlog' as const;
+  }
+}
+
 export function SocketProvider({ children }: SocketProviderProps) {
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const { addTask, updateTask, moveTask, addWorker, updateWorker, removeWorker } = useMissionStore();
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { setTasks, upsertTask } = useMissionStore();
+
+  const fetchInitialTasks = useCallback(async () => {
+    try {
+      const res = await fetch(`${GATEWAY_URL}/api/tasks`);
+      if (!res.ok) return;
+      const tasks = await res.json();
+      setTasks(tasks);
+    } catch {
+      // Gateway not reachable — will retry on reconnect
+    }
+  }, [setTasks]);
+
+  const connect = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+
+    const wsUrl = GATEWAY_URL.replace(/^http/, 'ws');
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      console.log('Mission Control connected to Gateway');
+      setIsConnected(true);
+      fetchInitialTasks();
+    };
+
+    ws.onclose = () => {
+      setIsConnected(false);
+      // Reconnect after 3s
+      reconnectTimerRef.current = setTimeout(connect, 3000);
+    };
+
+    ws.onerror = () => {
+      ws.close();
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        const type = data.type as string;
+
+        if (type?.startsWith('task:') && data.task) {
+          const t = data.task;
+          upsertTask(t.id, {
+            title: t.instruction || t.id,
+            description: t.instruction || '',
+            status: mapStatus(t.status),
+            progress: t.progress,
+            gatewayTaskId: t.id,
+            gatewayStatus: t.status,
+            channel: t.channel,
+            instruction: t.instruction,
+            subtasks: t.subtasks,
+            delivery: t.delivery,
+          });
+        }
+      } catch {
+        // ignore non-JSON or irrelevant messages
+      }
+    };
+
+    wsRef.current = ws;
+  }, [fetchInitialTasks, upsertTask]);
 
   useEffect(() => {
-    const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || 'http://localhost:3000';
-    
-    const newSocket = io(GATEWAY_URL, {
-      query: { type: 'mission-control' },
-      transports: ['websocket'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 5,
-    });
-
-    newSocket.on('connect', () => {
-      console.log('🎮 Mission Control connected to Gateway');
-      setIsConnected(true);
-    });
-
-    newSocket.on('disconnect', () => {
-      console.log('🔌 Mission Control disconnected');
-      setIsConnected(false);
-    });
-
-    // 監聽任務事件
-    newSocket.on('task:created', (task) => {
-      addTask({
-        title: task.title,
-        description: task.description,
-        status: 'backlog',
-        category: task.category,
-        projectId: task.projectId,
-      });
-    });
-
-    newSocket.on('task:updated', ({ id, updates }) => {
-      updateTask(id, updates);
-    });
-
-    newSocket.on('task:moved', ({ id, status }) => {
-      moveTask(id, status as TaskStatus);
-    });
-
-    // 監聽 Worker 事件
-    newSocket.on('worker:connected', (worker) => {
-      addWorker({
-        projectId: worker.projectId,
-        projectName: worker.projectName,
-        socketId: worker.socketId,
-        status: 'connected',
-        lastActivity: new Date(),
-      });
-    });
-
-    newSocket.on('worker:disconnected', ({ id }) => {
-      updateWorker(id, { status: 'disconnected' });
-    });
-
-    newSocket.on('worker:progress', ({ id, progress, currentTask }) => {
-      updateWorker(id, { 
-        lastActivity: new Date(),
-        currentTask,
-      });
-    });
-
-    setSocket(newSocket);
+    connect();
 
     return () => {
-      newSocket.close();
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      wsRef.current?.close();
     };
-  }, [addTask, updateTask, moveTask, addWorker, updateWorker, removeWorker]);
+  }, [connect]);
 
   return (
-    <SocketContext.Provider value={{ socket, isConnected }}>
+    <SocketContext.Provider value={{ isConnected }}>
       {children}
     </SocketContext.Provider>
   );

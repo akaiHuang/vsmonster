@@ -185,7 +185,7 @@ client.on('messageCreate', async (message) => {
 ```
 用戶: [傳送照片]
 機器人: ✅ 照片已保存
-       連結: https://ufo.fawstudio.com/api/media/xxx/view
+       連結: https://your-domain.com/api/media/xxx/view
 
 用戶: /media list
 機器人: [顯示最近的媒體列表]
@@ -198,7 +198,7 @@ client.on('messageCreate', async (message) => {
 ```
 用戶: [傳送影片]
 機器人: ✅ 影片已保存
-       連結: https://ufo.fawstudio.com/api/media/yyy/view
+       連結: https://your-domain.com/api/media/yyy/view
 
 用戶: /media stats
 機器人: [顯示統計資訊]
@@ -208,7 +208,7 @@ client.on('messageCreate', async (message) => {
 ```
 用戶: [上傳檔案]
 機器人: ✅ 檔案已保存
-       連結: https://ufo.fawstudio.com/api/media/zzz/view
+       連結: https://your-domain.com/api/media/zzz/view
 
 用戶: !media help
 機器人: [顯示幫助資訊]

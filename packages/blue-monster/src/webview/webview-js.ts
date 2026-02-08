@@ -254,5 +254,10 @@ export const WEBVIEW_JS = `(function() {
   setBusy(false);
   vscode.postMessage({ type: 'ready' });
   vscode.postMessage({ type: 'requestModelOptions' });
+  // Default UX: show task list first (history panel), instead of jumping into the last chat.
+  if (historyPanelEl) {
+    historyPanelEl.hidden = false;
+    requestHistory();
+  }
   updateLayoutPadding();
 })();`;

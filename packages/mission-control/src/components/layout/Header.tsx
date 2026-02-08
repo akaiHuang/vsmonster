@@ -8,6 +8,7 @@ import clsx from 'clsx';
 const navItems = [
   { href: '/', label: 'Tasks', icon: LayoutGrid },
   { href: '/dashboard', label: 'Dashboard', icon: BarChart3 },
+  { href: '/ai-settings', label: 'AI Settings', icon: Settings },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 

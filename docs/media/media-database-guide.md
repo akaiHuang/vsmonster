@@ -60,7 +60,7 @@ curl -X POST http://localhost:3000/api/media/upload \
 
 ```bash
 # 預覽圖片
-https://ufo.fawstudio.com/api/media/550e8400-e29b-41d4-a716-446655440000/view
+https://your-domain.com/api/media/550e8400-e29b-41d4-a716-446655440000/view
 
 # 回應：檔案內容 + 適當的 Content-Type
 ```
@@ -74,7 +74,7 @@ https://ufo.fawstudio.com/api/media/550e8400-e29b-41d4-a716-446655440000/view
 強制下載檔案（瀏覽器會提示儲存）
 
 ```bash
-https://ufo.fawstudio.com/api/media/550e8400-e29b-41d4-a716-446655440000/download
+https://your-domain.com/api/media/550e8400-e29b-41d4-a716-446655440000/download
 ```
 
 ---
@@ -86,7 +86,7 @@ https://ufo.fawstudio.com/api/media/550e8400-e29b-41d4-a716-446655440000/downloa
 自動生成的影片縮圖（1% 時間點的截圖）
 
 ```bash
-https://ufo.fawstudio.com/api/media/550e8400-e29b-41d4-a716-446655440000/thumbnail
+https://your-domain.com/api/media/550e8400-e29b-41d4-a716-446655440000/thumbnail
 ```
 
 ---
@@ -98,7 +98,7 @@ https://ufo.fawstudio.com/api/media/550e8400-e29b-41d4-a716-446655440000/thumbna
 取得媒體的元資訊
 
 ```bash
-curl https://ufo.fawstudio.com/api/media/550e8400-e29b-41d4-a716-446655440000/info
+curl https://your-domain.com/api/media/550e8400-e29b-41d4-a716-446655440000/info
 ```
 
 **回應**：
@@ -125,7 +125,7 @@ curl https://ufo.fawstudio.com/api/media/550e8400-e29b-41d4-a716-446655440000/in
 列出所有上傳的媒體
 
 ```bash
-curl "https://ufo.fawstudio.com/api/media?skip=0&limit=20"
+curl "https://your-domain.com/api/media?skip=0&limit=20"
 ```
 
 **回應**：
@@ -159,7 +159,7 @@ curl "https://ufo.fawstudio.com/api/media?skip=0&limit=20"
 取得媒體庫的統計資訊
 
 ```bash
-curl https://ufo.fawstudio.com/api/media/stats/overview
+curl https://your-domain.com/api/media/stats/overview
 ```
 
 **回應**：
@@ -189,7 +189,7 @@ curl https://ufo.fawstudio.com/api/media/stats/overview
 刪除指定的媒體檔案
 
 ```bash
-curl -X DELETE https://ufo.fawstudio.com/api/media/550e8400-e29b-41d4-a716-446655440000
+curl -X DELETE https://your-domain.com/api/media/550e8400-e29b-41d4-a716-446655440000
 ```
 
 **回應**：
@@ -292,7 +292,7 @@ Gateway 接收
   ↓
 自動上傳到多媒體庫 (uploadMedia)
   ↓
-生成公開連結：https://ufo.fawstudio.com/api/media/xxx/view
+生成公開連結：https://your-domain.com/api/media/xxx/view
   ↓
 回覆用戶連結
   ↓

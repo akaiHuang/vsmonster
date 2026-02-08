@@ -46,7 +46,7 @@
 | DNS 路由 | `cloudflared tunnel route dns <tunnel> <domain>` | 配置 DNS 路由 |
 | 啟動隧道 | `cloudflared tunnel run <tunnel-name>` | 運行隧道 |
 
-**主要用途**：生產環境的安全隧道，用於 Webhook（`ufo.fawstudio.com`）和媒體 CDN（`media.your-domain.com`）
+**主要用途**：生產環境的安全隧道，用於 Webhook（`your-domain.com`）和媒體 CDN（`media.your-domain.com`）
 
 **BlueMonster 知道**：
 - ✅ 如何創建獨立隧道用於媒體

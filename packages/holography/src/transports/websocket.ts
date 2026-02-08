@@ -6,6 +6,7 @@
 import WebSocket, { WebSocketServer } from 'ws';
 import { EventEmitter } from 'events';
 import { Server as HttpServer } from 'http';
+import type { IncomingMessage as HttpIncomingMessage } from 'http';
 import { WSMessage, WSMessageType, IncomingMessage } from '../core/types';
 
 export interface WebSocketTransportConfig {
@@ -25,6 +26,11 @@ interface ClientConnection {
   connectedAt: Date;
   lastHeartbeat: Date;
   isAlive: boolean;
+  missedHeartbeats: number;
+  // Optional client tag from URL query (?client=ufo, ?client=test-page, etc.)
+  clientTag?: string;
+  // Request path (e.g. /vscode)
+  path?: string;
 }
 
 export class WebSocketTransport extends EventEmitter {
@@ -65,8 +71,8 @@ export class WebSocketTransport extends EventEmitter {
       throw new Error('WebSocketTransport requires either a server or a port');
     }
 
-    this.wss.on('connection', (ws: WebSocket) => {
-      this.handleConnection(ws);
+    this.wss.on('connection', (ws: WebSocket, req: HttpIncomingMessage) => {
+      this.handleConnection(ws, req);
     });
 
     this.wss.on('error', (error) => {
@@ -82,8 +88,20 @@ export class WebSocketTransport extends EventEmitter {
   /**
    * 處理新連接
    */
-  private handleConnection(ws: WebSocket): void {
+  private handleConnection(ws: WebSocket, req?: HttpIncomingMessage): void {
     const clientId = this.generateClientId();
+
+    // Capture request metadata for /api/ws/status debugging.
+    let clientTag: string | undefined;
+    let path: string | undefined;
+    try {
+      const rawUrl = req?.url || '';
+      const url = new URL(rawUrl, 'http://localhost');
+      clientTag = url.searchParams.get('client') || undefined;
+      path = url.pathname || undefined;
+    } catch {
+      // ignore
+    }
     
     const client: ClientConnection = {
       ws,
@@ -91,6 +109,9 @@ export class WebSocketTransport extends EventEmitter {
       connectedAt: new Date(),
       lastHeartbeat: new Date(),
       isAlive: true,
+      missedHeartbeats: 0,
+      clientTag,
+      path,
     };
 
     this.clients.set(clientId, client);
@@ -99,9 +120,9 @@ export class WebSocketTransport extends EventEmitter {
       this.handleMessage(clientId, data);
     });
 
-    ws.on('close', () => {
+    ws.on('close', (code: number, reason: Buffer) => {
       this.clients.delete(clientId);
-      this.emit('clientDisconnected', { clientId });
+      this.emit('clientDisconnected', { clientId, code, reason: reason?.toString() || '' });
     });
 
     ws.on('error', (error) => {
@@ -113,6 +134,7 @@ export class WebSocketTransport extends EventEmitter {
       if (c) {
         c.isAlive = true;
         c.lastHeartbeat = new Date();
+        c.missedHeartbeats = 0;
       }
     });
 
@@ -137,6 +159,11 @@ export class WebSocketTransport extends EventEmitter {
       const client = this.clients.get(clientId);
       if (client) {
         client.lastHeartbeat = new Date();
+        // Treat any well-formed message as a heartbeat as well (not only protocol-level pong).
+        // This makes the WS link more resilient when the client can't respond to ping fast enough
+        // but is still actively sending traffic (e.g. extension host under load).
+        client.isAlive = true;
+        client.missedHeartbeats = 0;
       }
 
       switch (message.type) {
@@ -153,6 +180,9 @@ export class WebSocketTransport extends EventEmitter {
           this.emit('command', { clientId, command: message.payload });
           break;
         default:
+          // Forward unrecognized message types (e.g. copilot_response, task_update)
+          // so holography-server can handle them
+          this.emit('message', { clientId, message });
           this.emit('unknownMessage', { clientId, message });
       }
     } catch (error) {
@@ -211,21 +241,39 @@ export class WebSocketTransport extends EventEmitter {
   }
 
   /**
+   * 廣播原始 JSON 到所有客戶端（不包裝為 WSMessage）
+   * UFO Extension 預期收到扁平 JSON 如 { type: 'ufo_message', channel, userId, text }
+   */
+  broadcastRaw(data: Record<string, any>): void {
+    const json = JSON.stringify(data);
+    for (const [, client] of this.clients) {
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(json);
+      }
+    }
+  }
+
+  /**
    * 啟動心跳檢查
    */
   private startHeartbeat(): void {
     this.heartbeatTimer = setInterval(() => {
       for (const [clientId, client] of this.clients) {
+        // Be tolerant of transient extension-host stalls: only drop after a few missed heartbeats.
+        // (Extensions share an event loop; brief stalls are common under heavy load.)
         if (!client.isAlive) {
-          // 上次心跳沒有回應，關閉連接
-          client.ws.terminate();
-          this.clients.delete(clientId);
-          this.emit('clientTimeout', { clientId });
-          continue;
+          client.missedHeartbeats += 1;
+          if (client.missedHeartbeats >= 3) {
+            // 上次心跳沒有回應，關閉連接
+            try { client.ws.terminate(); } catch {}
+            this.clients.delete(clientId);
+            this.emit('clientTimeout', { clientId });
+            continue;
+          }
         }
 
         client.isAlive = false;
-        client.ws.ping();
+        try { client.ws.ping(); } catch {}
       }
     }, this.config.heartbeatInterval);
   }
@@ -262,11 +310,13 @@ export class WebSocketTransport extends EventEmitter {
   /**
    * 獲取所有客戶端資訊
    */
-  getClients(): { id: string; connectedAt: Date; lastHeartbeat: Date }[] {
+  getClients(): { id: string; connectedAt: Date; lastHeartbeat: Date; clientTag?: string; path?: string }[] {
     return Array.from(this.clients.values()).map(c => ({
       id: c.id,
       connectedAt: c.connectedAt,
       lastHeartbeat: c.lastHeartbeat,
+      clientTag: c.clientTag,
+      path: c.path,
     }));
   }
 

@@ -250,6 +250,13 @@ export class TelegramChannel extends HologramChannel {
   }
 
   async sendTypingAction(chatId: string): Promise<void> {
+    if (this.useCurlFallback) {
+      // Use curl fallback to avoid node network issues (same reason as getMe/setWebhook).
+      await customFetch(
+        `https://api.telegram.org/bot${this.config.botToken}/sendChatAction?chat_id=${encodeURIComponent(chatId)}&action=typing`
+      );
+      return;
+    }
     await this.bot.api.sendChatAction(chatId, 'typing');
   }
 

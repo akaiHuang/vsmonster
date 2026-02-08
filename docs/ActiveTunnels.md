@@ -27,7 +27,7 @@ ngrok http 3000
 
 | 隧道名稱 | 工具 | 本地 URL | 公開 URL | 用途 | 啟動時間 | 備註 |
 |----------|------|---------|---------|------|---------|------|
-| moltbot | Cloudflare Tunnel | N/A | ufo.fawstudio.com | 主機器人 webhook | 永久 | 已配置 DNS |
+| moltbot | Cloudflare Tunnel | N/A | your-domain.com | 主機器人 webhook | 永久 | 已配置 DNS |
 | media-cdn | Cloudflare Tunnel | N/A | media.your-domain.com | 多媒體 CDN | 永久 | 已配置 DNS |
 | [範例] CSV Share | ngrok | localhost:8000 | https://abc-xyz.ngrok.io | 文件分享 | 2026-02-04 10:30 | 臨時分享 |
 
@@ -81,7 +81,7 @@ pkill ngrok
   原因: 檔案分享完成
 
 2026-02-03 09:15 - Cloudflare moltbot 隧道正常運行
-  域名: ufo.fawstudio.com
+  域名: your-domain.com
   狀態: ✅ 活躍
 
 2026-02-03 09:15 - Cloudflare media-cdn 隧道正常運行

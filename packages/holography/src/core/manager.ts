@@ -101,63 +101,72 @@ export class ChannelManager extends EventEmitter {
   /**
    * 處理收到的訊息
    */
-  async handleIncomingMessage(message: IncomingMessage): Promise<{ 
-    allowed: boolean; 
+  async handleIncomingMessage(message: IncomingMessage): Promise<{
+    allowed: boolean;
     reason?: string;
     handled?: boolean;
   }> {
     const channel = message.channel as ChannelType;
     const userId = message.userId;
+    const chatId = message.chatId;
+    const text = message.text?.trim();
+
+    // 回覆用的 helper（Telegram 群組需要 chatId）
+    const reply = async (replyText: string) => {
+      await this.sendMessage(channel, chatId || userId, { text: replyText, chatId });
+    };
+
+    // /reset 指令（已驗證 + 未驗證都可以用）
+    if (text === '/reset') {
+      const result = this.handshakeManager.handleResetCommand(channel, userId);
+      await reply(result.message);
+      return { allowed: false, reason: result.message, handled: true };
+    }
 
     // 檢查白名單
     if (!this.whitelistManager.isWhitelisted(channel, userId)) {
-      // 檢查是否是握手命令
-      if (message.text?.startsWith('/handshake ')) {
-        const code = message.text.replace('/handshake ', '').trim();
+      // 1. /handshake <code> 指令驗證
+      if (text?.startsWith('/handshake ')) {
+        const code = text.replace('/handshake ', '').trim();
         const result = this.handshakeManager.verifyCode(
-          code, 
-          channel, 
-          userId, 
-          message.senderName
+          code, channel, userId, message.senderName
         );
-        
-        // 發送回應
-        await this.sendMessage(channel, userId, { text: result.message });
-        
-        return { 
-          allowed: result.success, 
-          reason: result.message,
-          handled: true 
-        };
+        await reply(result.message);
+        return { allowed: result.success, reason: result.message, handled: true };
       }
 
-      // 檢查是否是 /reset 命令
-      if (message.text === '/reset') {
-        const result = this.handshakeManager.handleResetCommand(channel, userId);
-        await this.sendMessage(channel, userId, { text: result.message });
-        return { allowed: false, reason: result.message, handled: true };
+      // 2. 嘗試 emoji 自動握手驗證（用戶回傳 emoji）
+      if (text && this.handshakeManager.hasPendingEmoji(channel, userId)) {
+        const result = this.handshakeManager.verifyEmoji(
+          text, channel, userId, message.senderName
+        );
+        if (result.matched) {
+          await reply(result.message);
+          return { allowed: result.success, reason: result.message, handled: true };
+        }
       }
 
-      // 未驗證用戶
-      const rejectMessage = '⚠️ 你尚未通過驗證。請使用 `/handshake <code>` 進行驗證。';
-      await this.sendMessage(channel, userId, { text: rejectMessage });
-      
-      return { 
-        allowed: false, 
-        reason: 'User not whitelisted',
-        handled: true 
-      };
+      // 3. 未驗證用戶 → 自動生成 emoji 握手碼
+      const emoji = this.handshakeManager.generateEmojiCode(channel, userId);
+      const senderLabel = message.senderName || message.senderUsername || userId;
+
+      // 在終端機顯示 emoji 驗證碼
+      console.log('');
+      console.log(`🔐 ═══════════════════════════════════`);
+      console.log(`🔐  握手驗證碼:  ${emoji}`);
+      console.log(`🔐  來自: [${channel}] ${senderLabel}`);
+      console.log(`🔐 ═══════════════════════════════════`);
+      console.log('');
+
+      this.emit('handshakeRequested', { channel, userId, senderLabel, emoji });
+
+      await reply(`🔐 請查看終端機上顯示的 emoji，然後在這裡輸入相同的 emoji 完成驗證。`);
+
+      return { allowed: false, reason: 'Handshake emoji sent', handled: true };
     }
 
     // 更新最後活動時間
     this.whitelistManager.updateLastActive(channel, userId);
-
-    // 處理 /reset 命令（已驗證用戶）
-    if (message.text === '/reset') {
-      const result = this.handshakeManager.handleResetCommand(channel, userId);
-      await this.sendMessage(channel, userId, { text: result.message });
-      return { allowed: false, reason: result.message, handled: true };
-    }
 
     return { allowed: true };
   }

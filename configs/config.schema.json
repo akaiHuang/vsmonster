@@ -160,7 +160,7 @@
     },
     "publicUrl": {
       "type": "string",
-      "description": "Public base URL (e.g. https://ufo.fawstudio.com)"
+      "description": "Public base URL (e.g. https://your-domain.com)"
     }
   }
 }

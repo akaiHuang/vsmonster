@@ -39,7 +39,7 @@ const db: MediaDatabase = getMediaDatabase();
 
 /**
  * 初始化媒體 URL 基礎路徑
- * @param mediaUrl 媒體服務的基礎 URL（例如：https://media.ufo.fawstudio.com）
+ * @param mediaUrl 媒體服務的基礎 URL（例如：https://media.your-domain.com）
  */
 export function initializeMediaUrl(mediaUrl: string): void {
   MEDIA_URL_BASE = mediaUrl.replace(/\/+$/, ''); // 移除末尾斜線

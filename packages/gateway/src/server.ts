@@ -1,249 +1,152 @@
-import express from 'express';
-import fs from 'fs';
-import path from 'path';
-import { createServer } from 'http';
-import { WebSocket, WebSocketServer } from 'ws';
-import { loadConfig, VSMONSTERConfig } from './config/loader';
-import { ChannelManager } from './channels/manager';
+/**
+ * VSMONSTER Gateway Server
+ * 使用 @vsmonster/holography 模組作為通訊核心
+ */
+
+import {
+  HolographyServer,
+  HolographyServerConfig,
+  ChannelType,
+  IncomingMessage,
+  TelegramChannel,
+} from '@vsmonster/holography';
+import { loadConfig } from './config/loader';
 import { TaskManager } from './task/manager';
+import { CommandProcessor } from './commands/processor';
 import { TunnelService } from './tunnel/service';
 import { CopilotBridge } from './copilot/bridge';
 import { MCPController } from './mcp/controller';
-import { WebInterface } from './web-interface';
 import { SoulManager } from './soul/manager';
 import { logger } from './utils/logger';
+import express, { Express, Router } from 'express';
 import mediaRouter from './routes/media.routes';
-import { initializeMediaUrl } from './services/media.service';
-import { uploadFromLINE } from './services/media-integration';
-import crypto from 'crypto';
+import { initializeMediaUrl, uploadMedia } from './services/media.service';
+import { loadAISettings, saveAISettings, AVAILABLE_MODELS, TASK_TYPES } from './services/ai-settings.service';
+import * as fs from 'fs';
+import * as path from 'path';
+import { getMediaDatabase } from './db/media-database';
 
-export class VSMONSTERGateway {
-  private app: express.Application;
-  private server: ReturnType<typeof createServer>;
-  private wss: WebSocketServer;
-  private config: VSMONSTERConfig;
+export class HolographyGateway {
+  private holography: HolographyServer;
+  private config: ReturnType<typeof loadConfig>;
   
-  private channelManager: ChannelManager;
   private taskManager: TaskManager;
+  private commandProcessor: CommandProcessor;
   private tunnelService: TunnelService;
   private copilotBridge: CopilotBridge;
   private mcpController: MCPController;
-  private webInterface: WebInterface;
   private soulManager: SoulManager;
-  
-  private vsCodeConnections: Set<WebSocket> = new Set();
-  private ufoConnections: Set<WebSocket> = new Set();
-  private lineHandshakeCodes: Map<string, string> = new Map();
-  private telegramHandshakeCodes: Map<string, string> = new Map();
-  private readonly handshakeEmojis = ['🛸', '👾', '🚀', '✨', '🌟'];
-  private adminResetToken: string;
-  private ufoApprovals: Map<string, { token: string; userId: string; channel: string; taskPath: string }> = new Map();
-
-  // 用戶管理：記錄所有驗證過的用戶
-  private verifiedUsers: Map<string, {
-    id: string;
-    channel: string;
-    ip: string;
-    verifiedAt: Date;
-    lastActiveAt: Date;
-    messageCount: number;
-    displayName?: string;
-  }> = new Map();
+  private offlineGreetingLastSent: Map<string, number> = new Map();
+  private readonly offlineGreetingCooldownMs = 15000;
 
   constructor() {
     this.config = loadConfig();
-    this.app = express();
-    this.server = createServer(this.app);
-    this.wss = new WebSocketServer({ server: this.server });
     
-    // 初始化各個服務
-    this.channelManager = new ChannelManager(this.config.channels);
+    // 建立 Holography 伺服器配置
+    const holographyConfig: HolographyServerConfig = {
+      port: this.config.port || 3000,
+      wsPort: (this.config.port || 3000) + 1,
+      channels: {
+        line: this.config.channels.line ? {
+          channelAccessToken: this.config.channels.line.channelAccessToken,
+          channelSecret: this.config.channels.line.channelSecret,
+          webhookSecret: this.config.channels.line.webhookSecret,
+        } : undefined,
+        telegram: this.config.channels.telegram ? {
+          botToken: this.config.channels.telegram.botToken,
+          webhookUrl: this.config.channels.telegram.webhookUrl,
+        } : undefined,
+        discord: this.config.channels.discord ? {
+          botToken: this.config.channels.discord.botToken,
+          applicationId: this.config.channels.discord.applicationId,
+        } : undefined,
+      },
+      corsOrigins: ['*'],
+    };
+    
+    this.holography = new HolographyServer(holographyConfig);
+    
+    // 初始化其他服務
     this.taskManager = new TaskManager();
+    this.commandProcessor = new CommandProcessor(this.taskManager);
     this.tunnelService = new TunnelService(this.config.tunnel);
     this.copilotBridge = new CopilotBridge();
     this.mcpController = new MCPController(this.config.mcp);
-    this.webInterface = new WebInterface(this.app, this.copilotBridge, this.config.port);
     this.soulManager = new SoulManager();
-    this.adminResetToken = crypto.randomBytes(8).toString('hex');
-    
-    this.setupMiddleware();
-    this.setupRoutes();
-    this.setupWebSocket();
 
-    logger.info(`UFO Admin reset token: ${this.adminResetToken}`);
-  }
-
-  private setupMiddleware(): void {
-    this.app.use(
-      express.json({
-        verify: (req, _res, buf) => {
-          (req as any).rawBody = buf.toString();
-        }
-      })
-    );
-    this.app.use(express.urlencoded({ extended: true }));
-    
-    // CORS for VS Code extension
-    this.app.use((req, res, next) => {
-      res.header('Access-Control-Allow-Origin', '*');
-      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-      next();
-    });
-  }
-
-  private setupRoutes(): void {
-    // 健康檢查
-    this.app.get('/health', (req, res) => {
-      res.json({ 
-        status: 'ok', 
-        uptime: process.uptime(),
-        channels: this.channelManager.getActiveChannels(),
-        tasks: this.taskManager.getRunningTaskCount()
-      });
-    });
-
-    // LINE Webhook - 使用動態安全路徑
-    this.app.get('/webhook/line/:secret', (req, res) => {
-      // Some platforms perform a GET verification. Respond 200 if the path matches.
-      const lineChannel = this.channelManager.getChannel('line') as any;
-      if (lineChannel && lineChannel.webhookPath) {
-        const expectedPath = lineChannel.webhookPath.replace('/webhook/line/', '');
-        if (req.params.secret !== expectedPath) {
-          logger.warn('LINE webhook invalid secret in URL (GET)');
-          return res.sendStatus(403);
-        }
-      }
-      return res.sendStatus(200);
-    });
-
-    this.app.post('/webhook/line/:secret', async (req, res) => {
-      try {
-        // 驗證 webhook token header
-        const authToken = req.headers['x-line-signature'];
-        if (!authToken) {
-          logger.warn('LINE webhook request without signature header');
-          return res.sendStatus(403);
-        }
-
-        const rawBody = (req as any).rawBody as string | undefined;
-        const lineChannel = this.channelManager.getChannel('line') as any;
-        if (!rawBody || !lineChannel?.config?.channelSecret) {
-          logger.warn('LINE webhook missing raw body or channel secret');
-          return res.sendStatus(403);
-        }
-
-        const expectedSignature = crypto
-          .createHmac('sha256', lineChannel.config.channelSecret)
-          .update(rawBody)
-          .digest('base64');
-
-        if (authToken !== expectedSignature) {
-          logger.warn('LINE webhook signature mismatch');
-          return res.sendStatus(403);
-        }
-
-        // 驗證 URL 路徑中的 secret
-        if (lineChannel && lineChannel.webhookPath) {
-          const expectedPath = lineChannel.webhookPath.replace('/webhook/line/', '');
-          if (req.params.secret !== expectedPath) {
-            logger.warn('LINE webhook invalid secret in URL');
-            return res.sendStatus(403);
-          }
-        }
-        
-        const events = req.body.events || [];
-        for (const event of events) {
-          await this.handleChannelMessage('line', event);
-        }
-        res.sendStatus(200);
-      } catch (error) {
-        logger.error('LINE webhook error:', error);
-        res.sendStatus(500);
-      }
-    });
-
-    // Telegram Webhook（帶 secret token 的路由）
-    this.app.post('/webhook/telegram', async (req, res) => {
-      try {
-        // 驗證 Telegram IP 白名單（Telegram 官方 IP 範圍）
-        const telegramIPs = [
-          '149.154.160.0/20',  // Telegram 官方 IP 範圍
-          '91.108.4.0/22',
-          '91.108.8.0/22',
-          '91.108.12.0/22',
-          '91.108.16.0/22',
-          '91.108.56.0/22',
-          '127.0.0.1',         // localhost（開發用）
-          '::1',
-        ];
-        
-        const clientIP = req.headers['cf-connecting-ip'] || 
-                         req.headers['x-forwarded-for']?.toString().split(',')[0] || 
-                         req.socket.remoteAddress || '';
-        
-        // 簡化的 IP 檢查（生產環境建議使用完整的 CIDR 檢查）
-        const isFromTelegram = telegramIPs.some(ip => 
-          clientIP.includes(ip.split('/')[0].split('.').slice(0, 2).join('.')) ||
-          clientIP === ip ||
-          clientIP === '127.0.0.1' ||
-          clientIP === '::1' ||
-          clientIP.includes('149.154') ||
-          clientIP.includes('91.108')
+    // 設定 CommandProcessor 回調
+    this.commandProcessor.setCallbacks({
+      sendToVSCode: (type, data) => {
+        this.holography.broadcastRawToExtensions({ type, ...data });
+      },
+      replyToChannel: async (message, text) => {
+        await this.holography.sendMessage(
+          message.channel as ChannelType,
+          message.chatId || message.userId,
+          { text, chatId: message.chatId }
         );
-        
-        if (!isFromTelegram && process.env.NODE_ENV === 'production') {
-          logger.warn(`🚫 Telegram webhook rejected from IP: ${clientIP}`);
-          res.sendStatus(403);
-          return;
-        }
-        
-        logger.info('📩 Telegram webhook received:', JSON.stringify(req.body).substring(0, 200));
-        await this.handleChannelMessage('telegram', req.body);
-        res.sendStatus(200);
-      } catch (error) {
-        logger.error('Telegram webhook error:', error);
-        res.sendStatus(500);
-      }
+      },
     });
 
-    // Telegram Webhook（帶 secret token 的路由）
-    this.app.post('/webhook/telegram/:secret', async (req, res) => {
-      try {
-        const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
-        if (expectedSecret && req.params.secret !== expectedSecret) {
-          logger.warn(`🚫 Telegram webhook secret mismatch`);
-          res.sendStatus(403);
-          return;
-        }
-        
-        const clientIp = req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip'] || req.socket.remoteAddress || 'unknown';
-        logger.info('📩 Telegram webhook (secret) received:', JSON.stringify(req.body).substring(0, 200));
-        await this.handleChannelMessage('telegram', req.body, String(clientIp));
-        res.sendStatus(200);
-      } catch (error) {
-        logger.error('Telegram webhook error:', error);
-        res.sendStatus(500);
-      }
+    this.setupEventHandlers();
+    this.setupAdditionalRoutes();
+    this.setupTaskBroadcasts();
+  }
+
+  /**
+   * 設定 Holography 事件處理器
+   */
+  private setupEventHandlers(): void {
+    // 當收到已驗證的社群訊息時
+    this.holography.on('messageForwarded', ({ message }) => {
+      this.handleVerifiedMessage(message);
     });
 
-    // Discord interactions
-    this.app.post('/webhook/discord', async (req, res) => {
-      try {
-        await this.handleChannelMessage('discord', req.body);
-        res.json({ type: 1 }); // ACK
-      } catch (error) {
-        logger.error('Discord webhook error:', error);
-        res.sendStatus(500);
-      }
+    // 頻道初始化
+    this.holography.on('channelInitialized', ({ channel }) => {
+      logger.info(`✅ ${channel} channel initialized via Holography`);
     });
+
+    this.holography.on('channelError', ({ channel, error }) => {
+      logger.error(`❌ ${channel} channel error:`, error);
+    });
+
+    // WebSocket 連接
+    this.holography.on('wsClientConnected', ({ clientId }) => {
+      logger.info(`🔌 VS Code client connected: ${clientId}`);
+    });
+
+    this.holography.on('wsClientDisconnected', ({ clientId, code, reason }: any) => {
+      logger.info(`🔌 VS Code client disconnected: ${clientId} (code=${code || '?'}, reason=${reason || 'none'})`);
+    });
+
+    this.holography.on('wsClientTimeout', ({ clientId }: any) => {
+      logger.warn(`⏰ VS Code client heartbeat timeout: ${clientId}`);
+    });
+
+    // Extension 訊息
+    this.holography.on('extensionMessage', ({ clientId, message }) => {
+      this.handleExtensionMessage(clientId, message);
+    });
+
+    // Webhook 註冊
+    this.holography.on('webhookRegistered', ({ channel, path }) => {
+      logger.info(`📬 ${channel} webhook registered: ${path}`);
+    });
+  }
+
+  /**
+   * 設定額外的 API 路由
+   */
+  private setupAdditionalRoutes(): void {
+    const app: Express = this.holography.getApp();
 
     // 任務 API
-    this.app.get('/api/tasks', (req, res) => {
+    app.get('/api/tasks', (req, res) => {
       res.json(this.taskManager.getAllTasks());
     });
 
-    this.app.get('/api/tasks/:id', (req, res) => {
+    app.get('/api/tasks/:id', (req, res) => {
       const task = this.taskManager.getTask(req.params.id);
       if (task) {
         res.json(task);
@@ -252,12 +155,84 @@ export class VSMONSTERGateway {
       }
     });
 
+    // 任務詳情（含解析後的 media 記錄）
+    app.get('/api/tasks/:id/detail', (req, res) => {
+      const task = this.taskManager.getTask(req.params.id);
+      if (!task) {
+        return res.status(404).json({ error: 'Task not found' });
+      }
+
+      const mediaDb = getMediaDatabase();
+      const mediaRecords = (task.delivery?.mediaIds || [])
+        .map(id => mediaDb.findOne(id))
+        .filter(Boolean);
+
+      res.json({ task, media: mediaRecords });
+    });
+
+    // 設定任務交付資料
+    app.post('/api/tasks/:id/deliver', (req, res) => {
+      const task = this.taskManager.getTask(req.params.id);
+      if (!task) {
+        return res.status(404).json({ error: 'Task not found' });
+      }
+
+      const { mediaIds, summary } = req.body;
+      this.taskManager.setTaskDelivery(req.params.id, {
+        mediaIds,
+        summary,
+        deliveredAt: new Date(),
+      });
+
+      res.json({ success: true, task: this.taskManager.getTask(req.params.id) });
+    });
+
+    // 審核任務（用戶透過 Mission Control 頁面操作）
+    app.post('/api/tasks/:id/review', async (req, res) => {
+      const task = this.taskManager.getTask(req.params.id);
+      if (!task) {
+        return res.status(404).json({ error: 'Task not found' });
+      }
+
+      const { approved, comment } = req.body;
+      if (typeof approved !== 'boolean') {
+        return res.status(400).json({ error: 'approved (boolean) is required' });
+      }
+
+      this.taskManager.reviewTask(req.params.id, approved, comment);
+
+      // 通知社群用戶
+      const statusLabel = approved ? '✅ 已核准' : '↩️ 需要修改';
+      let notifyText = `${statusLabel}\n任務: ${task.instruction.slice(0, 50)}`;
+      if (comment) notifyText += `\n備註: ${comment}`;
+
+      try {
+        await this.holography.sendMessage(
+          task.channel as ChannelType,
+          task.userId,
+          { text: notifyText }
+        );
+      } catch (err) {
+        logger.warn(`Failed to notify user for task review: ${err}`);
+      }
+
+      // 通知 VS Code Extension
+      this.holography.broadcastRawToExtensions({
+        type: 'task_reviewed',
+        taskId: req.params.id,
+        approved,
+        comment,
+      });
+
+      res.json({ success: true, task: this.taskManager.getTask(req.params.id) });
+    });
+
     // MCP 控制 API
-    this.app.get('/api/mcp/servers', (req, res) => {
+    app.get('/api/mcp/servers', (req, res) => {
       res.json(this.mcpController.listServers());
     });
 
-    this.app.post('/api/mcp/:server/invoke', async (req, res) => {
+    app.post('/api/mcp/:server/invoke', async (req, res) => {
       try {
         const result = await this.mcpController.invoke(
           req.params.server,
@@ -272,924 +247,535 @@ export class VSMONSTERGateway {
     });
 
     // Tunnel 狀態
-    this.app.get('/api/tunnel', (req, res) => {
+    app.get('/api/tunnel', (req, res) => {
       res.json(this.tunnelService.getStatus());
     });
 
-    // ========== 發送訊息 API ==========
-    // POST /api/send - 發送訊息給指定用戶
-    this.app.post('/api/send', async (req, res) => {
+    // 多媒體路由
+    const mediaUrl = this.config.mediaUrl || `http://localhost:${this.config.port || 3000}`;
+    initializeMediaUrl(mediaUrl);
+    app.use('/api/media', mediaRouter);
+
+    // AI Settings API
+    app.get('/api/ai-settings', (req, res) => {
+      res.json(loadAISettings());
+    });
+
+    app.put('/api/ai-settings', (req, res) => {
       try {
-        const { channel, userId, message } = req.body;
-        
-        if (!channel || !userId || !message) {
-          return res.status(400).json({ 
-            error: 'Missing required fields: channel, userId, message' 
-          });
-        }
-        
-        await this.channelManager.sendMessage(channel, userId, message);
-        logger.info(`📤 Message sent to ${channel}:${userId}: ${message.substring(0, 50)}...`);
-        res.json({ success: true, channel, userId });
+        const current = loadAISettings();
+        const updated = {
+          blueMonster: { ...current.blueMonster, ...req.body.blueMonster },
+          ufo: { ...current.ufo, ...req.body.ufo },
+        };
+        saveAISettings(updated);
+        res.json({ success: true, settings: updated });
       } catch (error) {
-        logger.error('Send message error:', error);
         res.status(500).json({ error: String(error) });
       }
     });
 
-    // GET /api/channels - 取得可用頻道列表
-    this.app.get('/api/channels', (req, res) => {
+    app.get('/api/ai-settings/models', (req, res) => {
+      res.json({ models: AVAILABLE_MODELS, taskTypes: TASK_TYPES });
+    });
+
+    // Persona (me.md) API — resolve from project root (cwd)
+    const projectRoot = process.cwd();
+    const personaPaths: Record<string, string> = {
+      ufo: path.join(projectRoot, 'UFO/me.md'),
+      bluemonster: path.join(projectRoot, 'packages/blue-monster/me.md'),
+    };
+    app.get('/api/persona/:agent', (req, res) => {
+      const agentPath = personaPaths[req.params.agent];
+      if (!agentPath) {
+        return res.status(404).json({ error: 'Unknown agent' });
+      }
+      try {
+        const content = fs.existsSync(agentPath) ? fs.readFileSync(agentPath, 'utf8') : '';
+        res.json({ content, path: agentPath });
+      } catch (error) {
+        res.status(500).json({ error: String(error) });
+      }
+    });
+    app.put('/api/persona/:agent', (req, res) => {
+      const agentPath = personaPaths[req.params.agent];
+      if (!agentPath) {
+        return res.status(404).json({ error: 'Unknown agent' });
+      }
+      try {
+        const content = req.body.content ?? '';
+        fs.writeFileSync(agentPath, content, 'utf8');
+        res.json({ success: true });
+      } catch (error) {
+        res.status(500).json({ error: String(error) });
+      }
+    });
+
+    // 刪除已驗證用戶
+    app.delete('/api/users/:channel/:userId', (req, res) => {
+      const { channel, userId } = req.params;
+      try {
+        const cm = this.holography.getChannelManager();
+        const ch = cm.getChannel(channel as ChannelType);
+        if (ch) {
+          ch.removeFromWhitelist(userId);
+          res.json({ success: true });
+        } else {
+          res.status(404).json({ error: `Channel ${channel} not found` });
+        }
+      } catch (error) {
+        res.status(500).json({ error: String(error) });
+      }
+    });
+
+    // 列出啟用的頻道
+    app.get('/api/channels', (req, res) => {
+      res.json({ channels: this.holography.getChannelManager().getEnabledChannels() });
+    });
+
+    // === 測試 & 診斷 API ===
+
+    // WebSocket 連線狀態
+    app.get('/api/ws/status', (_req, res) => {
+      const wst = this.holography.getWebSocketTransport();
       res.json({
-        channels: this.channelManager.getActiveChannels(),
-        users: Array.from(this.lastActiveUsers.entries()).map(([key, channel]) => ({
-          channel,
-          userId: key.split(':')[1]
-        }))
+        clientCount: wst.getClientCount(),
+        clients: wst.getClients(),
+        hasActiveConnections: wst.hasActiveConnections(),
       });
     });
 
-    // POST /api/send - 發送訊息到指定頻道
-    this.app.post('/api/send', async (req, res) => {
-      const { channel, userId, message } = req.body;
-      
-      if (!channel || !message) {
-        return res.status(400).json({ error: 'channel and message are required' });
+    // 透過 HTTP 建立任務（模擬社群指令，用於測試）
+    app.post('/api/tasks', (req, res) => {
+      const { instruction, channel, userId, priority } = req.body;
+      if (!instruction) {
+        return res.status(400).json({ error: 'instruction is required' });
       }
 
-      try {
-        if (userId) {
-          // 發送給指定用戶
-          await this.sendToChannel(channel, userId, message);
-          res.json({ success: true, sent: { channel, userId, message } });
-        } else {
-          // 廣播給該頻道所有活躍用戶
-          await this.broadcastToChannelUsers(channel, message);
-          const users = this.getActiveUsersForChannel(channel);
-          res.json({ success: true, broadcast: { channel, users: users.length, message } });
-        }
-      } catch (error) {
-        logger.error('Failed to send message via API:', error);
-        res.status(500).json({ error: String(error) });
-      }
+      const task = this.taskManager.createTask({
+        channel: channel || 'api-test',
+        userId: userId || 'test-user',
+        instruction,
+        priority: priority || 'normal',
+      });
+
+      // 發送到 VS Code Extension（跟 /task 指令一樣）
+      this.holography.broadcastRawToExtensions({
+        type: 'new_task',
+        task,
+        instruction,
+        media: [],
+      });
+
+      res.json({ success: true, task });
     });
 
-    // GET /api/users - 取得所有已驗證用戶
-    this.app.get('/api/users', (req, res) => {
-      const users = Array.from(this.verifiedUsers.values()).map(u => ({
-        ...u,
-        verifiedAt: u.verifiedAt.toISOString(),
-        lastActiveAt: u.lastActiveAt.toISOString()
-      }));
-      res.json({ users, total: users.length });
-    });
-
-    // DELETE /api/users/:channel/:userId - 移除用戶
-    this.app.delete('/api/users/:channel/:userId', (req, res) => {
-      const { channel, userId } = req.params;
-      const key = `${channel}:${userId}`;
-      
-      if (this.verifiedUsers.has(key)) {
-        this.verifiedUsers.delete(key);
-        this.lastActiveUsers.delete(key);
-        
-        // 同時從白名單移除
-        const channelInstance = this.channelManager.getChannel(channel) as any;
-        if (channelInstance?.removeFromWhitelist) {
-          channelInstance.removeFromWhitelist(userId);
-        }
-        
-        logger.info(`🗑️ 用戶已移除: ${key}`);
-        res.json({ success: true, removed: key });
-      } else {
-        res.status(404).json({ error: 'User not found' });
-      }
-    });
-
-    // 發送訊息測試頁面
-    this.app.get('/send', (req, res) => {
+    // 發送訊息頁面
+    app.get('/send', (_req, res) => {
       res.send(this.renderSendMessagePage());
     });
 
-    // UFO approval pages
-    this.app.get('/ufo/approve/:taskId', (req, res) => {
-      const taskId = req.params.taskId;
-      const approval = this.ufoApprovals.get(taskId);
-      if (!approval) {
-        return res.sendStatus(404);
-      }
+    // 診斷測試頁面
+    app.get('/test', (_req, res) => {
+      res.send(this.renderTestPage());
+    });
+  }
 
-      const token = String(req.query.token || '');
-      if (token !== approval.token) {
-        return res.sendStatus(403);
-      }
+  /**
+   * 廣播任務事件到所有 WebSocket 客戶端（Mission Control 等）
+   */
+  private setupTaskBroadcasts(): void {
+    const broadcast = (event: string, data: any) => {
+      this.holography.broadcastRawToExtensions({ type: event, ...data });
+    };
 
-      const files = this.readTaskFiles(approval.taskPath, taskId);
-      return res.send(this.renderApprovalPage(taskId, token, files));
+    this.taskManager.on('task:created', (task: any) => {
+      broadcast('task:created', { task });
     });
 
-    this.app.post('/api/ufo/approve/:taskId', (req, res) => {
-      const taskId = req.params.taskId;
-      const approval = this.ufoApprovals.get(taskId);
-      if (!approval) {
-        return res.sendStatus(404);
-      }
-
-      const token = String(req.query.token || '');
-      if (token !== approval.token) {
-        return res.sendStatus(403);
-      }
-
-      this.ufoApprovals.delete(taskId);
-      this.broadcastToVSCode({
-        type: 'ufo_approved',
-        taskId,
-        userId: approval.userId,
-        channel: approval.channel,
-        taskPath: approval.taskPath
-      });
-      return res.json({ success: true });
+    this.taskManager.on('task:updated', (task: any) => {
+      broadcast('task:updated', { task });
     });
 
-    // 多媒體路由
-    // 初始化媒體 URL（使用 mediaUrl 配置或預設）
-    const mediaUrl = this.config.mediaUrl || `http://localhost:${this.config.port || 3000}`;
-    initializeMediaUrl(mediaUrl);
-    this.app.use('/api/media', mediaRouter);
+    this.taskManager.on('task:delivered', (task: any) => {
+      broadcast('task:delivered', { task });
+    });
+
+    this.taskManager.on('task:reviewed', (task: any) => {
+      broadcast('task:reviewed', { task });
+    });
+
+    this.taskManager.on('task:failed', (task: any) => {
+      broadcast('task:failed', { task });
+    });
+
+    this.taskManager.on('task:cancelled', (task: any) => {
+      broadcast('task:cancelled', { task });
+    });
   }
 
-  private getVerifiedUsersPath(): string {
-    const dataDir = path.join(__dirname, '..', '..', 'gateway', 'data');
-    return path.join(dataDir, 'verified-users.json');
-  }
+  /**
+   * 處理已驗證的訊息
+   */
+  private async handleVerifiedMessage(message: IncomingMessage): Promise<void> {
+    const { channel, userId, text, media } = message;
 
-  private loadVerifiedUsers(): void {
-    try {
-      const filePath = this.getVerifiedUsersPath();
-      if (fs.existsSync(filePath)) {
-        const data = fs.readFileSync(filePath, 'utf-8');
-        const users = JSON.parse(data);
-        
-        // 轉換日期字串回 Date 物件
-        for (const [key, user] of Object.entries(users)) {
-          const userData = user as any;
-          this.verifiedUsers.set(key, {
-            ...userData,
-            verifiedAt: new Date(userData.verifiedAt),
-            lastActiveAt: new Date(userData.lastActiveAt)
-          });
-        }
-        
-        logger.info(`✅ 已載入 ${this.verifiedUsers.size} 個已驗證用戶`);
-      }
-    } catch (err) {
-      logger.error(`⚠️ 無法載入已驗證用戶: ${err}`);
+    logger.info(`📨 [${channel}] ${userId}: ${text?.substring(0, 100) || '(media)'}`);
+
+    // 先交給 CommandProcessor 處理（/help, /status, /task 等指令）
+    if (text?.startsWith('/')) {
+      const result = await this.commandProcessor.processMessage(message);
+      if (result) return; // 指令已處理，不再轉發
     }
-  }
 
-  private saveVerifiedUsers(): void {
-    try {
-      const dataDir = path.dirname(this.getVerifiedUsersPath());
-      
-      // 確保目錄存在
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-      }
-      
-      // 轉換 Map 為 Object，並處理 Date 序列化
-      const data: Record<string, any> = {};
-      for (const [key, user] of this.verifiedUsers) {
-        data[key] = {
-          ...user,
-          verifiedAt: user.verifiedAt.toISOString(),
-          lastActiveAt: user.lastActiveAt.toISOString()
-        };
-      }
-      
-      const filePath = this.getVerifiedUsersPath();
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (err) {
-      logger.error(`⚠️ 無法保存已驗證用戶: ${err}`);
-    }
-  }
-
-  private setupWebSocket(): void {
-    this.wss.on('connection', (ws: WebSocket, req) => {
-      const isVsCode = req.url?.includes('vscode') ?? false;
-      const isUfo = req.url?.includes('client=ufo') ?? false;
-      const clientType = isVsCode ? 'vscode' : 'unknown';
-      
-      if (clientType === 'vscode') {
-        this.vsCodeConnections.add(ws);
-        if (isUfo) {
-          this.ufoConnections.add(ws);
-          logger.info('UFO extension connected');
-        } else {
-          logger.info('VS Code extension connected');
-        }
-        
-        // 發送當前狀態
-        ws.send(JSON.stringify({
-          type: 'init',
-          data: {
-            channels: this.channelManager.getActiveChannels(),
-            tasks: this.taskManager.getAllTasks(),
-            tunnel: this.tunnelService.getStatus()
-          }
-        }));
-      }
-
-      ws.on('message', async (data) => {
+    // If no VS Code extension is connected, reply with an offline greeting instead of silently dropping messages.
+    const wst = this.holography.getWebSocketTransport();
+    if (!wst.hasActiveConnections()) {
+      const key = `${channel}:${message.chatId || userId}`;
+      const now = Date.now();
+      const last = this.offlineGreetingLastSent.get(key) || 0;
+      if (now - last >= this.offlineGreetingCooldownMs) {
+        this.offlineGreetingLastSent.set(key, now);
         try {
-          const message = JSON.parse(data.toString());
-          await this.handleWebSocketMessage(ws, message);
-        } catch (error) {
-          logger.error('WebSocket message error:', error);
+          await this.holography.sendMessage(
+            channel as ChannelType,
+            message.chatId || userId,
+            { text: this.soulManager.getGreeting(), chatId: message.chatId }
+          );
+        } catch (err) {
+          logger.warn(`Failed to send offline greeting: ${err}`);
         }
-      });
+      }
+      return;
+    }
 
-      ws.on('close', () => {
-        this.vsCodeConnections.delete(ws);
-        if (this.ufoConnections.has(ws)) {
-          this.ufoConnections.delete(ws);
-          logger.info('UFO extension disconnected');
-        } else {
-          logger.info('VS Code extension disconnected');
-        }
-      });
+    // Best-effort: ingest incoming media into the gateway media store so downstream
+    // extensions (UFO/BlueMonster) can access a stable preview URL.
+    if (Array.isArray(media) && media.length > 0) {
+      try {
+        await this.ingestIncomingMedia(message);
+      } catch (err) {
+        logger.warn(`Failed to ingest incoming media: ${String(err)}`);
+      }
+    }
+
+    // 非指令訊息 → 轉發給 VS Code Extension（使用扁平 JSON）
+    this.holography.broadcastRawToExtensions({
+      type: 'ufo_message',
+      channel,
+      userId,
+      chatId: message.chatId,
+      text,
+      media,
+      messageId: message.messageId,
+      timestamp: message.timestamp.toISOString(),
     });
   }
 
-  private async handleWebSocketMessage(ws: WebSocket, message: any): Promise<void> {
+  private async ingestIncomingMedia(message: IncomingMessage): Promise<void> {
+    const items = Array.isArray(message.media) ? message.media : [];
+    if (items.length === 0) return;
+
+    const channel = message.channel;
+    const source = channel === 'line' ? 'line' : channel === 'discord' ? 'discord' : 'telegram';
+    const ch: any = this.holography.getChannelManager().getChannel<any>(channel as any);
+
+    const guessNameAndMime = (it: any, idx: number): { fileName: string; mimeType: string } => {
+      const type = String(it?.type || 'file');
+      const fileNameRaw = typeof it?.fileName === 'string' ? it.fileName.trim() : '';
+      const mimeRaw = typeof it?.mimeType === 'string' ? it.mimeType.trim() : '';
+      if (fileNameRaw && mimeRaw) return { fileName: fileNameRaw, mimeType: mimeRaw };
+      if (fileNameRaw) {
+        // Derive mime from extension if possible.
+        const ext = fileNameRaw.split('.').pop()?.toLowerCase() || '';
+        const mime =
+          ext === 'png' ? 'image/png' :
+          (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' :
+          ext === 'gif' ? 'image/gif' :
+          ext === 'webp' ? 'image/webp' :
+          ext === 'svg' ? 'image/svg+xml' :
+          ext === 'pdf' ? 'application/pdf' :
+          ext === 'txt' ? 'text/plain' :
+          ext === 'html' ? 'text/html' :
+          ext === 'json' ? 'application/json' :
+          mimeRaw || 'application/octet-stream';
+        return { fileName: fileNameRaw, mimeType: mime };
+      }
+      if (type === 'image') return { fileName: `image-${idx + 1}.jpg`, mimeType: mimeRaw || 'image/jpeg' };
+      if (type === 'video') return { fileName: `video-${idx + 1}.mp4`, mimeType: mimeRaw || 'video/mp4' };
+      if (type === 'audio') return { fileName: `audio-${idx + 1}.mp3`, mimeType: mimeRaw || 'audio/mpeg' };
+      return { fileName: `file-${idx + 1}.bin`, mimeType: mimeRaw || 'application/octet-stream' };
+    };
+
+    for (let i = 0; i < items.length; i += 1) {
+      const it: any = items[i];
+      if (!it || typeof it !== 'object') continue;
+      // Skip if we already have a URL (Discord often has one).
+      if (typeof it.url === 'string' && it.url.trim()) continue;
+
+      const { fileName, mimeType } = guessNameAndMime(it, i);
+
+      let buffer: Buffer | null = null;
+      try {
+        if (typeof it.url === 'string' && it.url) {
+          const res = await fetch(it.url);
+          const arrayBuf = await res.arrayBuffer();
+          buffer = Buffer.from(arrayBuf);
+        } else if (ch && typeof ch.downloadMedia === 'function' && typeof it.id === 'string') {
+          buffer = await ch.downloadMedia(it.id);
+        }
+      } catch (err) {
+        logger.warn(`Failed to download media for ${channel}: ${String(err)}`);
+        buffer = null;
+      }
+
+      if (!buffer) continue;
+
+      try {
+        const record = await uploadMedia(buffer, fileName, mimeType, source as any);
+        // Keep the original platform id in place, but add a stable preview URL.
+        it.url = record.publicUrl;
+        it.fileName = record.originalFilename;
+        it.mimeType = record.mimeType;
+        it.fileSize = record.fileSize;
+      } catch (err) {
+        logger.warn(`Failed to store media (${fileName}): ${String(err)}`);
+      }
+    }
+  }
+
+  /**
+   * 處理來自 Extension 的訊息
+   */
+  private async handleExtensionMessage(clientId: string, message: any): Promise<void> {
+    logger.debug(`Extension message from ${clientId}:`, message);
+
     switch (message.type) {
-      case 'copilot_response':
-        // 收到 Copilot 回應，轉發到社群頻道
-        await this.sendToChannel(message.channel, message.userId, message.content);
-        break;
-        
-      case 'task_update':
-        // 任務狀態更新
-        this.taskManager.updateTask(message.taskId, message.status, message.progress);
-        this.broadcastToChannels('task_progress', message);
-        break;
-
-      case 'task_status_change':
-        // UFO 任務狀態變更，通知所有活躍用戶
-        logger.info(`Task status change: ${message.taskId} ${message.from} → ${message.to}`);
-        await this.broadcastTaskStatusToAllChannels(message);
-        break;
-
-      case 'send_message':
-        // 發送訊息到指定頻道和用戶
-        if (message.channel && message.userId && message.content) {
-          await this.sendToChannel(message.channel, message.userId, message.content);
-        } else if (message.channel && message.content) {
-          // 廣播到該頻道的所有活躍用戶
-          await this.broadcastToChannelUsers(message.channel, message.content);
-        }
-        break;
-        
-      case 'tunnel_url':
-        // ngrok URL 更新
-        this.broadcastToChannels('preview_url', { url: message.url });
-        break;
-        
-      case 'mcp_invoke':
-        // MCP 調用請求
-        const result = await this.mcpController.invoke(
-          message.server,
-          message.action,
-          message.params
-        );
-        ws.send(JSON.stringify({ type: 'mcp_result', requestId: message.requestId, result }));
-        break;
-
-      case 'ufo_request_approval': {
-        const { taskId, taskPath, channel, userId } = message;
-        if (!taskId || !taskPath || !channel || !userId) {
-          break;
-        }
-        const token = crypto.randomBytes(8).toString('hex');
-        this.ufoApprovals.set(taskId, { token, userId, channel, taskPath });
-        const base = this.getPublicUrl();
-        const approvalUrl = `${base}/ufo/approve/${encodeURIComponent(taskId)}?token=${token}`;
-        await this.sendToChannel(channel, userId, `📝 請確認需求與規格：\n${approvalUrl}`);
-        ws.send(JSON.stringify({ type: 'ufo_approval_link', taskId, url: approvalUrl }));
-        break;
-      }
-    }
-  }
-
-  private async handleChannelMessage(channel: string, event: any, clientIp: string = 'unknown'): Promise<void> {
-    const parsed = this.channelManager.parseMessage(channel, event);
-    if (!parsed) return;
-
-    const { userId, text, media, messageId } = parsed;
-    
-    // 取得用戶顯示名稱
-    const displayName = this.extractDisplayName(channel, event);
-
-    // 記錄活躍用戶（用於廣播通知）
-    this.recordActiveUser(channel, userId);
-
-    // 自動上傳媒體檔案
-    if (media && media.length > 0) {
-      for (const mediaItem of media) {
-        if (channel === 'line' && mediaItem.type === 'image') {
-          try {
-            const fileName = `line_photo_${Date.now()}.jpg`;
-            const record = await uploadFromLINE(
-              this.channelManager.getChannel('line'),
-              mediaItem.id,
-              fileName,
-              'line'
-            );
-            
-            if (record) {
-              logger.info(`✅ LINE 照片已上傳: ${record.id}`);
-              await this.sendToChannel(
-                channel,
-                userId,
-                `📸 照片已保存\n連結: ${record.publicUrl}`
-              );
+      case 'chat_action': {
+        // Allow extensions (UFO) to ask for transient UI indicators such as Telegram typing.
+        if (message.channel === 'telegram' && message.action === 'typing') {
+          const chatId = String(message.chatId || message.userId || '');
+          if (chatId) {
+            const tg = this.holography.getChannelManager().getChannel<TelegramChannel>('telegram');
+            try {
+              await tg?.sendTypingAction(chatId);
+            } catch (err) {
+              logger.debug(`Failed to send typing action: ${String(err)}`);
             }
-          } catch (error) {
-            logger.error(`❌ LINE 照片上傳失敗`, error);
           }
         }
+        break;
       }
-    }
-
-    if (!text) {
-      return;
-    }
-
-    // === 自助重置命令（所有用戶都可以用） ===
-    if (text.trim().toLowerCase() === '/reset') {
-      const lineChannel = this.channelManager.getChannel('line') as any;
-      const telegramChannel = this.channelManager.getChannel('telegram') as any;
-      
-      if (channel === 'line' && lineChannel) {
-        lineChannel.removeFromWhitelist(userId);
-        this.lineHandshakeCodes.delete(userId);
-        this.verifiedUsers.delete(`${channel}:${userId}`);
-        this.saveVerifiedUsers();
-        await this.sendToChannel(channel, userId, '🔄 重置成功！請發送「你好」開始重新握手驗證。');
-        return;
-      } else if (channel === 'telegram' && telegramChannel) {
-        telegramChannel.removeFromWhitelist(userId);
-        this.telegramHandshakeCodes.delete(userId);
-        this.verifiedUsers.delete(`${channel}:${userId}`);
-        this.saveVerifiedUsers();
-        await this.sendToChannel(channel, userId, '🔄 重置成功！請發送「你好」開始重新握手驗證。');
-        return;
-      }
-    }
-
-    // === LINE 白名單握手 ===
-    if (channel === 'line') {
-      const lineChannel = this.channelManager.getChannel('line') as any;
-      if (lineChannel && !lineChannel.isWhitelisted(userId)) {
-        const normalized = text.trim().toLowerCase();
-        const currentCode = this.lineHandshakeCodes.get(userId);
-        const generateCode = () => {
-          const code = Array.from({ length: 4 }, () => {
-            return this.handshakeEmojis[Math.floor(Math.random() * this.handshakeEmojis.length)];
-          }).join('');
-          this.lineHandshakeCodes.set(userId, code);
-          logger.info(`LINE handshake code for ${userId}: ${code}`);
-          return code;
-        };
-
-        if (!currentCode) {
-          generateCode();
-        }
-
-        if (text.trim() === currentCode) {
-          await lineChannel.addToWhitelist(userId);
-          this.lineHandshakeCodes.delete(userId);
-          this.recordActiveUser(channel, userId);
-          
-          // 記錄已驗證用戶的完整資訊
-          this.verifiedUsers.set(`${channel}:${userId}`, {
-            id: userId,
-            channel,
-            ip: clientIp,
-            verifiedAt: new Date(),
-            lastActiveAt: new Date(),
-            messageCount: 1,
-            displayName
-          });
-          logger.info(`✅ 用戶已驗證: ${channel}:${userId} (IP: ${clientIp}, 名稱: ${displayName || 'N/A'})`);
-          
-          // 保存到檔案
-          this.saveVerifiedUsers();
-        } else {
-          if (normalized === '你好') {
-            generateCode();
+      case 'copilot_response': {
+        // UFO 送 content，舊版送 text — 兩者都支援
+        const text = message.text || message.content;
+        if (message.channel && message.userId && text) {
+          // Some flows (e.g. /api/tasks test page) use a synthetic channel like "api-test".
+          // Don't attempt to send to a social channel that isn't initialized; instead,
+          // rebroadcast the response to WS clients for local debugging.
+          const enabledChannels = this.holography.getChannelManager().getEnabledChannels();
+          const canNotify = enabledChannels.includes(message.channel as ChannelType);
+          if (!canNotify) {
+            this.holography.broadcastRawToExtensions({
+              type: 'copilot_response',
+              channel: message.channel,
+              userId: message.userId,
+              chatId: message.chatId,
+              text,
+              source: 'extension',
+            });
+            break;
           }
-
-          if (normalized === `/ufo-reset ${this.adminResetToken}`) {
-            lineChannel.clearWhitelist();
-            this.lineHandshakeCodes.clear();
-            await this.sendToChannel(channel, userId, '🧹 已清空白名單與握手狀態');
-            return;
-          }
-
-          await this.sendToChannel(
-            channel,
-            userId,
-            '🔒 尚未授權。請依照後台顯示的握手符號回覆。若未看到請回覆「你好」以重新產生。'
-          );
-        }
-        return;
-      }
-    }
-
-    // === Telegram 白名單握手 ===
-    if (channel === 'telegram') {
-      const telegramChannel = this.channelManager.getChannel('telegram') as any;
-      if (telegramChannel && !telegramChannel.isWhitelisted(userId)) {
-        const normalized = text.trim().toLowerCase();
-        const currentCode = this.telegramHandshakeCodes.get(userId);
-        
-        const generateCode = () => {
-          const code = Array.from({ length: 4 }, () => {
-            return this.handshakeEmojis[Math.floor(Math.random() * this.handshakeEmojis.length)];
-          }).join('');
-          this.telegramHandshakeCodes.set(userId, code);
-          
-          // 只在終端機顯示驗證碼（安全）
-          logger.info(`🔐 Telegram 握手驗證碼: ${code} (用戶: ${userId})`);
-          
-          // 也發送到 VS Code
-          this.broadcastToVSCode({
-            type: 'handshake_code',
-            channel: 'telegram',
-            userId,
-            code,
-            message: `🔐 Telegram 握手驗證碼: ${code} (用戶 ID: ${userId})`
-          });
-          
-          return code;
-        };
-
-        // 驗證握手碼
-        if (currentCode && text.trim() === currentCode) {
-          await telegramChannel.addToWhitelist(userId);
-          this.telegramHandshakeCodes.delete(userId);
-          this.recordActiveUser(channel, userId);
-          
-          // 記錄已驗證用戶的完整資訊
-          this.verifiedUsers.set(`${channel}:${userId}`, {
-            id: userId,
-            channel,
-            ip: clientIp,
-            verifiedAt: new Date(),
-            lastActiveAt: new Date(),
-            messageCount: 1,
-            displayName
-          });
-          logger.info(`✅ 用戶已驗證: ${channel}:${userId} (IP: ${clientIp}, 名稱: ${displayName || 'N/A'})`);
-          
-          // 保存到檔案
-          this.saveVerifiedUsers();
-          
-          await this.sendToChannel(channel, userId, '✅ 驗證成功！歡迎使用 UFO 🛸');
-          return;
-        }
-        
-        // 特殊命令：重新產生驗證碼
-        if (normalized === '你好' || normalized === 'hi' || normalized === 'hello' || normalized === '/start') {
-          generateCode();
-          await this.sendToChannel(
-            channel,
-            userId,
-            '🔒 請查看 VS Code 終端機中的驗證碼，然後在這裡輸入。'
-          );
-          return;
-        }
-
-        // 管理員重置命令
-        if (normalized === `/ufo-reset ${this.adminResetToken}`) {
-          telegramChannel.clearWhitelist();
-          this.telegramHandshakeCodes.clear();
-          await this.sendToChannel(channel, userId, '🧹 已清空白名單與握手狀態');
-          return;
-        }
-
-        // 如果還沒有驗證碼，產生一個
-        if (!currentCode) {
-          generateCode();
-        }
-        
-        // 提示用戶查看終端機
-        await this.sendToChannel(
-          channel,
-          userId,
-          '🔒 尚未授權\n\n請查看 VS Code 終端機中的驗證碼，然後在這裡輸入相同的符號。\n\n💡 輸入「你好」可重新產生驗證碼。'
-        );
-        return;
-      }
-    }
-
-    // 發送訊息給 UFO extension（支援所有 channel）
-    if (text) {
-      this.broadcastToVSCode({
-        type: 'ufo_message',
-        channel,
-        userId,
-        text,
-        messageId: parsed.messageId,
-        timestamp: parsed.timestamp.toISOString(),
-        media
-      });
-    }
-
-    // 檢查是否為問候或第一次使用
-    if (this.isGreeting(text)) {
-      if (this.ufoConnections.size > 0) {
-        return;
-      }
-      const greeting = this.soulManager.getGreeting();
-      await this.sendToChannel(channel, userId, greeting);
-      return;
-    }
-
-    // 解析指令
-    const command = this.parseCommand(text);
-    
-    if (command) {
-      await this.handleCommand(channel, userId, command);
-    } else {
-      // 使用 Soul Manager 判斷是否應該創建任務
-      const shouldCreateTask = this.soulManager.shouldCreateTask(text);
-      
-      if (shouldCreateTask) {
-        // 創建正式任務
-        const task = this.taskManager.createTask({
-          channel,
-          userId,
-          instruction: text,
-          media
-        });
-
-        // 通知 VS Code extension
-        this.broadcastToVSCode({
-          type: 'new_task',
-          task,
-          instruction: text,
-          media
-        });
-        
-        logger.info(`Task created for user ${userId}: ${text}`);
-      } else {
-        // 一般對話，不創建任務，直接使用 Copilot 聊天
-        logger.info(`General chat from user ${userId}: ${text}`);
-        
-        this.broadcastToVSCode({
-          type: 'chat_message',
-          channel,
-          userId,
-          message: text,
-          media
-        });
-      }
-    }
-  }
-  
-  /**
-   * 檢查是否為問候訊息
-   */
-  private isGreeting(text: string): boolean {
-    const greetings = ['你好', '嗨', 'hi', 'hello', '哈囉', '安安'];
-    const lowerText = text.toLowerCase().trim();
-    return greetings.some(g => lowerText === g || lowerText === g + '!');
-  }
-
-  private parseCommand(text: string): { cmd: string; args: string } | null {
-    if (!text.startsWith('/')) return null;
-    
-    const [cmd, ...argParts] = text.slice(1).split(' ');
-    return { cmd: cmd.toLowerCase(), args: argParts.join(' ') };
-  }
-
-  private async handleCommand(channel: string, userId: string, command: { cmd: string; args: string }): Promise<void> {
-    switch (command.cmd) {
-      case 'ufo-reset': {
-        if (channel !== 'line') {
-          await this.sendToChannel(channel, userId, '❌ 此指令僅支援 LINE');
-          break;
-        }
-        const token = command.args.trim();
-        if (!token || token !== this.adminResetToken) {
-          await this.sendToChannel(channel, userId, '❌ Reset token 不正確');
-          break;
-        }
-        const lineChannel = this.channelManager.getChannel('line') as any;
-        if (lineChannel) {
-          lineChannel.clearWhitelist();
-        }
-        this.lineHandshakeCodes.clear();
-        await this.sendToChannel(channel, userId, '🧹 已清空白名單與握手狀態');
-        break;
-      }
-      case 'task':
-      case 'confirm':
-        // UFO 專用指令：交由 UFO 擴充處理，不在 Gateway 端提示未知指令
-        break;
-      case 'status':
-        const tasks = this.taskManager.getTasksForUser(userId);
-        const status = tasks.length > 0 
-          ? tasks.map(t => `${t.status === 'running' ? '🔄' : t.status === 'completed' ? '✅' : '⏳'} ${t.id}: ${t.instruction.slice(0, 30)}...`).join('\n')
-          : '目前沒有進行中的任務';
-        await this.sendToChannel(channel, userId, `📊 任務狀態:\n${status}`);
-        break;
-        
-      case 'model':
-        this.broadcastToVSCode({
-          type: 'switch_model',
-          model: command.args,
-          userId
-        });
-        await this.sendToChannel(channel, userId, `🤖 已切換模型至: ${command.args}`);
-        break;
-        
-      case 'preview':
-        const tunnelStatus = this.tunnelService.getStatus();
-        if (tunnelStatus.active && tunnelStatus.url) {
-          await this.sendToChannel(channel, userId, `🌐 預覽連結: ${tunnelStatus.url}`);
-        } else {
-          await this.sendToChannel(channel, userId, '❌ 目前沒有可用的預覽連結');
-        }
-        break;
-        
-      case 'mcp':
-        const [server, action, ...params] = command.args.split(' ');
-        if (server && action) {
           try {
-            const result = await this.mcpController.invoke(server, action, params);
-            await this.sendToChannel(channel, userId, `✅ MCP 執行結果:\n${JSON.stringify(result, null, 2)}`);
-          } catch (error) {
-            await this.sendToChannel(channel, userId, `❌ MCP 執行失敗: ${error}`);
+            await this.holography.sendMessage(
+              message.channel as ChannelType,
+              message.chatId || message.userId,
+              { text, chatId: message.chatId }
+            );
+          } catch (err) {
+            logger.warn(`Failed to send copilot response to ${message.channel}: ${err}`);
           }
-        } else {
-          await this.sendToChannel(channel, userId, '用法: /mcp <server> <action> [params]');
         }
         break;
-        
-      case 'help':
-        await this.sendToChannel(channel, userId, `
-📖 VSMONSTER 指令說明:
+      }
 
-/task <指令> - 建立新任務
-/status - 查看任務狀態
-/model <模型名> - 切換 AI 模型
-/preview - 獲取預覽連結
-/mcp <server> <action> - 執行 MCP 動作
-/help - 顯示此說明
-        `.trim());
+      case 'task_update':
+        this.taskManager.updateTask(message.taskId, message.status, message.progress);
         break;
-        
+
+      case 'task_status_change': {
+        // 廣播任務狀態變更到社群用戶
+        const task = this.taskManager.getTask(message.taskId);
+        if (task) {
+          this.taskManager.updateTask(message.taskId, message.status, message.progress);
+
+          // 檢查頻道是否為真實社群頻道（api-test 等測試頻道不發送通知）
+          const enabledChannels = this.holography.getChannelManager().getEnabledChannels();
+          const canNotify = enabledChannels.includes(task.channel as ChannelType);
+
+          if (message.status === 'completed') {
+            // 附加交付資料（如有）
+            if (message.mediaIds || message.summary) {
+              this.taskManager.setTaskDelivery(message.taskId, {
+                mediaIds: message.mediaIds,
+                summary: message.summary,
+                deliveredAt: new Date(),
+              });
+            }
+
+            if (canNotify) {
+              // 建立交付連結
+              const baseUrl = this.tunnelService.getStatus().url
+                || `http://localhost:${this.config.port || 3000}`;
+              const deliveryUrl = `${baseUrl}/task/${message.taskId}`;
+
+              const statusText = this.taskManager.formatTaskStatus(
+                this.taskManager.getTask(message.taskId)!
+              );
+              const deliveryMessage = `${statusText}\n📎 查看結果: ${deliveryUrl}`;
+
+              try {
+                await this.holography.sendMessage(
+                  task.channel as ChannelType,
+                  task.userId,
+                  { text: deliveryMessage }
+                );
+              } catch (err) {
+                logger.warn(`Failed to send delivery notification: ${err}`);
+              }
+            }
+
+            // 更新狀態為已送達
+            this.taskManager.updateTask(message.taskId, 'delivered');
+          } else if (canNotify) {
+            const statusText = this.taskManager.formatTaskStatus(
+              this.taskManager.getTask(message.taskId)!
+            );
+            try {
+              await this.holography.sendMessage(
+                task.channel as ChannelType,
+                task.userId,
+                { text: statusText }
+              );
+            } catch (err) {
+              logger.warn(`Failed to send status notification: ${err}`);
+            }
+          }
+        }
+        break;
+      }
+
+      case 'send_message': {
+        // Extension 請求發送訊息到社群
+        if (message.channel && message.userId && (message.text || message.content)) {
+          try {
+            await this.holography.sendMessage(
+              message.channel as ChannelType,
+              message.chatId || message.userId,
+              { text: message.text || message.content, chatId: message.chatId }
+            );
+          } catch (err) {
+            logger.warn(`Failed to send message to ${message.channel}: ${err}`);
+          }
+        }
+        break;
+      }
+
+      case 'mcp_invoke': {
+        // Extension 請求執行 MCP
+        try {
+          const result = await this.mcpController.invoke(
+            message.server,
+            message.action,
+            message.params
+          );
+          // 回傳結果給 Extension
+          this.holography.broadcastRawToExtensions({
+            type: 'mcp_result',
+            requestId: message.requestId,
+            result,
+          });
+        } catch (error) {
+          this.holography.broadcastRawToExtensions({
+            type: 'mcp_result',
+            requestId: message.requestId,
+            error: String(error),
+          });
+        }
+        break;
+      }
+
       default:
-        await this.sendToChannel(channel, userId, `❓ 未知指令: /${command.cmd}\n輸入 /help 查看可用指令`);
-    }
-  }
-
-  private async sendToChannel(channel: string, userId: string, message: string): Promise<void> {
-    try {
-      await this.channelManager.sendMessage(channel, userId, message);
-    } catch (error) {
-      logger.error(`Failed to send message to ${channel}:`, error);
+        logger.debug(`Unknown extension message type: ${message.type}`);
     }
   }
 
   /**
-   * 廣播任務狀態變更到所有活躍頻道的用戶
+   * 啟動服務
    */
-  private async broadcastTaskStatusToAllChannels(message: {
-    taskId: string;
-    from: string;
-    to: string;
-    message: string;
-  }): Promise<void> {
-    const channels = this.channelManager.getActiveChannels();
-    for (const channel of channels) {
-      try {
-        // 取得該頻道最近活躍的用戶
-        const activeUsers = this.getActiveUsersForChannel(channel);
-        for (const userId of activeUsers) {
-          await this.sendToChannel(channel, userId, message.message);
-        }
-      } catch (error) {
-        logger.error(`Failed to broadcast to ${channel}:`, error);
-      }
-    }
-  }
-
-  /**
-   * 廣播訊息到指定頻道的所有活躍用戶
-   */
-  private async broadcastToChannelUsers(channel: string, content: string): Promise<void> {
-    const activeUsers = this.getActiveUsersForChannel(channel);
-    for (const userId of activeUsers) {
-      await this.sendToChannel(channel, userId, content);
-    }
-  }
-
-  /**
-   * 取得頻道的活躍用戶列表
-   */
-  private getActiveUsersForChannel(channel: string): string[] {
-    const users: string[] = [];
-    this.lastActiveUsers.forEach((userChannel, key) => {
-      if (userChannel === channel) {
-        const userId = key.split(':')[1];
-        if (userId) users.push(userId);
-      }
-    });
-    return users;
-  }
-
-  // 記錄活躍用戶
-  private lastActiveUsers = new Map<string, string>(); // key: "channel:userId", value: channel
-
-  private recordActiveUser(channel: string, userId: string): void {
-    this.lastActiveUsers.set(`${channel}:${userId}`, channel);
-    
-    // 更新已驗證用戶的活躍時間和訊息計數
-    const key = `${channel}:${userId}`;
-    const user = this.verifiedUsers.get(key);
-    if (user) {
-      user.lastActiveAt = new Date();
-      user.messageCount++;
-      
-      // 每次活躍時自動保存
-      this.saveVerifiedUsers();
-    }
-  }
-
-  /**
-   * 從事件中提取用戶顯示名稱
-   */
-  private extractDisplayName(channel: string, event: any): string | undefined {
-    try {
-      if (channel === 'telegram' && event.message?.from) {
-        const from = event.message.from;
-        return [from.first_name, from.last_name].filter(Boolean).join(' ') || from.username;
-      }
-      if (channel === 'line' && event.source?.userId) {
-        // LINE 需要額外 API 呼叫取得名稱，這裡先回傳 undefined
-        return undefined;
-      }
-      if (channel === 'discord' && event.member?.user) {
-        return event.member.user.username;
-      }
-    } catch {
-      return undefined;
-    }
-    return undefined;
-  }
-
-  private broadcastToVSCode(message: object): void {
-    const data = JSON.stringify(message);
-    this.vsCodeConnections.forEach(ws => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
-    });
-  }
-
-  private broadcastToChannels(type: string, data: any): void {
-    // 廣播到所有有活躍用戶的頻道
-    this.channelManager.broadcastMessage(type, data);
-  }
-
-  private getPublicUrl(): string {
-    if (this.config.publicUrl) {
-      return this.config.publicUrl.replace(/\/+$/, '');
-    }
-    const tunnelStatus = this.tunnelService.getStatus();
-    if (tunnelStatus.active && tunnelStatus.url) {
-      return tunnelStatus.url.replace(/\/+$/, '');
-    }
-    return `http://localhost:${this.config.port || 3000}`;
-  }
-
-  private readTaskFiles(taskPath: string, taskId: string): { readme: string; agents: string; devSpec: string } {
-    const safeTaskPath = path.resolve(taskPath);
-    const readmePath = path.join(safeTaskPath, 'README.md');
-    const agentsPath = path.join(safeTaskPath, 'AGENTS.md');
-    const devSpecPath = path.join(safeTaskPath, `dev-spec-${taskId}.md`);
-
-    const readFileSafe = (p: string) => {
-      try {
-        return fs.readFileSync(p, 'utf8');
-      } catch {
-        return '';
-      }
-    };
-
-    return {
-      readme: readFileSafe(readmePath),
-      agents: readFileSafe(agentsPath),
-      devSpec: readFileSafe(devSpecPath)
-    };
-  }
-
-  private renderApprovalPage(
-    taskId: string,
-    token: string,
-    files: { readme: string; agents: string; devSpec: string }
-  ): string {
-    const escape = (value: string) =>
-      value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-
-    return `<!doctype html>
-<html lang="zh-TW">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>UFO 任務確認 - ${taskId}</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#0f1115; color:#e5e7eb; padding:24px; }
-    h1 { margin-bottom: 8px; }
-    pre { background:#111827; padding:16px; border-radius:8px; overflow:auto; white-space:pre-wrap; }
-    .card { margin-bottom: 24px; }
-    button { padding:12px 16px; font-size:16px; border-radius:8px; border:none; background:#22c55e; color:#0b0f14; cursor:pointer; }
-  </style>
-</head>
-<body>
-  <h1>UFO 任務確認</h1>
-  <p>任務 ID：${taskId}</p>
-
-  <div class="card">
-    <h2>README</h2>
-    <pre>${escape(files.readme)}</pre>
-  </div>
-  <div class="card">
-    <h2>AGENTS</h2>
-    <pre>${escape(files.agents)}</pre>
-  </div>
-  <div class="card">
-    <h2>DEV SPEC</h2>
-    <pre>${escape(files.devSpec)}</pre>
-  </div>
-
-  <button id="approve">✅ 確認並開始開發</button>
-
-  <script>
-    document.getElementById('approve').addEventListener('click', async () => {
-      const res = await fetch('/api/ufo/approve/${taskId}?token=${token}', { method: 'POST' });
-      if (res.ok) {
-        alert('已確認，任務已交接。');
-      } else {
-        alert('確認失敗，請稍後再試。');
-      }
-    });
-  </script>
-</body>
-</html>`;
-  }
-
   async start(): Promise<void> {
     const port = this.config.port || 3000;
-    
-    // 載入已驗證用戶（從持久化存儲）
-    this.loadVerifiedUsers();
-    
-    // 初始化頻道
-    await this.channelManager.initialize();
-    
+
+    // 啟動 Holography 伺服器
+    await this.holography.start();
+
     // 啟動 ngrok (如果配置了)
     if (this.config.tunnel?.enabled) {
       await this.tunnelService.start(port);
     }
-    
+
     // 初始化 MCP 服務器
     await this.mcpController.initialize();
-    
-    // 啟動服務器
-    this.server.listen(port, () => {
-      logger.info(`🚀 VSMONSTER Gateway running on port ${port}`);
-      logger.info(`📡 Active channels: ${this.channelManager.getActiveChannels().join(', ')}`);
-      logger.info(`📬 Send message page: http://localhost:${port}/send`);
-      
-      if (this.tunnelService.getStatus().active) {
-        logger.info(`🌐 Public URL: ${this.tunnelService.getStatus().url}`);
+
+    logger.info(`🚀 Holography Gateway running on port ${port}`);
+    logger.info(`📡 Active channels: ${this.holography.getChannelManager().getEnabledChannels().join(', ')}`);
+    logger.info(`📬 Send message page: http://localhost:${port}/send`);
+    logger.info(`🧪 Test page: http://localhost:${port}/test`);
+
+    if (this.tunnelService.getStatus().active) {
+      const tunnelUrl = this.tunnelService.getStatus().url;
+      logger.info(`🌐 Public URL: ${tunnelUrl}`);
+      if (tunnelUrl) {
+        this.commandProcessor.setTunnelUrl(tunnelUrl);
+        // Prefer tunnel URL for media publicUrl so uploaded assets are reachable externally.
+        try { initializeMediaUrl(tunnelUrl); } catch {}
       }
+    }
+
+    // Graceful shutdown
+    process.on('SIGINT', async () => {
+      logger.info('Received SIGINT, shutting down...');
+      await this.stop();
+      process.exit(0);
+    });
+    process.on('SIGTERM', async () => {
+      logger.info('Received SIGTERM, shutting down...');
+      await this.stop();
+      process.exit(0);
     });
   }
 
+  /**
+   * 停止服務
+   */
+  async stop(): Promise<void> {
+    logger.info('Shutting down gateway...');
+    await this.tunnelService.stop?.();
+    await this.mcpController.shutdown?.();
+    await this.holography.stop();
+    logger.info('Gateway stopped');
+  }
+
+  /**
+   * 渲染發送訊息頁面
+   */
   private renderSendMessagePage(): string {
     return `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>UFO - 發送訊息</title>
+  <title>UFO - 發送訊息 (Holography)</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { 
@@ -1208,21 +794,11 @@ export class VSMONSTERGateway {
       backdrop-filter: blur(10px);
       border: 1px solid rgba(255,255,255,0.1);
     }
-    h1 {
-      text-align: center;
-      margin-bottom: 30px;
-      font-size: 28px;
-    }
+    h1 { text-align: center; margin-bottom: 10px; font-size: 28px; }
     h1 span { font-size: 40px; }
-    .form-group {
-      margin-bottom: 20px;
-    }
-    label {
-      display: block;
-      margin-bottom: 8px;
-      font-weight: 500;
-      color: #aaa;
-    }
+    .subtitle { text-align: center; color: #888; margin-bottom: 30px; font-size: 14px; }
+    .form-group { margin-bottom: 20px; }
+    label { display: block; margin-bottom: 8px; font-weight: 500; color: #aaa; }
     select, input, textarea {
       width: 100%;
       padding: 12px 16px;
@@ -1232,15 +808,7 @@ export class VSMONSTERGateway {
       color: #fff;
       font-size: 16px;
     }
-    select:focus, input:focus, textarea:focus {
-      outline: none;
-      border-color: #00d4ff;
-      box-shadow: 0 0 0 3px rgba(0,212,255,0.2);
-    }
-    textarea {
-      min-height: 120px;
-      resize: vertical;
-    }
+    textarea { min-height: 120px; resize: vertical; }
     button {
       width: 100%;
       padding: 14px;
@@ -1248,132 +816,45 @@ export class VSMONSTERGateway {
       border: none;
       border-radius: 8px;
       color: #fff;
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 600;
       cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
     }
-    button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 20px rgba(0,212,255,0.4);
-    }
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: none;
-    }
-    .result {
-      margin-top: 20px;
-      padding: 15px;
+    button:hover { opacity: 0.9; }
+    .result { margin-top: 20px; padding: 15px; border-radius: 8px; display: none; }
+    .result.success { background: rgba(0,200,100,0.2); border: 1px solid #00c864; display: block; }
+    .result.error { background: rgba(200,50,50,0.2); border: 1px solid #c83232; display: block; }
+    .users-list { margin-top: 30px; }
+    .users-list h3 { margin-bottom: 15px; font-size: 18px; }
+    .user-item {
+      padding: 10px 15px;
+      background: rgba(255,255,255,0.05);
       border-radius: 8px;
-      display: none;
-    }
-    .result.success {
-      background: rgba(0,255,100,0.1);
-      border: 1px solid rgba(0,255,100,0.3);
-      color: #0f0;
-      display: block;
-    }
-    .result.error {
-      background: rgba(255,100,100,0.1);
-      border: 1px solid rgba(255,100,100,0.3);
-      color: #f66;
-      display: block;
-    }
-    .users-list {
-      margin-top: 30px;
-      padding-top: 20px;
-      border-top: 1px solid rgba(255,255,255,0.1);
-    }
-    .users-list h3 {
-      color: #aaa;
-      margin-bottom: 15px;
+      margin-bottom: 8px;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
-    .users-list h3 button {
-      background: rgba(0,212,255,0.2);
-      border: 1px solid rgba(0,212,255,0.3);
-      color: #0af;
-      padding: 5px 10px;
+    .user-info { display: flex; align-items: center; gap: 10px; }
+    .channel-badge {
+      padding: 3px 8px;
       border-radius: 4px;
-      cursor: pointer;
       font-size: 12px;
+      font-weight: 600;
     }
-    .users-list h3 button:hover {
-      background: rgba(0,212,255,0.3);
-    }
-    .user-item {
-      display: flex;
-      align-items: center;
-      padding: 12px;
-      background: rgba(0,0,0,0.2);
-      border-radius: 8px;
-      margin-bottom: 10px;
-      transition: background 0.2s;
-    }
-    .user-item:hover {
-      background: rgba(0,212,255,0.1);
-    }
-    .user-main {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      cursor: pointer;
-    }
-    .user-item .channel {
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      margin-right: 12px;
-      font-weight: bold;
-    }
-    .user-item .channel.line { background: #06c755; }
-    .user-item .channel.telegram { background: #0088cc; }
-    .user-item .channel.discord { background: #5865f2; }
-    .user-info {
-      flex: 1;
-    }
-    .user-name {
-      font-weight: bold;
-      margin-bottom: 4px;
-    }
-    .user-meta {
-      display: flex;
-      gap: 15px;
-      font-size: 11px;
-      color: #888;
-      margin-bottom: 2px;
-    }
-    .user-time {
-      display: flex;
-      gap: 15px;
-      font-size: 10px;
-      color: #666;
-    }
-    .delete-btn {
-      background: rgba(255,100,100,0.2);
-      border: 1px solid rgba(255,100,100,0.3);
-      color: #f66;
-      padding: 8px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-      margin-left: 10px;
-    }
-    .delete-btn:hover {
-      background: rgba(255,100,100,0.4);
-    }
+    .channel-badge.line { background: #00c300; }
+    .channel-badge.telegram { background: #0088cc; }
+    .channel-badge.discord { background: #5865f2; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1><span>🛸</span> UFO 發送訊息</h1>
+    <h1><span>🛸</span> UFO</h1>
+    <p class="subtitle">Powered by Holography</p>
     
     <form id="sendForm">
       <div class="form-group">
-        <label for="channel">頻道</label>
+        <label>頻道</label>
         <select id="channel" required>
           <option value="">選擇頻道...</option>
           <option value="line">LINE</option>
@@ -1383,165 +864,369 @@ export class VSMONSTERGateway {
       </div>
       
       <div class="form-group">
-        <label for="userId">用戶 ID</label>
-        <input type="text" id="userId" placeholder="輸入用戶 ID" required>
+        <label>用戶 ID</label>
+        <input type="text" id="userId" placeholder="輸入用戶 ID 或從下方選擇" required>
       </div>
       
       <div class="form-group">
-        <label for="message">訊息內容</label>
+        <label>訊息</label>
         <textarea id="message" placeholder="輸入要發送的訊息..." required></textarea>
       </div>
       
-      <button type="submit" id="sendBtn">📤 發送訊息</button>
+      <button type="submit">發送訊息</button>
     </form>
     
     <div id="result" class="result"></div>
     
     <div class="users-list">
-      <h3>📋 已驗證的用戶 <button onclick="loadUsers()">🔄 刷新</button></h3>
+      <h3>已驗證用戶</h3>
       <div id="usersList">載入中...</div>
     </div>
   </div>
-
+  
   <script>
-    const form = document.getElementById('sendForm');
-    const result = document.getElementById('result');
-    const usersList = document.getElementById('usersList');
-    const channelSelect = document.getElementById('channel');
-    const userIdInput = document.getElementById('userId');
-    const sendBtn = document.getElementById('sendBtn');
-
-    // 載入用戶列表
     async function loadUsers() {
       try {
         const res = await fetch('/api/users');
         const data = await res.json();
+        const list = document.getElementById('usersList');
         
-        if (data.users && data.users.length > 0) {
-          usersList.innerHTML = data.users.map(u => {
-            const verifiedDate = new Date(u.verifiedAt).toLocaleString('zh-TW');
-            const lastActive = new Date(u.lastActiveAt).toLocaleString('zh-TW');
-            const idShort = u.id.length > 15 ? u.id.substring(0, 15) + '...' : u.id;
-            return \`
-            <div class="user-item">
-              <div class="user-main" onclick="selectUser('\${u.channel}', '\${u.id}')">
-                <span class="channel \${u.channel}">\${u.channel.toUpperCase()}</span>
-                <div class="user-info">
-                  <div class="user-name">\${u.displayName || '未知用戶'}</div>
-                  <div class="user-meta">
-                    <span>🆔 \${idShort}</span>
-                    <span>🌐 \${u.ip}</span>
-                    <span>💬 \${u.messageCount} 則</span>
-                  </div>
-                  <div class="user-time">
-                    <span>✅ 驗證: \${verifiedDate}</span>
-                    <span>⏰ 活躍: \${lastActive}</span>
-                  </div>
-                </div>
-              </div>
-              <button class="delete-btn" onclick="deleteUser('\${u.channel}', '\${u.id}')" title="移除用戶">🗑️</button>
+        if (!data.users || data.users.length === 0) {
+          list.innerHTML = '<p style="color:#888">尚無已驗證用戶</p>';
+          return;
+        }
+        
+        list.innerHTML = data.users.map(u => \`
+          <div class="user-item" onclick="selectUser('\${u.channel}', '\${u.id}')">
+            <div class="user-info">
+              <span class="channel-badge \${u.channel}">\${u.channel.toUpperCase()}</span>
+              <span>\${u.displayName || u.id}</span>
             </div>
-          \`}).join('');
-        } else {
-          usersList.innerHTML = '<p style="color:#666">尚無已驗證的用戶。請先完成握手驗證。</p>';
-        }
-      } catch (err) {
-        console.error('loadUsers error:', err);
-        usersList.innerHTML = '<p style="color:#f66">無法載入用戶列表: ' + (err.message || err) + '</p>';
+            <span style="color:#888">\${u.id.substring(0,10)}...</span>
+          </div>
+        \`).join('');
+      } catch (e) {
+        document.getElementById('usersList').innerHTML = '<p style="color:#f66">載入失敗</p>';
       }
     }
-
+    
     function selectUser(channel, userId) {
-      channelSelect.value = channel;
-      userIdInput.value = userId;
+      document.getElementById('channel').value = channel;
+      document.getElementById('userId').value = userId;
     }
-
-    async function deleteUser(channel, userId) {
-      if (!confirm('確定要移除此用戶嗎？\\n移除後需要重新握手驗證。')) return;
-      
-      try {
-        const res = await fetch(\`/api/users/\${channel}/\${userId}\`, { method: 'DELETE' });
-        const data = await res.json();
-        if (data.success) {
-          alert('✅ 用戶已移除');
-          loadUsers();
-        } else {
-          alert('❌ ' + (data.error || '移除失敗'));
-        }
-      } catch (err) {
-        alert('❌ 網路錯誤');
-      }
-    }
-
-    form.addEventListener('submit', async (e) => {
+    
+    document.getElementById('sendForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      
-      const channel = channelSelect.value;
-      const userId = userIdInput.value.trim();
-      const message = document.getElementById('message').value.trim();
-      
-      if (!channel || !userId || !message) {
-        result.className = 'result error';
-        result.textContent = '請填寫所有欄位';
-        return;
-      }
-      
-      sendBtn.disabled = true;
-      sendBtn.textContent = '發送中...';
+      const result = document.getElementById('result');
       
       try {
         const res = await fetch('/api/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ channel, userId, message })
+          body: JSON.stringify({
+            channel: document.getElementById('channel').value,
+            userId: document.getElementById('userId').value,
+            message: document.getElementById('message').value
+          })
         });
         
         const data = await res.json();
-        
-        if (data.success) {
-          result.className = 'result success';
-          result.textContent = '✅ 訊息已發送！';
-          document.getElementById('message').value = '';
-        } else {
-          result.className = 'result error';
-          result.textContent = '❌ ' + (data.error || '發送失敗');
-        }
-      } catch (err) {
+        result.className = 'result ' + (data.success ? 'success' : 'error');
+        result.textContent = data.success ? '✅ 訊息已發送' : '❌ ' + (data.error || '發送失敗');
+      } catch (e) {
         result.className = 'result error';
-        result.textContent = '❌ 網路錯誤: ' + err.message;
-      } finally {
-        sendBtn.disabled = false;
-        sendBtn.textContent = '📤 發送訊息';
+        result.textContent = '❌ 網路錯誤';
       }
     });
-
-    // 載入並每 30 秒自動刷新
+    
     loadUsers();
     setInterval(loadUsers, 30000);
   </script>
 </body>
 </html>`;
   }
+  /**
+   * 渲染診斷測試頁面
+   */
+  private renderTestPage(): string {
+    return `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VSMONSTER - Channel Test</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;min-height:100vh;padding:20px;color:#e6edf3}
+    .grid{max-width:900px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+    .full{grid-column:1/-1}
+    h1{text-align:center;margin-bottom:6px;font-size:24px}
+    .subtitle{text-align:center;color:#7d8590;margin-bottom:24px;font-size:13px}
+    .card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px}
+    .card h2{font-size:16px;margin-bottom:14px;color:#58a6ff}
+    label{display:block;margin-bottom:6px;font-weight:500;color:#7d8590;font-size:13px}
+    input,textarea,select{width:100%;padding:10px 12px;border:1px solid #30363d;border-radius:6px;background:#0d1117;color:#e6edf3;font-size:14px;margin-bottom:12px}
+    textarea{min-height:80px;resize:vertical}
+    .btn{width:100%;padding:12px;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;transition:.15s}
+    .btn-primary{background:#238636;color:#fff}
+    .btn-primary:hover{background:#2ea043}
+    .btn-blue{background:#1f6feb;color:#fff}
+    .btn-blue:hover{background:#388bfd}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .status-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #21262d}
+    .status-row:last-child{border-bottom:none}
+    .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+    .dot.green{background:#3fb950}
+    .dot.red{background:#f85149}
+    .dot.gray{background:#484f58}
+    .status-label{flex:1;font-size:14px}
+    .status-val{font-size:13px;color:#7d8590;font-family:monospace}
+    .log{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;max-height:300px;overflow-y:auto;font-family:'SF Mono',Consolas,monospace;font-size:12px;line-height:1.6}
+    .log-entry{padding:2px 0}
+    .log-time{color:#484f58;margin-right:8px}
+    .log-ok{color:#3fb950}
+    .log-err{color:#f85149}
+    .log-info{color:#58a6ff}
+    .result{margin-top:12px;padding:12px;border-radius:6px;font-size:13px;display:none;word-break:break-all}
+    .result.ok{background:rgba(63,185,80,.12);border:1px solid #238636;color:#3fb950;display:block}
+    .result.err{background:rgba(248,81,73,.12);border:1px solid #f85149;color:#f85149;display:block}
+    .tasks-list{max-height:250px;overflow-y:auto}
+    .task-item{padding:8px 10px;background:#0d1117;border:1px solid #21262d;border-radius:6px;margin-bottom:6px;font-size:13px}
+    .task-id{color:#58a6ff;font-family:monospace}
+    .task-status{display:inline-block;padding:2px 6px;border-radius:3px;font-size:11px;font-weight:600;margin-left:6px}
+    .task-status.pending{background:#30363d;color:#7d8590}
+    .task-status.running{background:#1f6feb33;color:#58a6ff}
+    .task-status.completed{background:#23863633;color:#3fb950}
+  </style>
+</head>
+<body>
+  <h1>VSMONSTER Channel Test</h1>
+  <p class="subtitle">Gateway diagnostics &amp; task testing</p>
 
-  async stop(): Promise<void> {
-    await this.tunnelService.stop();
-    await this.mcpController.shutdown();
-    this.server.close();
-    logger.info('VSMONSTER Gateway stopped');
+  <div class="grid">
+    <!-- Left: Status -->
+    <div class="card">
+      <h2>Connection Status</h2>
+      <div id="statusPanel">
+        <div class="status-row">
+          <div class="dot gray" id="dotWs"></div>
+          <span class="status-label">WebSocket Clients</span>
+          <span class="status-val" id="wsCount">-</span>
+        </div>
+        <div class="status-row">
+          <div class="dot gray" id="dotLine"></div>
+          <span class="status-label">LINE Channel</span>
+          <span class="status-val" id="lineSt">-</span>
+        </div>
+        <div class="status-row">
+          <div class="dot gray" id="dotTg"></div>
+          <span class="status-label">Telegram Channel</span>
+          <span class="status-val" id="tgSt">-</span>
+        </div>
+        <div class="status-row">
+          <div class="dot gray" id="dotDc"></div>
+          <span class="status-label">Discord Channel</span>
+          <span class="status-val" id="dcSt">-</span>
+        </div>
+        <div class="status-row">
+          <div class="dot gray" id="dotTunnel"></div>
+          <span class="status-label">Tunnel</span>
+          <span class="status-val" id="tunnelSt">-</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Create Task -->
+    <div class="card">
+      <h2>Send Test Task</h2>
+      <label>Task Instruction</label>
+      <textarea id="taskInst" placeholder="e.g. Create a hello world page"></textarea>
+      <label>Priority</label>
+      <select id="taskPri">
+        <option value="normal">Normal</option>
+        <option value="high">High</option>
+        <option value="urgent">Urgent</option>
+        <option value="low">Low</option>
+      </select>
+      <button class="btn btn-primary" id="sendTaskBtn">Send Task to Extension</button>
+      <div id="taskResult" class="result"></div>
+    </div>
+
+    <!-- Bottom left: Recent tasks -->
+    <div class="card">
+      <h2>Recent Tasks</h2>
+      <div id="tasksList" class="tasks-list"><span style="color:#484f58">Loading...</span></div>
+    </div>
+
+    <!-- Bottom right: Event log -->
+    <div class="card">
+      <h2>Event Log</h2>
+      <div id="eventLog" class="log"><div class="log-entry"><span class="log-time">--:--:--</span><span class="log-info">Waiting for events...</span></div></div>
+    </div>
+
+    <!-- Full width: cURL reference -->
+    <div class="card full">
+      <h2>API Quick Reference</h2>
+      <div style="font-family:'SF Mono',Consolas,monospace;font-size:12px;color:#7d8590;line-height:1.8">
+        <div style="margin-bottom:8px"><span style="color:#3fb950">POST</span> /api/tasks <span style="color:#484f58">- Create a task (body: { instruction, priority? })</span></div>
+        <div style="margin-bottom:8px"><span style="color:#58a6ff">GET</span>&nbsp; /api/tasks <span style="color:#484f58">- List all tasks</span></div>
+        <div style="margin-bottom:8px"><span style="color:#58a6ff">GET</span>&nbsp; /api/ws/status <span style="color:#484f58">- WebSocket client connections</span></div>
+        <div style="margin-bottom:8px"><span style="color:#58a6ff">GET</span>&nbsp; /api/channels <span style="color:#484f58">- Enabled channels</span></div>
+        <div style="margin-bottom:8px;color:#e6edf3">
+          curl -X POST http://localhost:3000/api/tasks \\<br>
+          &nbsp;&nbsp;-H "Content-Type: application/json" \\<br>
+          &nbsp;&nbsp;-d '{"instruction": "Build a login page"}'
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const byId = id => document.getElementById(id);
+    const now = () => new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+
+    function addLog(msg, cls) {
+      const log = byId('eventLog');
+      const d = document.createElement('div');
+      d.className = 'log-entry';
+      d.innerHTML = '<span class="log-time">' + now() + '</span><span class="log-' + (cls||'info') + '">' + msg + '</span>';
+      log.appendChild(d);
+      if (log.children.length > 200) log.removeChild(log.firstChild);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    // === Poll status ===
+    async function refreshStatus() {
+      try {
+        const [wsRes, chRes, tnRes] = await Promise.all([
+          fetch('/api/ws/status').then(r=>r.json()),
+          fetch('/api/channels').then(r=>r.json()),
+          fetch('/api/tunnel').then(r=>r.json()),
+        ]);
+        const cnt = wsRes.clientCount || 0;
+        byId('wsCount').textContent = cnt + ' client(s)';
+        byId('dotWs').className = 'dot ' + (cnt > 0 ? 'green' : 'red');
+
+        const chs = chRes.channels || [];
+        const setC = (dotId, valId, name) => {
+          const on = chs.includes(name);
+          byId(dotId).className = 'dot ' + (on ? 'green' : 'gray');
+          byId(valId).textContent = on ? 'Active' : 'Not configured';
+        };
+        setC('dotLine','lineSt','line');
+        setC('dotTg','tgSt','telegram');
+        setC('dotDc','dcSt','discord');
+
+        byId('dotTunnel').className = 'dot ' + (tnRes.active ? 'green' : 'gray');
+        byId('tunnelSt').textContent = tnRes.active ? tnRes.url : 'Inactive';
+      } catch(e) {
+        addLog('Failed to fetch status: ' + e.message, 'err');
+      }
+    }
+
+    // === Poll tasks ===
+    async function refreshTasks() {
+      try {
+        const tasks = await fetch('/api/tasks').then(r=>r.json());
+        const list = byId('tasksList');
+        if (!tasks || tasks.length === 0) {
+          list.innerHTML = '<span style="color:#484f58">No tasks yet</span>';
+          return;
+        }
+        const recent = tasks.slice(-10).reverse();
+        list.innerHTML = recent.map(t =>
+          '<div class="task-item">' +
+            '<span class="task-id">' + t.id + '</span>' +
+            '<span class="task-status ' + t.status + '">' + t.status + '</span>' +
+            '<div style="color:#7d8590;margin-top:4px">' + (t.instruction||'').substring(0,60) + '</div>' +
+          '</div>'
+        ).join('');
+      } catch(e) {}
+    }
+
+    // === Send task ===
+    byId('sendTaskBtn').addEventListener('click', async () => {
+      const inst = byId('taskInst').value.trim();
+      if (!inst) return;
+      const btn = byId('sendTaskBtn');
+      const result = byId('taskResult');
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+      result.className = 'result';
+      result.style.display = 'none';
+      try {
+        const res = await fetch('/api/tasks', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ instruction: inst, priority: byId('taskPri').value }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          result.className = 'result ok';
+          result.textContent = 'Task created: ' + data.task.id;
+          addLog('Task dispatched: ' + data.task.id + ' -> ' + inst.substring(0,40), 'ok');
+          byId('taskInst').value = '';
+          refreshTasks();
+        } else {
+          throw new Error(data.error || 'Unknown error');
+        }
+      } catch(e) {
+        result.className = 'result err';
+        result.textContent = 'Error: ' + e.message;
+        addLog('Task send failed: ' + e.message, 'err');
+      }
+      btn.disabled = false;
+      btn.textContent = 'Send Task to Extension';
+    });
+
+    // === WebSocket live events ===
+    function connectEventStream() {
+      // Holography WebSocket shares the same port as HTTP (e.g. 3000). The previous
+      // "+1 port" logic (3001) caused false disconnects and hid live events.
+      const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/vscode?client=test-page';
+      addLog('Connecting WS: ' + wsUrl + ' ...', 'info');
+      try {
+        const ws = new WebSocket(wsUrl);
+        ws.onopen = () => addLog('WS connected (live event stream)', 'ok');
+        ws.onmessage = (e) => {
+          try {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'heartbeat' || msg.type === 'pong') return;
+            addLog('[' + (msg.type||'unknown') + '] ' + JSON.stringify(msg).substring(0,120), 'info');
+            if (msg.type && msg.type.startsWith('task')) refreshTasks();
+          } catch(err) {}
+        };
+        ws.onclose = () => {
+          addLog('WS disconnected, retrying in 5s...', 'err');
+          setTimeout(connectEventStream, 5000);
+        };
+        ws.onerror = () => {};
+      } catch(e) {
+        addLog('WS connection failed', 'err');
+        setTimeout(connectEventStream, 5000);
+      }
+    }
+
+    // Init
+    refreshStatus();
+    refreshTasks();
+    connectEventStream();
+    setInterval(refreshStatus, 5000);
+    setInterval(refreshTasks, 10000);
+    addLog('Test page loaded', 'ok');
+  </script>
+</body>
+</html>`;
   }
 }
 
-// 主入口
+// 如果直接執行此檔案
 if (require.main === module) {
-  const gateway = new VSMONSTERGateway();
-  
+  const gateway = new HolographyGateway();
   gateway.start().catch(err => {
-    logger.error('Failed to start gateway:', err);
+    logger.error('Failed to start Holography Gateway:', err);
     process.exit(1);
   });
-
-  process.on('SIGINT', async () => {
-    await gateway.stop();
-    process.exit(0);
-  });
 }
+
+export default HolographyGateway;

@@ -57,8 +57,9 @@ export class HolographyServer extends EventEmitter {
    * 設定 Express middleware
    */
   private setupMiddleware(): void {
+    const origins = this.config.corsOrigins;
     this.app.use(cors({
-      origin: this.config.corsOrigins,
+      origin: origins.length === 1 && origins[0] === '*' ? '*' : origins,
     }));
     this.app.use(express.json());
   }
@@ -87,7 +88,7 @@ export class HolographyServer extends EventEmitter {
     });
 
     this.app.get('/api/users', (req: Request, res: Response) => {
-      res.json(this.channelManager.getVerifiedUsers());
+      res.json({ users: this.channelManager.getVerifiedUsers() });
     });
 
     this.app.post('/api/handshake/generate', (req: Request, res: Response) => {
@@ -99,10 +100,11 @@ export class HolographyServer extends EventEmitter {
     this.app.post('/api/send', async (req: Request, res: Response) => {
       try {
         const { channel, userId, message } = req.body;
-        await this.channelManager.sendMessage(channel, userId, message);
+        const outgoing = typeof message === 'string' ? { text: message } : message;
+        await this.channelManager.sendMessage(channel, userId, outgoing);
         res.json({ success: true });
       } catch (error) {
-        res.status(500).json({ error: String(error) });
+        res.status(500).json({ success: false, error: String(error) });
       }
     });
   }
@@ -145,7 +147,7 @@ export class HolographyServer extends EventEmitter {
       const telegramConfig = this.config.channels.telegram;
       let webhookPath = '';
       if (telegramConfig?.webhookUrl) {
-        // 例如: https://ufo.fawstudio.com/webhook/telegram/SECRET
+        // 例如: https://your-domain.com/webhook/telegram/SECRET
         // 提取 /webhook/telegram 之後的部分
         const match = telegramConfig.webhookUrl.match(/\/webhook\/telegram(\/[^?]*)?/);
         if (match && match[1]) {
@@ -191,6 +193,10 @@ export class HolographyServer extends EventEmitter {
 
     this.wsTransport.on('clientDisconnected', (data) => {
       this.emit('wsClientDisconnected', data);
+    });
+
+    this.wsTransport.on('clientTimeout', (data) => {
+      this.emit('wsClientTimeout', data);
     });
 
     this.wsTransport.on('message', async ({ clientId, message }) => {
@@ -336,7 +342,7 @@ export class HolographyServer extends EventEmitter {
   }
 
   /**
-   * 廣播訊息到所有 VS Code Extension
+   * 廣播訊息到所有 VS Code Extension（WSMessage 格式）
    */
   broadcastToExtensions(type: WSMessageType, payload: any): void {
     this.wsTransport.broadcast({
@@ -344,5 +350,13 @@ export class HolographyServer extends EventEmitter {
       payload,
       timestamp: new Date().toISOString(),
     });
+  }
+
+  /**
+   * 廣播原始 JSON 到所有 VS Code Extension（不包裝為 WSMessage）
+   * UFO Extension 預期收到扁平 JSON 如 { type: 'ufo_message', ... }
+   */
+  broadcastRawToExtensions(data: Record<string, any>): void {
+    this.wsTransport.broadcastRaw(data);
   }
 }

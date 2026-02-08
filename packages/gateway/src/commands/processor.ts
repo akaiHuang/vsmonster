@@ -3,7 +3,7 @@
  * 解析社群訊息中的指令並執行相應操作
  */
 
-import { IncomingMessage } from '../channels/base';
+import { IncomingMessage } from '@vsmonster/holography';
 import { TaskManager } from '../task/manager';
 import { logger } from '../utils/logger';
 

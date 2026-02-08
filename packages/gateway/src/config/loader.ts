@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import { ChannelsConfig } from '../channels/base';
+import { ChannelsConfig } from '@vsmonster/holography';
 import { TunnelConfig } from '../tunnel/service';
 import { MCPConfig } from '../mcp/controller';
 

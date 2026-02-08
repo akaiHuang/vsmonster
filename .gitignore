@@ -23,6 +23,14 @@ playwright-report/
 scripts/*.local.sh
 
 # ============================================
+# 🤖 AI Copilot Instructions (含個人化設定)
+# ============================================
+.github/copilot-instructions.md
+.vscode/copilot-instructions.md
+UFO/copilot-instructions.md
+packages/blue-monster/.github/copilot-instructions.md
+
+# ============================================
 # ⚙️ Config files (user specific)
 # ============================================
 configs/config.json

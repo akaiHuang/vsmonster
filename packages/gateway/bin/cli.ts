@@ -6,7 +6,7 @@
  */
 
 import { Command } from 'commander';
-import { VSMONSTERGateway } from '../src/server';
+import { HolographyGateway } from '../src/server';
 import { loadConfig, validateConfig } from '../src/config/loader';
 import { SetupWizard } from '../src/setup/wizard';
 import { logger } from '../src/utils/logger';
@@ -58,7 +58,7 @@ program
       config.port = parseInt(options.port, 10);
     }
 
-    const gateway = new VSMONSTERGateway();
+    const gateway = new HolographyGateway();
     await gateway.start();
   });
 

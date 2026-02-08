@@ -307,6 +307,9 @@ interface TaskState {
   createdAt: number;
   agentName: string;
   agentEmoji: string;
+  // Optional display metadata (e.g. injected by UFO)
+  displayTaskId?: string;
+  displayTitle?: string;
   taskFolder?: string; // 任務專屬資料夾路徑
   messages: UiMessage[];
   busy: boolean;
@@ -340,7 +343,7 @@ function createTaskState(chatId: string, agentName: string, agentEmoji: string):
     busy: false,
     activityStatus: 'Idle',
     activityLines: [],
-    mode: 'agent',
+    mode: 'agent-full',
     hasUnsavedChanges: false,
     stopRequested: false,
     activitySteps: [],
@@ -484,10 +487,14 @@ class BlueMonsterSession {
   private readonly context: vscode.ExtensionContext;
   private readonly views = new Set<vscode.Webview>();
   private currentModelLabel = 'Model: (auto)';
+  private lastResolvedModelId: string | undefined;
+  private lastResolvedModelName: string | undefined;
   
   // ========== 多任務管理 ==========
   private readonly tasks = new Map<string, TaskState>();  // chatId -> TaskState
   private activeChatId = '';  // 當前顯示的任務 ID
+  private historyBroadcastTimer?: NodeJS.Timeout;
+  private historyBroadcastAt = 0;
   
   private saveTimeout?: NodeJS.Timeout;
   private static instance?: BlueMonsterSession;
@@ -511,7 +518,9 @@ class BlueMonsterSession {
         // Fallback: 同步創建基本任務
         const chatId = this.createChatId();
         const usedNames = this.getUsedAgentNames();
-        const agentName = generateRandomName(usedNames);
+        const preferredNameRaw = vscode.workspace.getConfiguration(CONFIG_SECTION).get<string>('primaryAgentName', 'Jack');
+        const preferredName = String(preferredNameRaw || '').trim();
+        const agentName = preferredName && !usedNames.has(preferredName) ? preferredName : generateRandomName(usedNames);
         const agentEmoji = getNameEmoji(agentName);
         task = createTaskState(chatId, agentName, agentEmoji);
         this.tasks.set(chatId, task);
@@ -530,7 +539,9 @@ class BlueMonsterSession {
   private async createNewTask(): Promise<TaskState> {
     const chatId = this.createChatId();
     const usedNames = this.getUsedAgentNames();
-    const agentName = generateRandomName(usedNames);
+    const preferredNameRaw = vscode.workspace.getConfiguration(CONFIG_SECTION).get<string>('primaryAgentName', 'Jack');
+    const preferredName = String(preferredNameRaw || '').trim();
+    const agentName = preferredName && !usedNames.has(preferredName) ? preferredName : generateRandomName(usedNames);
     const agentEmoji = getNameEmoji(agentName);
     
     const task = createTaskState(chatId, agentName, agentEmoji);
@@ -539,6 +550,9 @@ class BlueMonsterSession {
     
     // 同步建立任務資料夾（確保 SDK 任務執行前資料夾已準備好）
     await this.setupTaskFolderAsync(task);
+
+    // If the task list is open, keep it updated.
+    this.scheduleHistoryBroadcast(0);
     
     return task;
   }
@@ -575,6 +589,30 @@ class BlueMonsterSession {
       this.broadcast({ type: 'activity', status: task.activityStatus, lines: [...task.activityLines] });
     }
     return true;
+  }
+
+  private scheduleHistoryBroadcast(delayMs: number = 250): void {
+    if (this.views.size === 0) {
+      return;
+    }
+    const now = Date.now();
+    if (delayMs <= 0 && now - this.historyBroadcastAt > 800) {
+      this.historyBroadcastAt = now;
+      void this.getChatHistoriesWithActiveTasks('').then((histories) => {
+        this.broadcast({ type: 'chatHistories', histories });
+      }).catch(() => undefined);
+      return;
+    }
+    if (this.historyBroadcastTimer) {
+      clearTimeout(this.historyBroadcastTimer);
+    }
+    this.historyBroadcastTimer = setTimeout(() => {
+      this.historyBroadcastTimer = undefined;
+      this.historyBroadcastAt = Date.now();
+      void this.getChatHistoriesWithActiveTasks('').then((histories) => {
+        this.broadcast({ type: 'chatHistories', histories });
+      }).catch(() => undefined);
+    }, Math.max(50, delayMs));
   }
 
   // 為了向後兼容，提供舊的屬性存取方式
@@ -854,6 +892,8 @@ class BlueMonsterSession {
   private setBusy(value: boolean) {
     this.busy = value;
     this.broadcast({ type: 'busy', value });
+    // Keep the task list status (busy/waiting) fresh when the panel is open.
+    this.scheduleHistoryBroadcast(500);
   }
 
   private setModelLabel(label: string) {
@@ -867,7 +907,7 @@ class BlueMonsterSession {
   private async refreshModelLabel(): Promise<void> {
     const model = await this.resolveModel();
     if (model) {
-      this.setModelLabel(`Model: ${model.name}`);
+      this.setModelLabel(`Model: ${model.name} (${model.id})`);
     } else {
       this.setModelLabel('Model: unavailable');
     }
@@ -1156,7 +1196,8 @@ class BlueMonsterSession {
    * 優先使用 exec 直接執行以捕獲輸出，同時也在終端機顯示
    */
   private async runTerminalCommandWithResult(command: string, cwd?: string): Promise<string> {
-    const confirmed = await this.confirmTerminalCommand(command, cwd);
+    const workingDir = cwd || this.currentTask.taskFolder || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const confirmed = await this.confirmTerminalCommand(command, workingDir);
     if (!confirmed) {
       this.addMessage('system', 'Terminal command cancelled.');
       return 'Terminal command cancelled.';
@@ -1165,8 +1206,7 @@ class BlueMonsterSession {
     this.appendThinking('Running terminal command...');
     this.recordActivityCommand(command);
     
-    const terminal = getTerminal(cwd);
-    const workingDir = cwd || this.currentTask.taskFolder || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const terminal = getTerminal(workingDir);
 
     const preview = command.length > 120 ? `${command.slice(0, 120)}...` : command;
     const cwdLabel = workingDir ? `\n📁 ${workingDir}` : '';
@@ -1783,6 +1823,108 @@ class BlueMonsterSession {
   // ============================================================
 
   /**
+   * 設定目前任務的工作資料夾（同時會影響 prompt 注入的 <current_working_directory>）
+   * - UFO 可用此方法把 BlueMonster 指向 UFO 任務資料夾
+   */
+  async setTaskFolder(taskFolderPath: string): Promise<string> {
+    const raw = String(taskFolderPath || '').trim();
+    if (!raw) {
+      return 'No task folder provided.';
+    }
+
+    const resolved = this.resolvePath(raw);
+    try {
+      await vscode.workspace.fs.createDirectory(vscode.Uri.file(resolved));
+    } catch {}
+
+    this.currentTask.taskFolder = resolved;
+    this.addMessage('system', `📁 Working directory set:\n${resolved}`);
+    return `Task folder set: ${resolved}`;
+  }
+
+  /**
+   * External entrypoint: append a non-LLM system note to the current task.
+   * Used by UFO to inject preview URLs / delivery info.
+   */
+  addSystemNote(text: string): void {
+    const t = String(text || '').trim();
+    if (!t) return;
+    this.addMessage('system', t);
+  }
+
+  /**
+   * External entrypoint: create/switch to a task seeded by UFO.
+   * - Ensures the task appears in the task list immediately (even before messages exist).
+   */
+  async createExternalTask(externalTaskId: string, taskFolderPath: string, title?: string): Promise<{ chatId: string }> {
+    const extId = String(externalTaskId || '').trim();
+    const rawFolder = String(taskFolderPath || '').trim();
+    if (!extId) {
+      throw new Error('No externalTaskId provided.');
+    }
+    if (!rawFolder) {
+      throw new Error('No taskFolderPath provided.');
+    }
+
+    const resolvedFolder = this.resolvePath(rawFolder);
+    try {
+      await vscode.workspace.fs.createDirectory(vscode.Uri.file(resolvedFolder));
+    } catch {}
+
+    // Reuse existing task if the same external id already exists.
+    for (const t of this.tasks.values()) {
+      if (t.displayTaskId === extId) {
+        t.taskFolder = resolvedFolder;
+        if (title && String(title).trim()) {
+          t.displayTitle = String(title).trim();
+        }
+        this.activeChatId = t.chatId;
+        this.broadcast({ type: 'history', messages: t.messages });
+        this.broadcast({ type: 'busy', value: t.busy });
+        this.broadcast({ type: 'agentInfo', name: t.agentName, emoji: t.agentEmoji, requestCount: t.requestCount });
+        if (t.activityLines.length > 0 || t.activityStatus !== 'Idle') {
+          this.broadcast({ type: 'activity', status: t.activityStatus, lines: [...t.activityLines] });
+        }
+        this.scheduleHistoryBroadcast(0);
+        return { chatId: t.chatId };
+      }
+    }
+
+    const usedNames = this.getUsedAgentNames();
+    const preferredNameRaw = vscode.workspace.getConfiguration(CONFIG_SECTION).get<string>('primaryAgentName', 'Jack');
+    const preferredName = String(preferredNameRaw || '').trim();
+    const agentName = preferredName && !usedNames.has(preferredName) ? preferredName : generateRandomName(usedNames);
+    const agentEmoji = getNameEmoji(agentName);
+
+    const safeId = extId.replace(/[^a-zA-Z0-9\\-_.]/g, '-').slice(0, 80);
+    let chatId = `ufo-${safeId}`;
+    if (this.tasks.has(chatId)) {
+      chatId = `ufo-${safeId}-${Date.now().toString(36)}`;
+    }
+
+    const task = createTaskState(chatId, agentName, agentEmoji);
+    task.displayTaskId = extId;
+    const t = String(title || '').trim();
+    if (t) {
+      task.displayTitle = t;
+    } else {
+      task.displayTitle = path.basename(resolvedFolder) || 'UFO Task';
+    }
+    task.taskFolder = resolvedFolder;
+    this.tasks.set(chatId, task);
+    this.activeChatId = chatId;
+
+    // Update UI + task list.
+    this.broadcast({ type: 'history', messages: task.messages });
+    this.broadcast({ type: 'busy', value: task.busy });
+    this.broadcast({ type: 'agentInfo', name: task.agentName, emoji: task.agentEmoji, requestCount: task.requestCount });
+    this.broadcast({ type: 'toast', text: `${task.agentEmoji} ${task.agentName} 已加入任務清單：${task.displayTitle}` });
+    this.scheduleHistoryBroadcast(0);
+
+    return { chatId };
+  }
+
+  /**
    * 取得所有待處理的確認請求
    * 回傳格式：[{ id, command, category, timestamp, age }]
    */
@@ -1852,17 +1994,36 @@ class BlueMonsterSession {
     busy: boolean; 
     mode: string; 
     model: string; 
+    modelId?: string;
+    modelName?: string;
     pendingConfirmations: number;
     chatId: string;
     messageCount: number;
+    agentName: string;
+    agentEmoji: string;
+    taskFolder?: string;
+    activityStatus: string;
+    activityLines: string[];
+    tasksTotal: number;
+    tasksRunning: number;
   } {
+    const sdk = copilotSDK.getStatus();
     return {
       busy: this.busy,
       mode: this.currentMode,
       model: this.currentModelLabel,
+      modelId: this.lastResolvedModelId,
+      modelName: this.lastResolvedModelName,
       pendingConfirmations: this.pendingConfirmations.size,
       chatId: this.currentChatId,
-      messageCount: this.messages.length
+      messageCount: this.messages.length,
+      agentName: this.currentAgentName,
+      agentEmoji: this.currentAgentEmoji,
+      taskFolder: this.currentTask.taskFolder,
+      activityStatus: this.activityStatus,
+      activityLines: [...this.activityLines],
+      tasksTotal: sdk.total,
+      tasksRunning: sdk.running,
     };
   }
 
@@ -1888,11 +2049,17 @@ class BlueMonsterSession {
       if (preferredModelId) {
         const matches = await vscode.lm.selectChatModels({ vendor: 'copilot', id: preferredModelId });
         if (matches.length > 0) {
+          this.lastResolvedModelId = matches[0].id;
+          this.lastResolvedModelName = matches[0].name;
           return matches[0];
         }
       }
 
       const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+      if (models[0]) {
+        this.lastResolvedModelId = models[0].id;
+        this.lastResolvedModelName = models[0].name;
+      }
       return models[0];
     } catch (err) {
       console.warn('[BlueMonster] Failed to resolve model:', err);
@@ -2623,7 +2790,7 @@ class BlueMonsterSession {
     mode?: string,
     images?: Array<{dataUrl: string, mimeType: string, name: string}>,
     files?: Array<{name: string, path: string}>
-  ) {
+  ): Promise<ChatResult | undefined> {
     if (this.busy) {
       this.addMessage('system', 'BlueMonster is busy. Please wait.');
       return;
@@ -2745,16 +2912,45 @@ class BlueMonsterSession {
         return;
       }
       this.addAssistantResult(response);
+      return response;
     } catch (error) {
       if (this.stopRequested) {
         return;
       }
       this.addMessage('system', `Error: ${String(error)}`);
+      return;
     } finally {
       this.stopThinking();
       this.stopWorking();
       this.setBusy(false);
     }
+  }
+
+  /**
+   * External entrypoint: run a message and return assistant output + pending confirmations.
+   * Used by UFO to bridge Telegram <-> BlueMonster without relying on the webview UI.
+   */
+  async sendMessageExternal(
+    text: string,
+    mode?: 'chat' | 'agent' | 'agent-full'
+  ): Promise<{
+    text: string;
+    pendingConfirmations: Array<{ id: string; command: string; category: string; timestamp: number; age: number }>;
+  }> {
+    const before = this.messages.length;
+    const result = await this.handleUserMessage(text, mode, [], []);
+    const assistantText =
+      (result?.text || '').trim() ||
+      this.messages
+        .slice(before)
+        .filter((m) => m.role === 'assistant' && typeof m.text === 'string')
+        .map((m) => m.text)
+        .join('')
+        .trim();
+    return {
+      text: assistantText,
+      pendingConfirmations: this.getPendingConfirmations(),
+    };
   }
 
   async handleMessage(message: any) {
@@ -3352,17 +3548,17 @@ class BlueMonsterSession {
     // 將活動任務轉換為歷史格式
     const activeTasks: any[] = [];
     for (const task of this.tasks.values()) {
-      if (task.messages.length === 0) continue; // 跳過空任務
+      if (task.messages.length === 0 && !task.displayTaskId && !task.displayTitle) continue; // 跳過空任務（除非是外部注入的任務）
       
       const firstUserMsg = task.messages.find((m) => m.role === 'user' && m.text);
-      const title = firstUserMsg?.text?.substring(0, 50) || 'New Task';
+      const title = task.displayTitle || firstUserMsg?.text?.substring(0, 50) || 'New Task';
       const dateObj = new Date(task.createdAt);
       const dateStr = dateObj.toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }) + 
         ' ' + dateObj.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
       
       activeTasks.push({
         id: task.chatId,
-        taskId: '#LIVE', // 特殊標記：活動中的任務
+        taskId: task.displayTaskId || '#LIVE', // 特殊標記：活動中的任務
         agentName: task.agentName,
         agentEmoji: task.agentEmoji,
         title,
@@ -3948,11 +4144,23 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('blueMonster.getStatus', () => session.getStatus()),
     vscode.commands.registerCommand('blueMonster.getPendingConfirmations', () => session.getPendingConfirmations()),
     vscode.commands.registerCommand('blueMonster.respondToConfirmation', 
-      (id: string, action: 'run' | 'sessionAllow' | 'cancel' | 'custom', customText?: string) => 
+      (id: string, action: 'run' | 'sessionAllow' | 'projectAllow' | 'cancel' | 'custom', customText?: string) => 
         session.respondToConfirmation(id, action, customText)
     ),
     vscode.commands.registerCommand('blueMonster.sendMessage', 
       (text: string, mode?: 'chat' | 'agent' | 'agent-full') => session.sendMessage(text, mode)
+    ),
+    vscode.commands.registerCommand('blueMonster.sendMessageExternal',
+      (text: string, mode?: 'chat' | 'agent' | 'agent-full') => session.sendMessageExternal(text, mode)
+    ),
+    vscode.commands.registerCommand('blueMonster.addSystemNote',
+      (text: string) => session.addSystemNote(text)
+    ),
+    vscode.commands.registerCommand('blueMonster.setTaskFolder',
+      (folderPath: string) => session.setTaskFolder(folderPath)
+    ),
+    vscode.commands.registerCommand('blueMonster.createExternalTask',
+      (externalTaskId: string, taskFolderPath: string, title?: string) => session.createExternalTask(externalTaskId, taskFolderPath, title)
     ),
     vscode.commands.registerCommand('blueMonster.mcp.startAll', () => {
       mcpManager.startAll(getMcpServers());

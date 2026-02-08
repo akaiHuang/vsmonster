@@ -61,7 +61,7 @@ ingress:
 ```
 
 **綁定網域**：
-- **網域**：`ufo.fawstudio.com`
+- **網域**：`your-domain.com`
 - **指向**：`http://localhost:3000`
 
 ---

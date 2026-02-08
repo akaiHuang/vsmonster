@@ -4,6 +4,7 @@ interface DashboardState {
   connected: boolean;
   connectionState: "connected" | "reconnecting" | "disconnected";
   gatewayUrl: string;
+  gatewayHttpUrl: string;
   publicUrl: string;
   envAutoSync: boolean;
   tasksRoot: string;
@@ -14,6 +15,20 @@ interface DashboardState {
     done: number;
     total: number;
   };
+  blueMonsterTasks: {
+    count: number;
+    recent: Array<{ taskId: string; updatedAt: number }>;
+  };
+  taskItems: Array<{
+    taskId: string;
+    title: string;
+    status: "pending" | "approved" | "in-progress" | "done";
+    taskDir: string;
+    agentName?: string;
+    agentEmoji?: string;
+    createdAt: number;
+    updatedAt: number;
+  }>;
   models: {
     chat: string;
     spec: string;
@@ -27,435 +42,902 @@ interface DashboardState {
   lastUpdated: string;
 }
 
-function getNonce(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let value = "";
-  for (let i = 0; i < 32; i += 1) {
-    value += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return value;
-}
-
 export function getDashboardHtml(
   webview: vscode.Webview,
-  state: DashboardState
+  state: DashboardState,
+  extensionUri: vscode.Uri
 ): string {
-  const nonce = getNonce();
-  const csp = [
-    "default-src 'none'",
-    `style-src ${webview.cspSource} 'unsafe-inline'`,
-    `script-src 'nonce-${nonce}'`
-  ].join("; ");
+  const scriptUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, "media", "dashboard.js")
+  );
 
   return `<!doctype html>
 <html lang="zh-Hant">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="${csp}" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>UFO Control Center</title>
+    <title>UFO Dashboard</title>
     <style>
       :root {
-        color-scheme: light dark;
-        /* 8-bit 像素風格配色 */
-        --bg: #1a1c23;
-        --panel: #252834;
-        --panel-highlight: #2f3546;
-        --border-dark: #1a1c23;
-        --border-light: #3d4153;
-        --text: #f0f0f0;
-        --text-bright: #ffffff;
-        --muted: #8b92a8;
-        --accent: #ff6b9d;
-        --accent-2: #4ecdc4;
-        --success: #95e1d3;
-        --warning: #ffd93d;
-        --danger: #ff6b6b;
-        --shadow: rgba(0, 0, 0, 0.4);
+        color-scheme: dark;
+        --bg: #0f0f0f;
+        --card: #1a1a1a;
+        --border: #2a2a2a;
+        --hover: #252525;
+        --monster: #8b5cf6;
+        --monster-dim: #7c3aed;
+        --monster-light: #a78bfa;
+        --cyan: #06b6d4;
+        --green: #22c55e;
+        --amber: #f59e0b;
+        --red: #ef4444;
+        --gray: #6b7280;
+        --text: #ffffff;
+        --text-2: #d1d5db;
+        --text-3: #9ca3af;
+        --text-4: #6b7280;
       }
-      
-      @keyframes pixel-pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.7; }
-      }
-      
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
       body {
-        font-family: 'Courier New', monospace;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         background: var(--bg);
         color: var(--text);
-        margin: 0;
-        padding: 16px;
+        padding: 12px;
         font-size: 13px;
+        -webkit-font-smoothing: antialiased;
       }
-      
+
+      /* Header */
       .header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 20px;
-        padding: 12px;
-        background: var(--panel);
-        border: 3px solid var(--border-dark);
-        box-shadow: 4px 4px 0 var(--border-dark);
+        margin-bottom: 12px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border);
       }
-      
-      .title {
-        font-size: 16px;
-        font-weight: 700;
-        letter-spacing: 2px;
-        text-transform: uppercase;
-        color: var(--text-bright);
-        text-shadow: 2px 2px 0 var(--border-dark);
-      }
-      
-      .status-pill {
-        padding: 6px 12px;
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-        background: var(--panel-highlight);
-        border: 2px solid var(--border-dark);
-        box-shadow: 2px 2px 0 var(--border-dark);
-        letter-spacing: 1px;
-      }
-      
-      .status-pill.connected {
-        color: var(--success);
-        background: rgba(149, 225, 211, 0.15);
-        border-color: var(--success);
-        animation: pixel-pulse 2s ease-in-out infinite;
-      }
-      
-      .status-pill.reconnecting {
-        color: var(--warning);
-        background: rgba(255, 217, 61, 0.15);
-        border-color: var(--warning);
-      }
-      
-      .status-pill.disconnected {
-        color: var(--danger);
-        background: rgba(255, 107, 107, 0.15);
-        border-color: var(--danger);
-      }
-      
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 16px;
-        margin-bottom: 16px;
-      }
-      
-      .card {
-        background: var(--panel);
-        border: 3px solid var(--border-dark);
-        box-shadow: 4px 4px 0 var(--border-dark);
-        padding: 16px;
+      .header-title {
+        font-size: 15px;
+        font-weight: 600;
         display: flex;
-        flex-direction: column;
-        gap: 12px;
-        position: relative;
+        align-items: center;
+        gap: 6px;
       }
-      
-      .card::before {
-        content: '';
-        position: absolute;
-        top: -3px;
-        left: -3px;
-        right: -3px;
-        height: 3px;
-        background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
-      }
-      
-      .card h3 {
-        margin: 0;
+      .status-pill {
+        padding: 3px 10px;
         font-size: 11px;
-        color: var(--accent);
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        font-weight: 700;
-        padding-bottom: 8px;
-        border-bottom: 2px solid var(--border-light);
+        font-weight: 600;
+        border-radius: 12px;
+        letter-spacing: 0.3px;
       }
-      
-      .card .value {
+      .status-pill.connected { color: var(--green); background: rgba(34,197,94,0.15); }
+      .status-pill.reconnecting { color: var(--amber); background: rgba(245,158,11,0.15); }
+      .status-pill.disconnected { color: var(--red); background: rgba(239,68,68,0.15); }
+
+      /* Tab Bar */
+      .tab-bar {
+        display: flex;
+        gap: 2px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 3px;
+        margin-bottom: 12px;
+      }
+      .tab {
+        flex: 1;
+        padding: 6px 4px;
+        font-size: 11px;
+        font-weight: 500;
+        background: none;
+        border: none;
+        border-radius: 6px;
+        color: var(--text-3);
+        cursor: pointer;
+        transition: all 0.15s;
+        font-family: inherit;
+      }
+      .tab:hover { color: var(--text); background: var(--hover); }
+      .tab.active { color: var(--text); background: var(--monster); }
+
+      /* Tab Content */
+      .tab-content { display: none; }
+      .tab-content.active { display: block; }
+
+      /* Cards */
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 10px;
+      }
+      .card-header {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-2);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 12px;
+      }
+
+      /* Stats Grid */
+      .stats-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .stat-box {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+        text-align: center;
+      }
+      .stat-value {
         font-size: 20px;
         font-weight: 700;
-        color: var(--text-bright);
+        color: var(--text);
       }
-      
-      .muted {
-        color: var(--muted);
+      .stat-label {
         font-size: 10px;
-        font-family: monospace;
-      }
-      
-      .actions {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 10px;
-        padding: 16px;
-        background: var(--panel);
-        border: 3px solid var(--border-dark);
-        box-shadow: 4px 4px 0 var(--border-dark);
-        margin-bottom: 16px;
-      }
-      
-      .actions::before {
-        content: '⚡ QUICK ACTIONS';
-        position: absolute;
-        top: -12px;
-        left: 12px;
-        background: var(--panel);
-        padding: 0 8px;
-        font-size: 10px;
-        font-weight: 700;
-        color: var(--warning);
-        letter-spacing: 1px;
-      }
-      
-      button.action {
-        background: var(--panel-highlight);
-        color: var(--text-bright);
-        border: 3px solid var(--border-light);
-        padding: 10px 14px;
-        font-size: 11px;
-        font-weight: 700;
-        font-family: 'Courier New', monospace;
+        color: var(--text-4);
+        margin-top: 2px;
         text-transform: uppercase;
-        letter-spacing: 1px;
+        letter-spacing: 0.05em;
+      }
+
+      /* Action Buttons */
+      .actions-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 6px;
+      }
+      .action-btn {
+        padding: 8px 4px;
+        font-size: 11px;
+        font-weight: 500;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text-2);
         cursor: pointer;
-        transition: all 0.1s ease;
-        box-shadow: 2px 2px 0 var(--border-dark);
-        position: relative;
+        transition: all 0.15s;
+        font-family: inherit;
+        text-align: center;
       }
-      
-      button.action:hover {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: var(--bg);
-        transform: translate(-2px, -2px);
-        box-shadow: 4px 4px 0 var(--border-dark);
-      }
-      
-      button.action:active {
-        transform: translate(0, 0);
-        box-shadow: 1px 1px 0 var(--border-dark);
-      }
-      
-      .task-row {
+      .action-btn:hover { border-color: var(--monster); color: var(--text); background: var(--hover); }
+
+      /* List rows */
+      .list-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        font-size: 13px;
-        padding: 6px 0;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border);
       }
-      
-      .task-row span:last-child {
-        font-weight: 700;
-        font-size: 16px;
-        color: var(--text-bright);
-      }
-      
-      .tag {
-        padding: 4px 10px;
-        font-size: 10px;
-        font-weight: 700;
-        border: 2px solid;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-      }
-      
-      .tag.pending {
-        color: var(--warning);
-        background: rgba(255, 217, 61, 0.15);
-        border-color: var(--warning);
-      }
-      
-      .tag.approved {
-        color: var(--accent-2);
-        background: rgba(78, 205, 196, 0.15);
-        border-color: var(--accent-2);
-      }
-      
-      .tag.in-progress {
-        color: var(--accent);
-        background: rgba(255, 107, 157, 0.15);
-        border-color: var(--accent);
-        animation: pixel-pulse 2s ease-in-out infinite;
-      }
-      
-      .tag.done {
-        color: var(--success);
-        background: rgba(149, 225, 211, 0.15);
-        border-color: var(--success);
-      }
-      
-      .divider {
-        height: 2px;
-        background: var(--border-light);
-        margin: 8px 0;
-      }
-      
-      .list {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-      
-      .list > div {
+      .list-row:last-child { border-bottom: none; }
+      .list-label {
         display: flex;
         align-items: center;
         gap: 8px;
+        font-size: 13px;
+        color: var(--text-2);
+      }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      /* Badges */
+      .badge {
+        padding: 2px 8px;
+        font-size: 10px;
+        font-weight: 600;
+        border-radius: 4px;
+        letter-spacing: 0.3px;
+      }
+      .badge-green { color: #4ade80; background: rgba(34,197,94,0.2); }
+      .badge-red { color: #f87171; background: rgba(239,68,68,0.2); }
+      .badge-amber { color: #fbbf24; background: rgba(245,158,11,0.2); }
+      .badge-gray { color: #9ca3af; background: rgba(107,114,128,0.2); }
+      .badge-purple { color: var(--monster-light); background: rgba(139,92,246,0.2); }
+      .badge-cyan { color: #22d3ee; background: rgba(6,182,212,0.2); }
+
+      .count-badge {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--text);
+      }
+
+      .muted { font-size: 11px; color: var(--text-4); }
+      .url-text {
+        font-size: 11px;
+        color: var(--text-4);
+        word-break: break-all;
+        margin-top: 2px;
+      }
+
+      /* Form elements (Settings tab) */
+      .field { margin-bottom: 14px; }
+      .field-label {
+        display: block;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-2);
+        margin-bottom: 4px;
+      }
+      .field-desc {
+        font-size: 11px;
+        color: var(--text-4);
+        margin-bottom: 6px;
+      }
+      .select, .textarea {
+        width: 100%;
+        padding: 8px 10px;
+        font-size: 12px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        font-family: inherit;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+      .select:focus, .textarea:focus { border-color: var(--monster); }
+      .textarea {
+        min-height: 80px;
+        resize: vertical;
+        font-family: 'SF Mono', Monaco, 'Courier New', monospace;
         font-size: 12px;
       }
-      
-      .badge {
-        font-size: 9px;
-        padding: 4px 8px;
-        border: 2px solid;
-        font-weight: 700;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        margin-left: auto;
+      option, optgroup { background: var(--card); color: var(--text); }
+
+      .btn-primary {
+        width: 100%;
+        padding: 10px;
+        font-size: 13px;
+        font-weight: 600;
+        background: var(--monster);
+        border: none;
+        border-radius: 8px;
+        color: var(--text);
+        cursor: pointer;
+        transition: all 0.15s;
+        font-family: inherit;
       }
-      
-      .badge.ok {
-        color: var(--success);
-        background: rgba(149, 225, 211, 0.15);
-        border-color: var(--success);
+      .btn-primary:hover { background: var(--monster-dim); }
+      .btn-primary:disabled { opacity: 0.5; cursor: default; }
+
+      .save-status {
+        display: inline-block;
+        margin-left: 8px;
+        font-size: 12px;
+        font-weight: 500;
       }
-      
-      .badge.missing {
-        color: var(--danger);
-        background: rgba(255, 107, 107, 0.15);
-        border-color: var(--danger);
-      }
-      
+      .save-status.saved { color: var(--green); }
+      .save-status.error { color: var(--red); }
+
+      /* Footer */
       .footer {
-        margin-top: 16px;
-        padding: 8px;
+        margin-top: 12px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border);
         font-size: 10px;
-        color: var(--muted);
+        color: var(--text-4);
         text-align: center;
-        border-top: 2px solid var(--border-light);
-        font-family: monospace;
       }
+
+      /* Sub-tabs (Settings BlueMonster/UFO) */
+      .sub-tab-bar {
+        display: flex;
+        gap: 2px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 3px;
+        margin-bottom: 12px;
+      }
+      .sub-tab {
+        flex: 1;
+        padding: 7px 8px;
+        font-size: 12px;
+        font-weight: 500;
+        background: none;
+        border: none;
+        border-radius: 6px;
+        color: var(--text-3);
+        cursor: pointer;
+        transition: all 0.15s;
+        font-family: inherit;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+      }
+      .sub-tab:hover { color: var(--text); background: var(--hover); }
+      .sub-tab.active { color: var(--text); background: var(--monster); }
+      .sub-panel { display: none; }
+      .sub-panel.active { display: block; }
+
+      /* Task model row */
+      .task-model-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .task-model-row:last-child { border-bottom: none; }
+      .task-model-info { flex: 1; min-width: 0; }
+      .task-model-name { font-size: 12px; font-weight: 500; color: var(--text-2); }
+      .task-model-desc { font-size: 10px; color: var(--text-4); }
+      .task-model-row .select { width: 130px; flex-shrink: 0; font-size: 11px; padding: 6px 8px; }
+
+      /* Loading / Error */
+      .loading { text-align: center; padding: 24px 0; color: var(--text-3); }
+      .error-msg { text-align: center; padding: 16px; color: var(--red); font-size: 12px; }
+
+      /* Console tab */
+      .console-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+      }
+      .console-toolbar-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-2);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .console-toolbar-btn {
+        padding: 4px 10px;
+        font-size: 10px;
+        font-weight: 500;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text-3);
+        cursor: pointer;
+        font-family: inherit;
+        transition: all 0.15s;
+      }
+      .console-toolbar-btn:hover { color: var(--text); border-color: var(--monster); }
+      .console-log {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        height: calc(100vh - 140px);
+        overflow-y: auto;
+        padding: 8px;
+        font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+        font-size: 11px;
+        line-height: 1.6;
+      }
+      .console-log::-webkit-scrollbar { width: 6px; }
+      .console-log::-webkit-scrollbar-track { background: transparent; }
+      .console-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+      .log-entry {
+        padding: 2px 4px;
+        border-radius: 3px;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .log-entry:hover { background: var(--hover); }
+      .log-time { color: var(--text-4); margin-right: 6px; }
+      .log-tag { font-weight: 600; margin-right: 6px; }
+      .log-tag.thinking { color: var(--monster-light); }
+      .log-tag.tool { color: var(--cyan); }
+      .log-tag.response { color: var(--green); }
+      .log-tag.error { color: var(--red); }
+      .log-tag.info { color: var(--amber); }
+      .log-tag.intent { color: var(--monster); }
+      .log-msg { color: var(--text-2); }
+      .console-empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--text-4);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 12px;
+      }
+
+      /* Task Interview Modal */
+      .modal {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .modal[hidden] { display: none; }
+      .modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0,0,0,0.55);
+      }
+      .modal-card {
+        position: relative;
+        width: min(720px, calc(100vw - 24px));
+        height: min(560px, calc(100vh - 24px));
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        box-shadow: 0 18px 60px rgba(0,0,0,0.55);
+      }
+      .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .modal-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-2);
+      }
+      .modal-close {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text-3);
+        border-radius: 8px;
+        padding: 4px 8px;
+        cursor: pointer;
+        font-size: 11px;
+      }
+      .modal-close:hover { border-color: var(--monster); color: var(--text); }
+      .modal-body {
+        flex: 1;
+        overflow: auto;
+        padding: 12px;
+      }
+      .chat-msg {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .chat-msg.user { justify-content: flex-end; }
+      .chat-bubble {
+        max-width: 85%;
+        padding: 10px 10px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #141414;
+        color: var(--text-2);
+        font-size: 12px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .chat-msg.user .chat-bubble {
+        background: rgba(139,92,246,0.12);
+        border-color: rgba(139,92,246,0.35);
+        color: var(--text);
+      }
+      .modal-footer {
+        border-top: 1px solid var(--border);
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: stretch;
+      }
+      .modal-steps {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .modal-step {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+        padding: 4px 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: rgba(255,255,255,0.03);
+      }
+      .modal-step-num {
+        width: 16px;
+        height: 16px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--text);
+        background: rgba(139,92,246,0.22);
+        border: 1px solid rgba(139,92,246,0.35);
+        position: relative;
+        overflow: hidden;
+      }
+      .modal-step-num .num { display: inline-block; }
+      .modal-step-num svg {
+        position: absolute;
+        inset: 0;
+        width: 16px;
+        height: 16px;
+        padding: 2px;
+        opacity: 0;
+      }
+      .modal-step.done .modal-step-num .num { opacity: 0; }
+      .modal-step.done .modal-step-num svg { opacity: 1; }
+      .modal-step.done .modal-step-num path {
+        stroke-dasharray: 30;
+        stroke-dashoffset: 30;
+        animation: dash 0.45s ease-out forwards;
+      }
+      @keyframes dash { to { stroke-dashoffset: 0; } }
+      }
+      .modal-input-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .modal-input {
+        flex: 1;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .modal-input input {
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: #101010;
+        color: var(--text);
+        outline: none;
+        font-size: 12px;
+      }
+      .modal-input input:focus { border-color: var(--monster); }
+      .btn {
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text-2);
+        cursor: pointer;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .btn:hover { border-color: var(--monster); color: var(--text); background: var(--hover); }
+      .btn.primary { background: rgba(139,92,246,0.18); border-color: rgba(139,92,246,0.35); color: var(--text); }
+      .btn.primary:hover { background: rgba(139,92,246,0.26); }
+      .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+      .modal-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: flex-start;
+      }
+      .modal-working {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .spinner {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 2px solid rgba(255,255,255,0.15);
+        border-top-color: var(--monster);
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      /* Tasks tab - cards */
+      .task-sections { margin-top: 10px; }
+      .task-section {
+        margin-top: 10px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--card);
+      }
+      .task-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        cursor: pointer;
+        user-select: none;
+        border-bottom: 1px solid var(--border);
+        background: rgba(255,255,255,0.02);
+      }
+      .task-section-header:hover { background: var(--hover); }
+      .task-section-title {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-2);
+      }
+      .chev {
+        width: 10px;
+        height: 10px;
+        border-right: 2px solid var(--text-4);
+        border-bottom: 2px solid var(--text-4);
+        transform: rotate(-45deg);
+        transition: transform 0.15s;
+      }
+      .task-section[data-open="true"] .chev { transform: rotate(45deg); }
+      .task-cards { padding: 10px 12px; display: none; }
+      .task-section[data-open="true"] .task-cards { display: block; }
+      .task-card {
+        position: relative;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 10px;
+        background: #141414;
+        margin-bottom: 10px;
+        cursor: pointer;
+      }
+      .task-card:last-child { margin-bottom: 0; }
+      .task-card-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 4px; padding-right: 22px; }
+      .task-card-sub { font-size: 10px; color: var(--text-4); padding-right: 22px; }
+      .task-card-meta { font-size: 10px; color: var(--text-4); word-break: break-all; display: none; }
+      .task-card-actions { margin-top: 8px; display: none; gap: 8px; flex-wrap: wrap; }
+      .task-card[data-open="true"] .task-card-meta { display: block; }
+      .task-card[data-open="true"] .task-card-actions { display: flex; }
+      .task-card:hover { border-color: rgba(139,92,246,0.35); }
+      .task-status-light {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        box-shadow: 0 0 10px rgba(34,197,94,0.55);
+        background: var(--green);
+      }
+      .task-status-light.pending { background: var(--gray); box-shadow: 0 0 10px rgba(107,114,128,0.45); }
+      .task-status-light.approved { background: var(--monster); box-shadow: 0 0 10px rgba(139,92,246,0.55); }
+      .task-status-light.running { background: var(--cyan); box-shadow: 0 0 10px rgba(6,182,212,0.55); }
+      .task-status-light.done { background: var(--green); box-shadow: 0 0 10px rgba(34,197,94,0.55); }
     </style>
   </head>
   <body>
+    <!-- Header -->
     <div class="header">
-      <div class="title">👾 UFO CONTROL</div>
+      <div class="header-title">
+        <span>👾</span> UFO
+      </div>
       <div class="status-pill ${state.connectionState}" id="gatewayStatus">
-        ${state.connectionState === "connected" ? "● ONLINE" : state.connectionState === "reconnecting" ? "◐ SYNC..." : "○ OFFLINE"}
+        ${state.connectionState === "connected" ? "Online" : state.connectionState === "reconnecting" ? "Syncing..." : "Offline"}
       </div>
     </div>
 
-    <div class="actions" style="position: relative;">
-      <button class="action" data-command="ufo.createTaskSpec">+ Task</button>
-      <button class="action" data-command="ufo.refreshQueue">↻ Refresh</button>
-      <button class="action" data-command="ufo.openTools">⚙ Tools</button>
-      <button class="action" data-command="ufo.openTasksRoot">📁 Folder</button>
-      <button class="action" data-command="ufo.openSettings">⚡ Config</button>
-      <button class="action" data-command="ufo.syncEnv">🔄 Sync</button>
+    <!-- Tab Bar -->
+    <div class="tab-bar">
+      <button class="tab active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="tasks">Tasks</button>
+      <button class="tab" data-tab="console">Console</button>
+      <button class="tab" data-tab="settings">Settings</button>
+      <button class="tab" data-tab="channels">Channels</button>
     </div>
 
-    <div class="grid">
+    <!-- Overview Tab -->
+    <div id="tab-overview" class="tab-content active">
       <div class="card">
-        <h3>📦 Tasks</h3>
-        <div class="task-row"><span class="tag pending">Pending</span><span id="countPending">${state.tasks.pending}</span></div>
-        <div class="task-row"><span class="tag approved">Approved</span><span id="countApproved">${state.tasks.approved}</span></div>
-        <div class="task-row"><span class="tag in-progress">Running</span><span id="countProgress">${state.tasks.inProgress}</span></div>
-        <div class="task-row"><span class="tag done">Done</span><span id="countDone">${state.tasks.done}</span></div>
-        <div class="divider"></div>
-        <div class="task-row"><span style="text-transform: uppercase; letter-spacing: 1px; font-weight: 700;">Total</span><span id="countTotal">${state.tasks.total}</span></div>
-        <div class="muted" id="tasksRoot">${state.tasksRoot}</div>
+        <div class="card-header">Connection</div>
+        <div class="list-row">
+          <span class="list-label">Gateway</span>
+          <span class="badge ${state.connectionState === "connected" ? "badge-green" : "badge-red"}" id="gatewayBadge">
+            ${state.connectionState === "connected" ? "OK" : state.connectionState === "reconnecting" ? "WAIT" : "DOWN"}
+          </span>
+        </div>
+        <div class="url-text" id="gatewayUrlText">${state.gatewayUrl}</div>
+        <div class="list-row" style="margin-top: 4px">
+          <span class="list-label">Public URL</span>
+          <span class="badge ${state.publicUrl ? "badge-green" : "badge-gray"}" id="publicUrlBadge">${state.publicUrl ? "SET" : "NONE"}</span>
+        </div>
+        <div class="url-text" id="publicUrlText">${state.publicUrl || "\u2014"}</div>
       </div>
 
-      <div class="card">
-        <h3>🔌 Connection</h3>
-        <div class="list">
-          <div>Gateway <span class="badge ${state.connectionState === "connected" ? "ok" : "missing"}" id="gatewayBadge">${state.connectionState === "connected" ? "OK" : state.connectionState === "reconnecting" ? "WAIT" : "DOWN"}</span></div>
-          <div class="muted" id="gatewayUrl" style="padding-left: 0; margin-top: -4px;">${state.gatewayUrl}</div>
-          <div>Public <span class="badge ${state.publicUrl ? "ok" : "missing"}" id="publicUrlBadge">${state.publicUrl ? "SET" : "NONE"}</span></div>
-          <div class="muted" id="publicUrl" style="padding-left: 0; margin-top: -4px;">${state.publicUrl || "—"}</div>
-          <div>Auto-Sync <span class="badge ${state.envAutoSync ? "ok" : "missing"}" id="envSyncBadge">${state.envAutoSync ? "ON" : "OFF"}</span></div>
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-value" id="statPending">${state.tasks.pending}</div>
+          <div class="stat-label">Pending</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="statRunning" style="color: var(--cyan)">${state.tasks.inProgress}</div>
+          <div class="stat-label">Running</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="statDone" style="color: var(--green)">${state.tasks.done}</div>
+          <div class="stat-label">Done</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="statTotal">${state.tasks.total}</div>
+          <div class="stat-label">Total</div>
         </div>
       </div>
 
       <div class="card">
-        <h3>🤖 Models</h3>
-        <div class="list">
-          <div>Chat <span class="badge ok" id="modelChat">${state.models.chat}</span></div>
-          <div>Spec <span class="badge ok" id="modelSpec">${state.models.spec}</span></div>
-          <div>Opus <span class="badge ${state.models.opus ? "ok" : "missing"}" id="modelOpus">${state.models.opus || "—"}</span></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>📡 Channels</h3>
-        <div class="list">
-          <div>LINE <span class="badge ${state.channels.line ? "ok" : "missing"}" id="channelLine">${state.channels.line ? "READY" : "NONE"}</span></div>
-          <div>Telegram <span class="badge ${state.channels.telegram ? "ok" : "missing"}" id="channelTelegram">${state.channels.telegram ? "READY" : "NONE"}</span></div>
-          <div>Discord <span class="badge ${state.channels.discord ? "ok" : "missing"}" id="channelDiscord">${state.channels.discord ? "READY" : "NONE"}</span></div>
+        <div class="card-header">Quick Actions</div>
+        <div class="actions-grid">
+          <button class="action-btn" data-command="ufo.createTaskSpec">+ Task</button>
+          <button class="action-btn" data-command="ufo.refreshQueue">Refresh</button>
+          <button class="action-btn" data-command="ufo.openTools">Tools</button>
+          <button class="action-btn" data-command="ufo.openTasksRoot">Folder</button>
+          <button class="action-btn" data-command="ufo.openSettings">Config</button>
+          <button class="action-btn" data-command="ufo.syncEnv">Sync</button>
         </div>
       </div>
     </div>
 
-    <div class="footer" id="lastUpdated">⏱ ${state.lastUpdated}</div>
+    <!-- Tasks Tab -->
+    <div id="tab-tasks" class="tab-content">
+      <div class="card">
+        <div class="card-header">Task Summary</div>
+        <div class="list-row">
+          <span class="list-label"><span class="status-dot" style="background:var(--gray)"></span> Pending</span>
+          <span class="count-badge" id="countPending">${state.tasks.pending}</span>
+        </div>
+        <div class="list-row">
+          <span class="list-label"><span class="status-dot" style="background:var(--monster)"></span> Approved</span>
+          <span class="count-badge" id="countApproved">${state.tasks.approved}</span>
+        </div>
+        <div class="list-row">
+          <span class="list-label"><span class="status-dot" style="background:var(--cyan)"></span> Running</span>
+          <span class="count-badge" id="countProgress">${state.tasks.inProgress}</span>
+        </div>
+        <div class="list-row" style="border-bottom: none; padding-bottom: 10px">
+          <span class="list-label"><span class="status-dot" style="background:var(--green)"></span> Done</span>
+          <span class="count-badge" id="countDone">${state.tasks.done}</span>
+        </div>
+        <div class="list-row" style="border-top: 1px solid var(--border); margin-top: 4px; padding-top: 10px">
+          <span class="list-label" style="font-weight: 600">Total</span>
+          <span class="count-badge" id="countTotal">${state.tasks.total}</span>
+        </div>
+      </div>
+      <div class="muted" id="tasksRoot" style="margin-top: 4px">${state.tasksRoot}</div>
+      <div class="card" style="margin-top: 10px">
+        <div class="card-header">BlueMonster Tasks</div>
+        <div class="list-row">
+          <span class="list-label">Total</span>
+          <span class="count-badge" id="bmCount">${state.blueMonsterTasks.count}</span>
+        </div>
+        <div class="muted" id="bmRecent" style="margin-top: 6px; white-space: pre-wrap"></div>
+      </div>
+      <div class="task-sections" id="taskSections"></div>
+    </div>
 
-    <script nonce="${nonce}">
-      const vscode = acquireVsCodeApi();
-      const byId = (id) => document.getElementById(id);
-      const setText = (id, value) => { const el = byId(id); if (el) el.textContent = value; };
-      const setBadge = (id, ok, okText, badText) => {
-        const el = byId(id);
-        if (!el) return;
-        el.textContent = ok ? okText : badText;
-        el.classList.toggle('ok', ok);
-        el.classList.toggle('missing', !ok);
-      };
+    <!-- Console Tab -->
+    <div id="tab-console" class="tab-content">
+      <div class="console-toolbar">
+        <span class="console-toolbar-title">UFO Output</span>
+        <button class="console-toolbar-btn" id="consoleClearBtn">Clear</button>
+      </div>
+      <div class="console-log" id="consoleLog">
+        <div class="console-empty" id="consoleEmpty">Waiting for UFO activity...</div>
+      </div>
+    </div>
 
-      document.querySelectorAll('button.action').forEach(btn => {
-        btn.addEventListener('click', () => {
-          vscode.postMessage({ type: 'command', command: btn.dataset.command });
-        });
-      });
+    <!-- Settings Tab -->
+    <div id="tab-settings" class="tab-content">
+      <div id="settingsContent">
+        <div class="loading" id="settingsLoading">Loading settings...</div>
+      </div>
+    </div>
 
-      window.addEventListener('message', (event) => {
-        const message = event.data;
-        if (!message || message.type !== 'state') return;
-        const state = message.state;
-        setText('countPending', String(state.tasks.pending));
-        setText('countApproved', String(state.tasks.approved));
-        setText('countProgress', String(state.tasks.inProgress));
-        setText('countDone', String(state.tasks.done));
-        setText('countTotal', String(state.tasks.total));
-        setText('tasksRoot', state.tasksRoot);
-        setText('gatewayUrl', state.gatewayUrl);
-        setText('publicUrl', state.publicUrl || "—");
-        setText('modelChat', state.models.chat);
-        setText('modelSpec', state.models.spec);
-        setText('modelOpus', state.models.opus || "—");
-        setText('lastUpdated', '⏱ ' + state.lastUpdated);
-        setBadge('gatewayBadge', state.connectionState === 'connected', 'OK', state.connectionState === 'reconnecting' ? 'WAIT' : 'DOWN');
-        setBadge('publicUrlBadge', !!state.publicUrl, 'SET', 'NONE');
-        setBadge('envSyncBadge', state.envAutoSync, 'ON', 'OFF');
-        setBadge('channelLine', state.channels.line, 'READY', 'NONE');
-        setBadge('channelTelegram', state.channels.telegram, 'READY', 'NONE');
-        setBadge('channelDiscord', state.channels.discord, 'READY', 'NONE');
-        const status = byId('gatewayStatus');
-        if (status) {
-          status.textContent = state.connectionState === 'connected'
-            ? '● ONLINE'
-            : state.connectionState === 'reconnecting'
-              ? '◐ SYNC...'
-              : '○ OFFLINE';
-          status.classList.toggle('connected', state.connectionState === 'connected');
-          status.classList.toggle('reconnecting', state.connectionState === 'reconnecting');
-          status.classList.toggle('disconnected', state.connectionState === 'disconnected');
-        }
-      });
-    </script>
+    <!-- Channels Tab -->
+    <div id="tab-channels" class="tab-content">
+      <div class="card">
+        <div class="card-header">Channel Status</div>
+        <div class="list-row">
+          <span class="list-label">LINE</span>
+          <span class="badge ${state.channels.line ? "badge-green" : "badge-gray"}" id="channelLine">${state.channels.line ? "READY" : "NONE"}</span>
+        </div>
+        <div class="list-row">
+          <span class="list-label">Telegram</span>
+          <span class="badge ${state.channels.telegram ? "badge-green" : "badge-gray"}" id="channelTelegram">${state.channels.telegram ? "READY" : "NONE"}</span>
+        </div>
+        <div class="list-row">
+          <span class="list-label">Discord</span>
+          <span class="badge ${state.channels.discord ? "badge-green" : "badge-gray"}" id="channelDiscord">${state.channels.discord ? "READY" : "NONE"}</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">Details</div>
+        <div class="list-row">
+          <span class="list-label">Auto-Sync</span>
+          <span class="badge ${state.envAutoSync ? "badge-green" : "badge-gray"}" id="envSyncBadge">${state.envAutoSync ? "ON" : "OFF"}</span>
+        </div>
+        <div class="list-row">
+          <span class="list-label">Models</span>
+          <span class="muted" id="modelSummary">${state.models.chat}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer" id="lastUpdated">${state.lastUpdated}</div>
+
+    <!-- Task Interview Modal -->
+    <div class="modal" id="taskInterviewModal" hidden>
+      <div class="modal-backdrop" id="taskModalBackdrop"></div>
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title">👾 UFO 任務訪談</div>
+          <button class="modal-close" id="taskModalClose">Close</button>
+        </div>
+        <div class="modal-body" id="taskModalMessages"></div>
+        <div class="modal-footer">
+          <div class="modal-steps" aria-label="steps">
+            <div class="modal-step" id="step1">
+              <span class="modal-step-num">
+                <span class="num">1</span>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M20 7L10 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span>輸入任務</span>
+            </div>
+            <div class="modal-step" id="step2">
+              <span class="modal-step-num">
+                <span class="num">2</span>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M20 7L10 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span>建立任務</span>
+            </div>
+            <div class="modal-step" id="step3">
+              <span class="modal-step-num">
+                <span class="num">3</span>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M20 7L10 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span>發送給 BlueMonster</span>
+            </div>
+          </div>
+          <div class="modal-input-row">
+            <div class="modal-input">
+            <input id="taskModalInput" placeholder="輸入回答..." />
+            <button class="btn" id="taskModalSendMsgBtn">送出</button>
+          </div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn primary" id="taskModalCreateBtn" disabled>建立任務</button>
+            <button class="btn primary" id="taskModalSendBtn" hidden disabled>發送 👾</button>
+            <div class="modal-working" id="taskModalWorking" hidden>
+              <span class="spinner" aria-hidden="true"></span>
+              <span>Working...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Config for external script -->
+    <div id="ufo-config" data-gateway-url="${state.gatewayHttpUrl}" style="display:none"></div>
+
+    <script src="${scriptUri}"></script>
   </body>
 </html>`;
 }

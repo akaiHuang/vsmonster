@@ -15,6 +15,7 @@
     "AI"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onView:ufoDashboard",
     "onView:ufoTasks",
     "onCommand:ufo.createTaskSpec",
@@ -101,19 +102,23 @@
         },
         {
           "id": "ufoTasksPending",
-          "name": "⏳ Pending"
+          "name": "⏳ Pending",
+          "when": "ufo.showQueueViews"
         },
         {
           "id": "ufoTasksApproved",
-          "name": "✅ Approved"
+          "name": "✅ Approved",
+          "when": "ufo.showQueueViews"
         },
         {
           "id": "ufoTasksRunning",
-          "name": "🔄 Running"
+          "name": "🔄 Running",
+          "when": "ufo.showQueueViews"
         },
         {
           "id": "ufoTasksDone",
-          "name": "✨ Done"
+          "name": "✨ Done",
+          "when": "ufo.showQueueViews"
         }
       ]
     },
@@ -166,6 +171,11 @@
     "configuration": {
       "title": "UFO",
       "properties": {
+        "ufo.ui.showQueueViews": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show legacy queue views (Pending/Approved/Running/Done) below Control Center."
+        },
         "ufo.gatewayUrl": {
           "type": "string",
           "default": "ws://localhost:3000",
@@ -210,6 +220,11 @@
           "type": "string",
           "default": "",
           "description": "Telegram Webhook Secret (auto-generated if empty)"
+        },
+        "ufo.telegram.useTypingIndicator": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use Telegram typing indicator instead of sending \"Thinking...\" messages"
         },
         "ufo.discord.botToken": {
           "type": "string",

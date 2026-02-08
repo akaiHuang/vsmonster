@@ -30,6 +30,13 @@ export class HandshakeManager {
   private pendingHandshakes: Map<string, PendingHandshake> = new Map();
   private activeCode: PendingHandshake | null = null;
 
+  /** Emoji 表情池 — 用於自動握手 */
+  private static readonly EMOJI_POOL = [
+    '🛸', '🚀', '✨', '👾', '👽', '🌙', '🔮', '🎮', '🎯', '🦊',
+    '🐉', '🦑', '🎪', '🎲', '🌈', '🍄', '⚡', '🔥', '💎', '🧊',
+    '🎵', '🌺', '🦋', '🐙', '🎃', '🍀', '🌸', '🐳', '🦄', '🪐',
+  ];
+
   constructor(whitelistManager: WhitelistManager, config: HandshakeConfig = {}) {
     this.whitelistManager = whitelistManager;
     this.config = {
@@ -40,11 +47,10 @@ export class HandshakeManager {
   }
 
   /**
-   * 生成新的握手碼
+   * 生成新的握手碼（英數字，用於 /handshake 指令）
    */
   generateCode(): string {
-    // 生成隨機的英數字組合
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 排除容易混淆的字元
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
     for (let i = 0; i < this.config.codeLength; i++) {
       code += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -61,55 +67,130 @@ export class HandshakeManager {
   }
 
   /**
-   * 驗證握手碼
+   * 自動生成 Emoji 握手碼（用於自動握手流程）
+   * 當未驗證用戶發送任何訊息時觸發
+   */
+  generateEmojiCode(channel: ChannelType, userId: string): string {
+    const emoji = HandshakeManager.EMOJI_POOL[
+      Math.floor(Math.random() * HandshakeManager.EMOJI_POOL.length)
+    ];
+
+    const now = new Date();
+    const key = `${channel}:${userId}`;
+    this.pendingHandshakes.set(key, {
+      code: emoji,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + this.config.codeExpiry),
+      channel,
+      userId,
+    });
+
+    return emoji;
+  }
+
+  /**
+   * 嘗試用 emoji 驗證（自動握手流程）
+   * 用戶直接發送 emoji，不需要 /handshake 前綴
+   */
+  verifyEmoji(
+    input: string,
+    channel: ChannelType,
+    userId: string,
+    displayName?: string
+  ): { success: boolean; message: string; matched: boolean } {
+    const key = `${channel}:${userId}`;
+    const pending = this.pendingHandshakes.get(key);
+
+    if (!pending) {
+      return { success: false, message: '', matched: false };
+    }
+
+    // 過期
+    if (new Date() > pending.expiresAt) {
+      this.pendingHandshakes.delete(key);
+      return { success: false, message: '', matched: false };
+    }
+
+    const trimmed = input.trim();
+    if (trimmed !== pending.code) {
+      return { success: false, message: '❌ 驗證碼不正確，請再試一次。', matched: true };
+    }
+
+    // 握手成功
+    this.whitelistManager.addToWhitelist(channel, userId, displayName);
+    this.pendingHandshakes.delete(key);
+
+    return {
+      success: true,
+      message: '✅ 握手成功！歡迎使用 VSMONSTER 🛸',
+      matched: true,
+    };
+  }
+
+  /**
+   * 檢查用戶是否有待處理的 emoji 握手
+   */
+  hasPendingEmoji(channel: ChannelType, userId: string): boolean {
+    const key = `${channel}:${userId}`;
+    const pending = this.pendingHandshakes.get(key);
+    if (!pending) return false;
+    if (new Date() > pending.expiresAt) {
+      this.pendingHandshakes.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * 驗證握手碼（/handshake 指令用）
    */
   verifyCode(
-    inputCode: string, 
-    channel: ChannelType, 
+    inputCode: string,
+    channel: ChannelType,
     userId: string,
     displayName?: string
   ): { success: boolean; message: string } {
     // 檢查是否有活動的握手碼
     if (!this.activeCode) {
-      return { 
-        success: false, 
-        message: '目前沒有有效的握手碼。請在 VS Code 中發起握手請求。' 
+      return {
+        success: false,
+        message: '目前沒有有效的握手碼。請在 VS Code 中發起握手請求。'
       };
     }
 
     // 檢查是否過期
     if (new Date() > this.activeCode.expiresAt) {
       this.activeCode = null;
-      return { 
-        success: false, 
-        message: '握手碼已過期。請在 VS Code 中重新發起握手請求。' 
+      return {
+        success: false,
+        message: '握手碼已過期。請在 VS Code 中重新發起握手請求。'
       };
     }
 
     // 比較握手碼
-    const codeToCompare = this.config.caseSensitive 
-      ? inputCode 
+    const codeToCompare = this.config.caseSensitive
+      ? inputCode
       : inputCode.toUpperCase();
-    const activeCodeToCompare = this.config.caseSensitive 
-      ? this.activeCode.code 
+    const activeCodeToCompare = this.config.caseSensitive
+      ? this.activeCode.code
       : this.activeCode.code.toUpperCase();
 
     if (codeToCompare !== activeCodeToCompare) {
-      return { 
-        success: false, 
-        message: '握手碼不正確。請確認輸入的碼是否正確。' 
+      return {
+        success: false,
+        message: '握手碼不正確。請確認輸入的碼是否正確。'
       };
     }
 
     // 握手成功，添加到白名單
     this.whitelistManager.addToWhitelist(channel, userId, displayName);
-    
+
     // 清除已使用的握手碼
     this.activeCode = null;
 
-    return { 
-      success: true, 
-      message: '✅ 握手成功！你已被加入白名單。' 
+    return {
+      success: true,
+      message: '✅ 握手成功！你已被加入白名單。'
     };
   }
 

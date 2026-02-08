@@ -9,6 +9,7 @@ export class GatewayClient extends EventEmitter {
   private readonly baseReconnectDelayMs = 1500;
   private readonly maxReconnectDelayMs = 30000;
   private pingInterval: NodeJS.Timer | null = null;
+  private healthCheckTimer: NodeJS.Timer | null = null;
   private shouldReconnect = true;
   private isReconnecting = false;
 
@@ -23,19 +24,32 @@ export class GatewayClient extends EventEmitter {
 
   async connect(): Promise<void> {
     this.shouldReconnect = true;
+
+    // Close any existing connection before creating a new one
+    if (this.ws) {
+      try {
+        this.ws.removeAllListeners();
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
+
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.url);
+        const ws = new WebSocket(this.url);
+        this.ws = ws;
+        let settled = false;
 
-        this.ws.on("open", () => {
+        ws.on("open", () => {
           this.reconnectAttempts = 0;
           this.isReconnecting = false;
           this.startPingInterval();
+          this.startHealthCheck();
           this.emit("connected");
-          resolve();
+          if (!settled) { settled = true; resolve(); }
         });
 
-        this.ws.on("message", (data: WebSocket.Data) => {
+        ws.on("message", (data: WebSocket.Data) => {
           try {
             const message = JSON.parse(data.toString());
             this.emit("message", message);
@@ -44,16 +58,26 @@ export class GatewayClient extends EventEmitter {
           }
         });
 
-        this.ws.on("close", () => {
+        // Respond to server's protocol-level pings explicitly (belt and suspenders)
+        ws.on("ping", () => {
+          try { ws.pong(); } catch {}
+        });
+
+        ws.on("close", (code: number, reason: Buffer) => {
           this.stopPingInterval();
-          this.emit("disconnected");
+          this.stopHealthCheck();
+          const reasonStr = reason?.toString() || "";
+          this.emit("disconnected", { code, reason: reasonStr });
+          // Only reconnect from close, not from error (avoid double reconnect)
           this.attemptReconnect().catch(() => undefined);
         });
 
-        this.ws.on("error", (error) => {
+        ws.on("error", (error) => {
           this.emit("error", error);
+          if (!settled) { settled = true; reject(error); }
+          // For initial connection failures, "close" isn't guaranteed to fire promptly.
+          // Trigger reconnect here too; isReconnecting guards against double attempts.
           this.attemptReconnect().catch(() => undefined);
-          reject(error);
         });
       } catch (error) {
         reject(error);
@@ -63,6 +87,7 @@ export class GatewayClient extends EventEmitter {
 
   disconnect(): void {
     this.stopPingInterval();
+    this.stopHealthCheck();
     this.reconnectAttempts = this.maxReconnectAttempts;
     this.shouldReconnect = false;
 
@@ -83,11 +108,12 @@ export class GatewayClient extends EventEmitter {
   }
 
   private startPingInterval(): void {
+    this.stopPingInterval();
     this.pingInterval = setInterval(() => {
       if (this.isConnected()) {
         this.send({ type: "ping" });
       }
-    }, 30000);
+    }, 25000); // 25s — shorter than server's 30s heartbeat
   }
 
   private stopPingInterval(): void {
@@ -97,25 +123,54 @@ export class GatewayClient extends EventEmitter {
     }
   }
 
+  /**
+   * Periodic check: if ws exists but isn't OPEN, force cleanup and reconnect.
+   * Catches zombie connections that lost TCP without a close event.
+   */
+  private startHealthCheck(): void {
+    this.stopHealthCheck();
+    this.healthCheckTimer = setInterval(() => {
+      if (!this.ws) { return; }
+      if (this.ws.readyState === WebSocket.CLOSING || this.ws.readyState === WebSocket.CLOSED) {
+        this.emit("health_check_failed", { readyState: this.ws.readyState });
+        try { this.ws.removeAllListeners(); this.ws.terminate(); } catch {}
+        this.ws = null;
+        this.stopPingInterval();
+        this.stopHealthCheck();
+        this.attemptReconnect().catch(() => undefined);
+      }
+    }, 10000);
+  }
+
+  private stopHealthCheck(): void {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer as any);
+      this.healthCheckTimer = null;
+    }
+  }
+
   private async attemptReconnect(): Promise<void> {
     if (!this.shouldReconnect) {
       return;
+    }
+    if (this.isReconnecting) {
+      return; // Already reconnecting, skip duplicate attempts
     }
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       this.emit("reconnect_failed");
       return;
     }
 
+    this.isReconnecting = true;
     this.reconnectAttempts += 1;
     const delay = this.computeReconnectDelayMs(this.reconnectAttempts);
-    this.isReconnecting = true;
     this.emit("reconnecting", { attempt: this.reconnectAttempts, delayMs: delay });
     await new Promise((resolve) => setTimeout(resolve, delay));
 
     try {
       await this.connect();
     } catch {
-      // Retry again on next close event.
+      this.isReconnecting = false; // Allow next close event to trigger reconnect
     }
   }
 

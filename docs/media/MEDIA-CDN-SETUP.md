@@ -142,14 +142,14 @@ uploadFromLINE() / uploadFromTelegram() / uploadFromDiscord()
 uploadMedia() - 保存到 media-storage/2026-02/xxxx-uuid.jpg
   ↓
 生成記錄：{
-  publicUrl: "https://media.ufo.fawstudio.com/api/media/{mediaId}/view"
+  publicUrl: "https://media.your-domain.com/api/media/{mediaId}/view"
 }
   ↓
-回覆用戶：📸 照片已保存\n連結: https://media.ufo.fawstudio.com/api/media/{mediaId}/view
+回覆用戶：📸 照片已保存\n連結: https://media.your-domain.com/api/media/{mediaId}/view
 ```
 
 ### 3. 媒體訪問流程
-用戶點擊鏈接 → Cloudflare CDN → media.ufo.fawstudio.com → Gateway /api/media/{id}/view → 返回文件
+用戶點擊鏈接 → Cloudflare CDN → media.your-domain.com → Gateway /api/media/{id}/view → 返回文件
 
 ## 故障排除
 

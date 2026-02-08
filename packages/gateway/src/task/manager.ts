@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Task, SubTask, TaskStatus, TaskPriority, MediaItem } from '../channels/base';
+import { Task, SubTask, TaskStatus, TaskPriority, TaskDelivery } from '../types';
+import { MediaItem } from '@vsmonster/holography';
+import { getTaskDatabase, TaskDatabase } from '../db/task-database';
 import { logger } from '../utils/logger';
 
 export interface CreateTaskParams {
@@ -15,16 +17,19 @@ export interface CreateTaskParams {
  * 負責任務的建立、拆分、追蹤和狀態管理
  */
 export class TaskManager {
-  private tasks: Map<string, Task> = new Map();
-  private userTasks: Map<string, string[]> = new Map();
+  private db: TaskDatabase;
   private eventListeners: Map<string, Function[]> = new Map();
+
+  constructor() {
+    this.db = getTaskDatabase();
+  }
 
   /**
    * 建立新任務
    */
   createTask(params: CreateTaskParams): Task {
     const taskId = this.generateTaskId();
-    
+
     const task: Task = {
       id: taskId,
       channel: params.channel,
@@ -39,15 +44,10 @@ export class TaskManager {
       updatedAt: new Date(),
     };
 
-    this.tasks.set(taskId, task);
-    
-    // 記錄用戶任務關係
-    const userTaskList = this.userTasks.get(params.userId) || [];
-    userTaskList.push(taskId);
-    this.userTasks.set(params.userId, userTaskList);
-
     // 自動拆分任務
     this.analyzeAndSplitTask(task);
+
+    this.db.insert(task);
 
     logger.info(`Task created: ${taskId} for user ${params.userId}`);
     this.emit('task:created', task);
@@ -62,9 +62,7 @@ export class TaskManager {
     const instruction = task.instruction.toLowerCase();
     const subtasks: SubTask[] = [];
 
-    // 基於指令關鍵字分析任務類型
     if (instruction.includes('專案') || instruction.includes('project')) {
-      // 專案建立類任務
       subtasks.push(
         this.createSubTask(task.id, '初始化專案結構', 1),
         this.createSubTask(task.id, '安裝依賴套件', 2),
@@ -73,7 +71,6 @@ export class TaskManager {
         this.createSubTask(task.id, '測試與驗證', 5)
       );
     } else if (instruction.includes('頁面') || instruction.includes('page') || instruction.includes('component')) {
-      // UI 組件類任務
       subtasks.push(
         this.createSubTask(task.id, '分析需求', 1),
         this.createSubTask(task.id, '建立組件檔案', 2),
@@ -82,7 +79,6 @@ export class TaskManager {
         this.createSubTask(task.id, '處理互動邏輯', 5)
       );
     } else if (instruction.includes('api') || instruction.includes('backend') || instruction.includes('後端')) {
-      // API 類任務
       subtasks.push(
         this.createSubTask(task.id, '設計 API 端點', 1),
         this.createSubTask(task.id, '建立路由', 2),
@@ -91,7 +87,6 @@ export class TaskManager {
         this.createSubTask(task.id, '錯誤處理', 5)
       );
     } else if (instruction.includes('bug') || instruction.includes('fix') || instruction.includes('修復')) {
-      // 修復類任務
       subtasks.push(
         this.createSubTask(task.id, '分析問題', 1),
         this.createSubTask(task.id, '定位問題原因', 2),
@@ -99,7 +94,6 @@ export class TaskManager {
         this.createSubTask(task.id, '驗證修復', 4)
       );
     } else {
-      // 通用任務
       subtasks.push(
         this.createSubTask(task.id, '分析指令', 1),
         this.createSubTask(task.id, '執行任務', 2),
@@ -108,12 +102,8 @@ export class TaskManager {
     }
 
     task.subtasks = subtasks;
-    this.tasks.set(task.id, task);
   }
 
-  /**
-   * 建立子任務
-   */
   private createSubTask(parentId: string, description: string, order: number): SubTask {
     return {
       id: `${parentId}-${order}`,
@@ -124,9 +114,6 @@ export class TaskManager {
     };
   }
 
-  /**
-   * 生成任務 ID
-   */
   private generateTaskId(): string {
     const timestamp = Date.now().toString(36);
     const random = uuidv4().split('-')[0];
@@ -137,33 +124,31 @@ export class TaskManager {
    * 更新任務狀態
    */
   updateTask(taskId: string, status: TaskStatus, progress?: number): void {
-    const task = this.tasks.get(taskId);
+    const task = this.db.findOne(taskId);
     if (!task) {
       logger.warn(`Task not found: ${taskId}`);
       return;
     }
 
-    task.status = status;
+    const update: Partial<Task> = { status, updatedAt: new Date() };
     if (progress !== undefined) {
-      task.progress = Math.min(100, Math.max(0, progress));
+      update.progress = Math.min(100, Math.max(0, progress));
     }
-    task.updatedAt = new Date();
-
     if (status === 'completed') {
-      task.completedAt = new Date();
-      task.progress = 100;
+      update.completedAt = new Date();
+      update.progress = 100;
     }
 
-    this.tasks.set(taskId, task);
-    logger.debug(`Task ${taskId} updated: ${status} (${task.progress}%)`);
-    this.emit('task:updated', task);
+    this.db.updateOne(taskId, update);
+    logger.debug(`Task ${taskId} updated: ${status} (${update.progress ?? task.progress}%)`);
+    this.emit('task:updated', this.db.findOne(taskId));
   }
 
   /**
    * 更新子任務狀態
    */
   updateSubTask(taskId: string, subTaskId: string, status: TaskStatus, result?: any): void {
-    const task = this.tasks.get(taskId);
+    const task = this.db.findOne(taskId);
     if (!task || !task.subtasks) return;
 
     const subTask = task.subtasks.find(st => st.id === subTaskId);
@@ -172,143 +157,124 @@ export class TaskManager {
     subTask.status = status;
     if (result) subTask.result = result;
 
-    // 計算總進度
     const completedCount = task.subtasks.filter(st => st.status === 'completed').length;
-    task.progress = Math.round((completedCount / task.subtasks.length) * 100);
-    task.updatedAt = new Date();
+    const progress = Math.round((completedCount / task.subtasks.length) * 100);
+    const update: Partial<Task> = { subtasks: task.subtasks, progress, updatedAt: new Date() };
 
-    // 如果所有子任務完成，標記主任務完成
     if (completedCount === task.subtasks.length) {
-      task.status = 'completed';
-      task.completedAt = new Date();
+      update.status = 'completed';
+      update.completedAt = new Date();
     }
 
-    this.tasks.set(taskId, task);
-    this.emit('task:updated', task);
-    this.emit('subtask:updated', { task, subTask });
+    this.db.updateOne(taskId, update);
+    const updated = this.db.findOne(taskId)!;
+    this.emit('task:updated', updated);
+    this.emit('subtask:updated', { task: updated, subTask });
   }
 
   /**
-   * 取得任務
+   * 設定任務交付資料
    */
+  setTaskDelivery(taskId: string, delivery: TaskDelivery): void {
+    const task = this.db.findOne(taskId);
+    if (!task) return;
+
+    const merged: TaskDelivery = { ...task.delivery, ...delivery };
+    this.db.updateOne(taskId, { delivery: merged, updatedAt: new Date() });
+    this.emit('task:delivered', this.db.findOne(taskId));
+  }
+
+  /**
+   * 審核任務
+   */
+  reviewTask(taskId: string, approved: boolean, comment?: string): void {
+    const task = this.db.findOne(taskId);
+    if (!task) return;
+
+    const status: TaskStatus = approved ? 'approved' : 'rejected';
+    const deliveryUpdate: Partial<TaskDelivery> = {
+      reviewStatus: approved ? 'approved' : 'rejected',
+      reviewComment: comment,
+      reviewedAt: new Date(),
+    };
+    const merged: TaskDelivery = { ...task.delivery, ...deliveryUpdate };
+    this.db.updateOne(taskId, { delivery: merged, status, updatedAt: new Date() });
+    this.emit('task:reviewed', this.db.findOne(taskId));
+  }
+
   getTask(taskId: string): Task | undefined {
-    return this.tasks.get(taskId);
+    return this.db.findOne(taskId);
   }
 
-  /**
-   * 取得所有任務
-   */
   getAllTasks(): Task[] {
-    return Array.from(this.tasks.values());
+    return this.db.findAll();
   }
 
-  /**
-   * 取得用戶的所有任務
-   */
   getTasksForUser(userId: string): Task[] {
-    const taskIds = this.userTasks.get(userId) || [];
-    return taskIds
-      .map(id => this.tasks.get(id))
-      .filter((task): task is Task => task !== undefined);
+    return this.db.findByUser(userId);
   }
 
-  /**
-   * 取得用戶的任務 (alias 為 getUserTasks)
-   */
   getUserTasks(userId: string): Task[] {
     return this.getTasksForUser(userId);
   }
 
-  /**
-   * 更新任務狀態 (alias 為 updateTask)
-   */
   updateTaskStatus(taskId: string, status: TaskStatus, progress?: number): void {
     return this.updateTask(taskId, status, progress);
   }
 
-  /**
-   * 完成任務
-   */
   completeTask(taskId: string): void {
     this.updateTask(taskId, 'completed', 100);
   }
 
-  /**
-   * 更新任務進度
-   */
   updateTaskProgress(taskId: string, progress: number): void {
     this.updateTask(taskId, 'running', progress);
   }
 
-  /**
-   * 取得正在執行的任務數量
-   */
   getRunningTaskCount(): number {
-    return Array.from(this.tasks.values())
-      .filter(task => task.status === 'running').length;
+    return this.db.findByStatus('running').length;
   }
 
-  /**
-   * 取得下一個待執行的子任務
-   */
   getNextSubTask(taskId: string): SubTask | null {
-    const task = this.tasks.get(taskId);
+    const task = this.db.findOne(taskId);
     if (!task || !task.subtasks) return null;
-
     return task.subtasks.find(st => st.status === 'pending') || null;
   }
 
-  /**
-   * 標記任務失敗
-   */
   failTask(taskId: string, error: string): void {
-    const task = this.tasks.get(taskId);
+    const task = this.db.findOne(taskId);
     if (!task) return;
 
-    task.status = 'failed';
-    task.error = error;
-    task.updatedAt = new Date();
-
-    this.tasks.set(taskId, task);
+    this.db.updateOne(taskId, { status: 'failed', error, updatedAt: new Date() });
     logger.error(`Task ${taskId} failed: ${error}`);
-    this.emit('task:failed', task);
+    this.emit('task:failed', this.db.findOne(taskId));
   }
 
-  /**
-   * 取消任務
-   */
   cancelTask(taskId: string): void {
-    const task = this.tasks.get(taskId);
-    if (!task) return;
-
-    task.status = 'cancelled';
-    task.updatedAt = new Date();
-
-    this.tasks.set(taskId, task);
+    this.db.updateOne(taskId, { status: 'cancelled', updatedAt: new Date() });
     logger.info(`Task ${taskId} cancelled`);
-    this.emit('task:cancelled', task);
+    this.emit('task:cancelled', this.db.findOne(taskId));
   }
 
-  /**
-   * 格式化任務狀態為文字
-   */
   formatTaskStatus(task: Task): string {
-    const statusEmoji: Record<TaskStatus, string> = {
+    const statusEmoji: Record<string, string> = {
       pending: '⏳',
       running: '🔄',
       completed: '✅',
       failed: '❌',
       cancelled: '🚫',
+      delivered: '📦',
+      approved: '👍',
+      rejected: '↩️',
     };
 
-    let result = `${statusEmoji[task.status]} 任務: ${task.id}\n`;
+    let result = `${statusEmoji[task.status] || '❓'} 任務: ${task.id}\n`;
     result += `指令: ${task.instruction.slice(0, 50)}${task.instruction.length > 50 ? '...' : ''}\n`;
     result += `進度: ${task.progress}%\n`;
 
     if (task.subtasks && task.subtasks.length > 0) {
       result += '\n子任務:\n';
       for (const st of task.subtasks) {
-        const stEmoji = statusEmoji[st.status];
+        const stEmoji = statusEmoji[st.status] || '❓';
         result += `  ${stEmoji} [${st.order}] ${st.description}\n`;
       }
     }
@@ -320,7 +286,6 @@ export class TaskManager {
     return result;
   }
 
-  // 簡單的事件系統
   on(event: string, listener: Function): void {
     const listeners = this.eventListeners.get(event) || [];
     listeners.push(listener);

@@ -1,9 +1,24 @@
 // Webview CSS 樣式 - 自動生成，請勿手動編輯此檔案
 // 原始檔案：src/webview/styles.css
 
-export const WEBVIEW_CSS = `/* VS Code Native Style - Copilot Chat 風格 */
+export const WEBVIEW_CSS = `/* BlueMonster — UFO Dashboard 風格 */
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
+  --bg: #0f0f0f;
+  --card: #1a1a1a;
+  --border: #2a2a2a;
+  --hover: #252525;
+  --monster: #8b5cf6;
+  --monster-dim: #7c3aed;
+  --monster-light: #a78bfa;
+  --cyan: #06b6d4;
+  --green: #22c55e;
+  --amber: #f59e0b;
+  --red: #ef4444;
+  --text: #ffffff;
+  --text-2: #d1d5db;
+  --text-3: #9ca3af;
+  --text-4: #6b7280;
 }
 * {
   box-sizing: border-box;
@@ -11,23 +26,24 @@ export const WEBVIEW_CSS = `/* VS Code Native Style - Copilot Chat 風格 */
 body {
   margin: 0;
   padding: 0;
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size);
-  color: var(--vscode-foreground);
-  background: var(--vscode-sideBar-background);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
   height: 100vh;
   display: flex;
   flex-direction: column;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Header - Copilot Chat 風格 */
+/* Header */
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--vscode-panel-border);
-  background: var(--vscode-sideBar-background);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
   flex-shrink: 0;
 }
 .header-left {
@@ -37,21 +53,22 @@ body {
 }
 .header-title {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  color: var(--text);
 }
 .header-title .icon {
   font-size: 16px;
 }
 .header-request-count {
   font-size: 10px;
-  font-weight: 500;
-  color: #888;
-  background: rgba(128, 128, 128, 0.15);
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-weight: 600;
+  color: var(--monster-light);
+  background: rgba(139, 92, 246, 0.15);
+  padding: 2px 8px;
+  border-radius: 8px;
   margin-left: 4px;
 }
 .header-right {
@@ -67,8 +84,8 @@ body {
   justify-content: center;
   gap: 8px;
   padding: 4px 10px;
-  background: rgba(0, 0, 0, 0.15);
-  border-bottom: 1px solid var(--vscode-panel-border);
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
   font-size: 11px;
   flex-wrap: wrap;
 }
@@ -81,20 +98,20 @@ body {
   font-weight: 500;
 }
 .queue-badge.running {
-  background: rgba(76, 175, 80, 0.2);
-  color: #81c784;
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--green);
 }
 .queue-badge.waiting {
-  background: rgba(255, 193, 7, 0.2);
-  color: #ffca28;
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--amber);
 }
 .queue-badge.budget {
-  background: rgba(33, 150, 243, 0.2);
-  color: #64b5f6;
+  background: rgba(139, 92, 246, 0.15);
+  color: var(--monster-light);
 }
 .queue-badge.budget-exceeded {
-  background: rgba(244, 67, 54, 0.25);
-  color: #ef5350;
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--red);
   animation: pulse 1.5s ease-in-out infinite;
 }
 @keyframes pulse {
@@ -108,10 +125,10 @@ body {
   display: inline-block;
 }
 .custom-select-trigger {
-  background: #3c3c3c;
-  color: #cccccc;
-  border: none;
-  border-radius: 6px;
+  background: var(--card);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   padding: 5px 28px 5px 10px;
   font-size: 12px;
   cursor: pointer;
@@ -123,7 +140,8 @@ body {
   user-select: none;
 }
 .custom-select-trigger:hover {
-  background: #4a4a4a;
+  background: var(--hover);
+  border-color: var(--monster);
 }
 .custom-select-trigger::after {
   content: '';
@@ -132,11 +150,11 @@ body {
   top: 50%;
   transform: translateY(-50%);
   border: 4px solid transparent;
-  border-top-color: #888;
+  border-top-color: var(--text-4);
 }
 .custom-select-trigger.open::after {
   border-top-color: transparent;
-  border-bottom-color: #888;
+  border-bottom-color: var(--text-4);
   transform: translateY(-80%);
 }
 .custom-select-options {
@@ -146,10 +164,10 @@ body {
   min-width: 100%;
   max-height: 400px;
   overflow-y: auto;
-  background: #2d2d2d;
-  border: 1px solid #454545;
-  border-radius: 8px;
-  box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
   z-index: 1000;
   display: none;
 }
@@ -160,20 +178,20 @@ body {
   padding: 8px 12px;
   cursor: pointer;
   font-size: 12px;
-  color: #cccccc;
+  color: var(--text-2);
   display: flex;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
 }
 .custom-select-option:hover {
-  background: #3c3c3c;
+  background: var(--hover);
 }
 .custom-select-option.selected {
-  color: #ffffff;
+  color: var(--text);
 }
 .custom-select-option.selected:hover {
-  background: #3c3c3c;
+  background: var(--hover);
 }
 .custom-select-option .check-mark {
   width: 16px;
@@ -191,7 +209,7 @@ body {
   height: 14px;
 }
 .custom-select-option .check-mark svg circle {
-  stroke: #4fc3f7;
+  stroke: var(--monster-light);
   fill: none;
   stroke-width: 2;
   stroke-dasharray: 50;
@@ -202,7 +220,7 @@ body {
   animation: checkCircle 0.4s ease forwards;
 }
 .custom-select-option .check-mark svg polyline {
-  stroke: #4fc3f7;
+  stroke: var(--monster-light);
   fill: none;
   stroke-width: 2;
   stroke-linecap: round;
@@ -222,32 +240,32 @@ body {
 .custom-select-option .multiplier-badge {
   margin-left: auto;
   font-size: 10px;
-  color: #888;
-  background: rgba(128, 128, 128, 0.15);
+  color: var(--text-4);
+  background: rgba(107, 114, 128, 0.15);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 .custom-select-option .multiplier-badge.free {
-  color: #4caf50;
-  background: rgba(76, 175, 80, 0.15);
+  color: var(--green);
+  background: rgba(34, 197, 94, 0.15);
   font-weight: 600;
 }
 .custom-select-option .reasoning-badge {
   font-size: 10px;
-  color: #ff9800;
-  background: rgba(255, 152, 0, 0.15);
+  color: var(--amber);
+  background: rgba(245, 158, 11, 0.15);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 6px;
   margin-left: 6px;
 }
 .custom-select-divider {
   height: 1px;
-  background: rgba(128, 128, 128, 0.3);
+  background: var(--border);
   margin: 4px 8px;
 }
-/* GPT 折疊選擇器樣式 */
+/* Model 折疊選擇器 */
 .model-group {
-  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+  border-bottom: 1px solid var(--border);
 }
 .model-group:last-child {
   border-bottom: none;
@@ -260,13 +278,13 @@ body {
   transition: background 0.15s;
 }
 .model-group-header:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--hover);
 }
 .model-group-header .expand-icon {
   margin-right: 8px;
   font-size: 10px;
   transition: transform 0.2s;
-  color: #888;
+  color: var(--text-4);
 }
 .model-group.expanded .expand-icon {
   transform: rotate(90deg);
@@ -277,18 +295,18 @@ body {
 .model-group-header .multiplier-badge {
   margin-left: auto;
   font-size: 10px;
-  color: #888;
-  background: rgba(128, 128, 128, 0.15);
+  color: var(--text-4);
+  background: rgba(107, 114, 128, 0.15);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 .model-group-header .multiplier-badge.free {
-  color: #4caf50;
-  background: rgba(76, 175, 80, 0.15);
+  color: var(--green);
+  background: rgba(34, 197, 94, 0.15);
 }
 .model-group-options {
   display: none;
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(0, 0, 0, 0.2);
   padding-left: 20px;
 }
 .model-group.expanded .model-group-options {
@@ -303,10 +321,10 @@ body {
   transition: background 0.15s;
 }
 .reasoning-option:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--hover);
 }
 .reasoning-option.selected {
-  background: rgba(79, 195, 247, 0.1);
+  background: rgba(139, 92, 246, 0.1);
 }
 .reasoning-option .check-mark {
   width: 16px;
@@ -325,7 +343,7 @@ body {
   height: 14px;
 }
 .reasoning-option .check-mark svg circle {
-  stroke: #4fc3f7;
+  stroke: var(--monster-light);
   fill: none;
   stroke-width: 2;
   stroke-dasharray: 50;
@@ -335,7 +353,7 @@ body {
   animation: checkCircle 0.4s ease forwards;
 }
 .reasoning-option .check-mark svg polyline {
-  stroke: #4fc3f7;
+  stroke: var(--monster-light);
   fill: none;
   stroke-width: 2;
   stroke-linecap: round;
@@ -355,23 +373,26 @@ body {
 }
 .toolbar button {
   background: transparent;
-  color: var(--vscode-icon-foreground);
+  color: var(--text-3);
   border: none;
   padding: 4px 6px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
   min-width: 26px;
   height: 26px;
+  transition: all 0.15s;
 }
 .toolbar button:hover {
-  background: var(--vscode-toolbar-hoverBackground);
+  background: var(--hover);
+  color: var(--text);
 }
 .toolbar button.active {
-  background: var(--vscode-toolbar-activeBackground);
+  background: var(--monster);
+  color: var(--text);
 }
 .toolbar button:disabled {
   opacity: 0.4;
@@ -380,7 +401,7 @@ body {
 .toolbar .divider {
   width: 1px;
   height: 16px;
-  background: var(--vscode-panel-border);
+  background: var(--border);
   margin: 0 4px;
   align-self: center;
 }
@@ -389,11 +410,12 @@ body {
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 12px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   height: 100%;
+  background: var(--bg);
 }
 .messages-wrap {
   position: relative;
@@ -445,8 +467,8 @@ body {
   display: block;
 }
 .message.user .message-avatar {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
+  background: var(--monster);
+  color: var(--text);
 }
 .message.assistant .message-avatar {
   background: none;
@@ -458,6 +480,7 @@ body {
 .message-role {
   font-size: 12px;
   font-weight: 600;
+  color: var(--text-2);
 }
 .message-time {
   font-size: 10px;
@@ -484,12 +507,14 @@ body {
   display: none;
 }
 .message.user .message-content {
-  padding: 10px 12px;
+  padding: 10px 14px;
   text-align: left;
   max-width: 100%;
-  background: #2b3442;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.2);
   border-radius: 12px;
   align-self: flex-end;
+  color: var(--text);
 }
 .message.user .message-content:empty {
   display: none;
@@ -503,10 +528,11 @@ body {
 .message.system .message-content {
   padding-left: 0;
   font-size: 11px;
-  opacity: 0.7;
+  color: var(--text-4);
 }
 .message.assistant .message-content {
   max-width: 90%;
+  color: var(--text-2);
 }
 .user-attachments {
   display: flex;
@@ -521,10 +547,10 @@ body {
   gap: 6px;
   padding: 4px 8px;
   border-radius: 8px;
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  background: var(--card);
+  border: 1px solid var(--border);
   font-size: 11px;
-  color: #d7d7d7;
+  color: var(--text-2);
   max-width: 220px;
 }
 .user-attachment-chip svg {
@@ -538,13 +564,13 @@ body {
   text-overflow: ellipsis;
 }
 
-/* 可折疊步驟卡片 - Copilot 風格 */
+/* 可折疊步驟卡片 */
 .activity-card {
   margin-left: 32px;
   margin-bottom: 8px;
-  border-radius: 6px;
-  border: 1px solid var(--vscode-panel-border);
-  background: var(--vscode-editor-background);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card);
   overflow: hidden;
 }
 .activity-card summary {
@@ -555,7 +581,7 @@ body {
   cursor: pointer;
   user-select: none;
   font-size: 12px;
-  color: var(--vscode-foreground);
+  color: var(--text-2);
   list-style: none;
 }
 .activity-card summary::-webkit-details-marker {
@@ -565,7 +591,7 @@ body {
   content: '▶';
   font-size: 8px;
   transition: transform 0.2s;
-  color: var(--vscode-icon-foreground);
+  color: var(--text-4);
 }
 .activity-card[open] summary::before {
   transform: rotate(90deg);
@@ -577,24 +603,24 @@ body {
   justify-content: center;
 }
 .activity-card .card-icon.done {
-  color: #89d185;
+  color: var(--green);
 }
 .activity-card .card-icon.working {
-  color: var(--vscode-progressBar-background);
+  color: var(--monster-light);
 }
 .activity-check-svg {
   width: 16px;
   height: 16px;
 }
 .activity-check-svg circle {
-  stroke: #89d185;
+  stroke: var(--green);
   fill: none;
   stroke-width: 2;
   stroke-dasharray: 50;
   stroke-dashoffset: 0;
 }
 .activity-check-svg polyline {
-  stroke: #89d185;
+  stroke: var(--green);
   fill: none;
   stroke-width: 2;
   stroke-linecap: round;
@@ -615,7 +641,7 @@ body {
   height: 16px;
 }
 .msg-check-icon svg circle {
-  stroke: #4fc3f7;
+  stroke: var(--monster-light);
   fill: none;
   stroke-width: 2;
   stroke-dasharray: 50;
@@ -623,7 +649,7 @@ body {
   animation: msgCheckCircle 0.4s ease forwards;
 }
 .msg-check-icon svg polyline {
-  stroke: #4fc3f7;
+  stroke: var(--monster-light);
   fill: none;
   stroke-width: 2;
   stroke-linecap: round;
@@ -648,22 +674,22 @@ body {
   display: inline-flex;
   gap: 4px;
   padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--vscode-badge-background);
+  border-radius: 6px;
+  background: rgba(139, 92, 246, 0.15);
   font-size: 10px;
-  font-family: var(--vscode-editor-font-family);
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
 }
 .activity-card .card-badge .plus {
-  color: #89d185;
+  color: var(--green);
 }
 .activity-card .card-badge .minus {
-  color: #f48771;
+  color: var(--red);
 }
 .activity-card .card-body {
   padding: 8px 12px;
-  border-top: 1px solid var(--vscode-panel-border);
+  border-top: 1px solid var(--border);
   font-size: 11px;
-  background: var(--vscode-textCodeBlock-background);
+  background: var(--bg);
   max-height: 200px;
   overflow-y: auto;
 }
@@ -671,15 +697,15 @@ body {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
-  font-family: var(--vscode-editor-font-family);
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
 }
 .activity-card .file-link {
-  color: var(--vscode-textLink-foreground);
+  color: var(--monster-light);
   cursor: pointer;
   text-decoration: underline;
 }
 .activity-card .file-link:hover {
-  color: var(--vscode-textLink-activeForeground);
+  color: var(--monster);
 }
 .activity-card .line-range {
   opacity: 0.7;
@@ -706,17 +732,17 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #c9c9c9;
+  color: var(--text-2);
 }
 .activity-check {
-  color: #8dd39c;
+  color: var(--green);
   font-size: 12px;
 }
 .activity-file {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #c9c9c9;
+  color: var(--text-2);
   font-size: 12px;
 }
 .file-badge {
@@ -725,16 +751,16 @@ body {
   align-items: center;
   padding: 2px 6px;
   border-radius: 6px;
-  background: #1f1f1f;
-  border: 1px solid #303030;
-  font-family: var(--vscode-editor-font-family);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
   font-size: 11px;
 }
 .file-badge .plus {
-  color: #7bd88f;
+  color: var(--green);
 }
 .file-badge .minus {
-  color: #f06c6c;
+  color: var(--red);
 }
 .command-row {
   display: flex;
@@ -742,17 +768,17 @@ body {
   gap: 10px;
   padding: 6px 8px;
   border-radius: 8px;
-  border: 1px solid #2f2f2f;
-  background: #1b1b1b;
-  font-family: var(--vscode-editor-font-family);
+  border: 1px solid var(--border);
+  background: var(--card);
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
   font-size: 12px;
-  color: #d8d8d8;
+  color: var(--text-2);
 }
 .command-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #64b5ff;
+  background: var(--monster-light);
 }
 
 /* 訊息操作按鈕 - Copilot 風格 */
@@ -771,43 +797,46 @@ body {
   display: flex;
 }
 .message-actions button {
-  background: var(--vscode-button-secondaryBackground);
-  color: var(--vscode-button-secondaryForeground);
-  border: none;
+  background: var(--card);
+  color: var(--text-3);
+  border: 1px solid var(--border);
   padding: 3px 8px;
-  border-radius: 3px;
+  border-radius: 6px;
   font-size: 11px;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 4px;
+  transition: all 0.15s;
 }
 .message-actions button:hover {
-  background: var(--vscode-button-secondaryHoverBackground);
+  background: var(--hover);
+  color: var(--text);
+  border-color: var(--monster);
 }
 
-/* Code blocks - Copilot 風格 */
+/* Code blocks */
 .message-content code {
-  background: var(--vscode-textCodeBlock-background);
+  background: var(--card);
   padding: 2px 5px;
   border-radius: 4px;
-  font-family: var(--vscode-editor-font-family);
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
   font-size: 12px;
 }
 .code-block {
   position: relative;
   margin: 8px 0;
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
-  border: 1px solid var(--vscode-panel-border);
+  border: 1px solid var(--border);
 }
 .code-block-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 4px 10px;
-  background: var(--vscode-editor-background);
-  border-bottom: 1px solid var(--vscode-panel-border);
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
 }
 .code-block-actions {
   display: flex;
@@ -815,10 +844,10 @@ body {
 }
 .code-block-actions button {
   background: transparent;
-  color: var(--vscode-icon-foreground);
+  color: var(--text-3);
   border: none;
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 11px;
   cursor: pointer;
   display: flex;
@@ -826,12 +855,13 @@ body {
   gap: 3px;
 }
 .code-block-actions button:hover {
-  background: var(--vscode-toolbar-hoverBackground);
+  background: var(--hover);
+  color: var(--text);
 }
 .code-block pre {
   margin: 0;
   padding: 10px 12px;
-  background: var(--vscode-textCodeBlock-background);
+  background: var(--bg);
   overflow-x: auto;
   font-size: 12px;
   line-height: 1.5;
@@ -842,31 +872,30 @@ body {
 .code-block pre code {
   background: none;
   padding: 0;
-  font-family: var(--vscode-editor-font-family);
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
   white-space: pre-wrap;
   word-wrap: break-word;
 }
 .code-block-lang {
   font-size: 10px;
-  color: #888;
-  opacity: 0.6;
-  font-family: var(--vscode-editor-font-family);
+  color: var(--text-4);
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
   text-transform: lowercase;
 }
 
-/* Image in message - Copilot style attachment */
+/* Image in message */
 .message-attachment {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   margin-left: 32px;
   padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--vscode-panel-border);
-  background: var(--vscode-input-background);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card);
   cursor: pointer;
   max-width: 240px;
-  transition: background 0.2s, box-shadow 0.2s;
+  transition: all 0.15s;
 }
 .message.user .message-attachment {
   margin-left: 0;
@@ -874,15 +903,16 @@ body {
   align-self: flex-end;
 }
 .message-attachment:hover {
-  background: var(--vscode-list-hoverBackground);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  background: var(--hover);
+  border-color: var(--monster);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 .message-image {
   width: 56px;
   height: 56px;
-  border-radius: 4px;
+  border-radius: 6px;
   object-fit: cover;
-  border: 1px solid var(--vscode-panel-border);
+  border: 1px solid var(--border);
   flex-shrink: 0;
 }
 .attachment-text {
@@ -906,9 +936,9 @@ body {
 /* Thought details */
 .message details.thought {
   margin-left: 32px;
-  background: var(--vscode-textBlockQuote-background);
-  border-left: 3px solid var(--vscode-charts-blue);
-  border-radius: 0 4px 4px 0;
+  background: var(--card);
+  border-left: 3px solid var(--monster);
+  border-radius: 0 8px 8px 0;
   padding: 8px 12px;
   margin-top: 6px;
 }
@@ -932,9 +962,9 @@ body {
 .panel {
   margin: 8px 12px;
   padding: 12px;
-  background: var(--vscode-notifications-background);
-  border: 1px solid var(--vscode-notifications-border);
-  border-radius: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
 }
 .panel-title {
   font-size: 13px;
@@ -950,12 +980,12 @@ body {
   margin-bottom: 8px;
 }
 .panel-body {
-  font-family: var(--vscode-editor-font-family);
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
   font-size: 12px;
   white-space: pre-wrap;
-  background: var(--vscode-textCodeBlock-background);
+  background: var(--bg);
   padding: 8px 10px;
-  border-radius: 4px;
+  border-radius: 8px;
   margin-bottom: 10px;
 }
 .panel-meta {
@@ -969,73 +999,76 @@ body {
   flex-wrap: wrap;
 }
 .panel-actions button {
-  padding: 5px 12px;
+  padding: 6px 14px;
   font-size: 12px;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   border: none;
   font-weight: 500;
+  transition: all 0.15s;
 }
 .btn-primary {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
+  background: var(--monster);
+  color: var(--text);
 }
 .btn-primary:hover {
-  background: var(--vscode-button-hoverBackground);
+  background: var(--monster-dim);
 }
 .btn-secondary {
-  background: var(--vscode-button-secondaryBackground);
-  color: var(--vscode-button-secondaryForeground);
+  background: var(--hover);
+  color: var(--text-2);
+  border: 1px solid var(--border);
 }
 .btn-secondary:hover {
-  background: var(--vscode-button-secondaryHoverBackground);
+  background: var(--card);
+  color: var(--text);
 }
 .btn-danger {
-  background: var(--vscode-inputValidation-errorBackground);
-  color: var(--vscode-inputValidation-errorForeground);
-  border: 1px solid var(--vscode-inputValidation-errorBorder);
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--red);
+  border: 1px solid var(--red);
 }
 
-/* 確認選項樣式 - 程式碼區塊風格 */
+/* 確認選項 */
 .confirm-panel-inline {
-  margin: 10px 5%; /* 左右寬度縮 5% */
+  margin: 10px 5%;
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid var(--vscode-panel-border);
-  background: var(--vscode-textCodeBlock-background);
+  border: 1px solid var(--border);
+  background: var(--card);
 }
 .confirm-panel-inline .confirm-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 9px 12px; /* 高度變寬 1.5 倍 (6px -> 9px) */
-  background: var(--vscode-editor-background);
-  border-bottom: 1px solid var(--vscode-panel-border);
+  padding: 9px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
 }
 .confirm-panel-inline .confirm-title {
   font-size: 12px;
   font-weight: 500;
-  color: #f48771;
+  color: var(--amber);
 }
 .confirm-panel-inline .confirm-danger-type {
   font-size: 10px;
-  color: #888;
-  opacity: 0.8;
+  color: var(--text-4);
 }
 .confirm-panel-inline .confirm-command {
   padding: 10px 12px;
-  font-family: var(--vscode-editor-font-family);
-  font-size: 10px; /* 文字縮小兩級 (12px -> 10px) */
-  line-height: 1.2; /* 行高縮小 20% (1.5 -> 1.2) */
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+  font-size: 10px;
+  line-height: 1.2;
   white-space: pre-wrap;
   word-wrap: break-word;
-  border-bottom: 1px solid var(--vscode-panel-border);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
 }
 .confirm-panel-inline .confirm-cwd {
   padding: 4px 12px;
-  font-size: 9px; /* 文字縮小兩級 (11px -> 9px) */
-  color: #888;
-  border-bottom: 1px solid var(--vscode-panel-border);
+  font-size: 9px;
+  color: var(--text-4);
+  border-bottom: 1px solid var(--border);
 }
 .confirm-options {
   padding: 8px;
@@ -1043,19 +1076,21 @@ body {
 .confirm-option {
   padding: 8px 12px;
   margin: 4px 0;
-  background: #2d2d2d;
+  background: var(--bg);
   border-radius: 8px;
   cursor: pointer;
   display: flex;
   align-items: center;
-  transition: background 0.15s ease;
-  font-size: 11px; /* 文字縮小兩級 (13px -> 11px) */
+  transition: all 0.15s;
+  font-size: 11px;
+  color: var(--text-2);
 }
 .confirm-option:hover {
-  background: #3c3c3c !important;
+  background: var(--hover) !important;
+  color: var(--text);
 }
 .confirm-option .option-num {
-  color: #4fc3f7;
+  color: var(--monster-light);
   margin-right: 8px;
   font-weight: 500;
 }
@@ -1063,48 +1098,49 @@ body {
   display: flex;
   gap: 8px;
   padding: 8px 12px;
-  border-top: 1px solid var(--vscode-panel-border);
+  border-top: 1px solid var(--border);
 }
 .confirm-input-wrap input {
   flex: 1;
   padding: 8px 12px;
-  background: #1e1e1e;
-  border: 1px solid #3c3c3c;
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  color: #fff;
+  color: var(--text);
   font-size: 13px;
   outline: none;
 }
 .confirm-input-wrap input:focus {
-  border-color: var(--vscode-focusBorder) !important;
+  border-color: var(--monster) !important;
 }
 .confirm-input-wrap button {
   padding: 8px 16px;
   border-radius: 8px;
-  background: #0078d4;
-  color: #fff;
+  background: var(--monster);
+  color: var(--text);
   border: none;
   cursor: pointer;
   font-weight: 500;
+  transition: all 0.15s;
 }
 .confirm-input-wrap button:hover {
-  background: #106ebe;
+  background: var(--monster-dim);
 }
 .confirm-hint {
   padding: 6px 12px;
   font-size: 11px;
-  opacity: 0.6;
+  color: var(--text-4);
 }
 
-/* Activity panel - 單一狀態列 + 3 行事件紀錄 */
+/* Activity panel */
 .activity-panel {
   margin: 8px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 10px 14px;
-  background: #1f242c;
-  border: 1px solid #2a2f38;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   font-size: 12px;
   position: relative;
@@ -1117,10 +1153,10 @@ body {
   align-items: center;
   gap: 8px;
   font-weight: 600;
-  color: #c9d1d9;
+  color: var(--text);
 }
 .activity-status {
-  background: linear-gradient(90deg, #9fb7d7 0%, #9fb7d7 40%, #ffffff 50%, #9fb7d7 60%, #9fb7d7 100%);
+  background: linear-gradient(90deg, var(--monster-light) 0%, var(--monster-light) 40%, #ffffff 50%, var(--monster-light) 60%, var(--monster-light) 100%);
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -1131,7 +1167,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  color: #9fb7d7;
+  color: var(--text-3);
   font-size: 11.5px;
 }
 .activity-line {
@@ -1141,7 +1177,7 @@ body {
 }
 .activity-line::before {
   content: "•";
-  color: #4fc3f7;
+  color: var(--monster-light);
 }
 @keyframes textShimmer {
   0% { background-position: 100% 0; }
@@ -1150,8 +1186,8 @@ body {
 .spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(102, 102, 102, 0.3);
-  border-top-color: #888;
+  border: 2px solid rgba(139, 92, 246, 0.2);
+  border-top-color: var(--monster);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -1159,7 +1195,7 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* 任務清單面板 - 全寬樣式 */
+/* 任務清單面板 */
 .history-panel {
   position: absolute;
   top: 0;
@@ -1168,7 +1204,7 @@ body {
   bottom: 0;
   width: 100%;
   height: 100%;
-  background: var(--vscode-sideBar-background);
+  background: var(--bg);
   z-index: 100;
   overflow: hidden;
   display: flex;
@@ -1185,17 +1221,17 @@ body {
   width: 100%;
   padding: 8px 12px;
   font-size: 13px;
-  background: transparent;
-  color: var(--vscode-input-foreground);
-  border: none;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   outline: none;
 }
 .history-search input::placeholder {
-  color: var(--vscode-input-placeholderForeground);
-  opacity: 0.6;
+  color: var(--text-4);
 }
 .history-search input:focus {
-  border: none;
+  border-color: var(--monster);
   outline: none;
   box-shadow: none;
 }
@@ -1208,9 +1244,8 @@ body {
 }
 .history-header span {
   font-size: 11px;
-  color: var(--vscode-descriptionForeground);
-  opacity: 0.7;
-  font-weight: 400;
+  color: var(--text-4);
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -1233,25 +1268,25 @@ body {
   width: 100%;
 }
 .history-item:hover {
-  background: var(--vscode-list-hoverBackground);
+  background: var(--hover);
 }
 .history-item-icon {
   width: 32px;
   height: 32px;
-  border-radius: 6px;
+  border-radius: 8px;
   flex-shrink: 0;
   object-fit: cover;
 }
 .history-item-avatar {
   width: 32px;
   height: 32px;
-  border-radius: 6px;
+  border-radius: 8px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 20px;
-  background: var(--vscode-button-secondaryBackground);
+  background: var(--card);
 }
 .history-item-content {
   flex: 1;
@@ -1267,18 +1302,18 @@ body {
 }
 .history-item-taskid {
   font-size: 11px;
-  color: var(--vscode-textLink-foreground);
-  font-family: monospace;
+  color: var(--monster-light);
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
   flex-shrink: 0;
-  background: var(--vscode-badge-background);
+  background: rgba(139, 92, 246, 0.15);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 6px;
   font-weight: 500;
 }
 .history-item-agent {
   font-size: 13px;
   font-weight: 600;
-  color: var(--vscode-foreground);
+  color: var(--text);
   flex-shrink: 0;
 }
 .history-item-status {
@@ -1290,39 +1325,38 @@ body {
   font-weight: 500;
 }
 .history-item-status.active {
-  color: #4caf50;
-  background: rgba(76, 175, 80, 0.15);
+  color: var(--green);
+  background: rgba(34, 197, 94, 0.15);
 }
 .history-item-status.busy {
-  color: #2196f3;
-  background: rgba(33, 150, 243, 0.15);
+  color: var(--cyan);
+  background: rgba(6, 182, 212, 0.15);
   animation: pulse 1.5s ease-in-out infinite;
 }
 .history-item-status.waiting {
-  color: #ff9800;
-  background: rgba(255, 152, 0, 0.15);
+  color: var(--amber);
+  background: rgba(245, 158, 11, 0.15);
   animation: pulse 2s ease-in-out infinite;
 }
 .history-item-status.archived {
-  color: var(--vscode-descriptionForeground);
-  background: rgba(128, 128, 128, 0.1);
-  opacity: 0.7;
+  color: var(--text-4);
+  background: rgba(107, 114, 128, 0.1);
 }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
 .history-item.active {
-  border-left: 2px solid #4caf50;
-  background: rgba(76, 175, 80, 0.05);
+  border-left: 2px solid var(--green);
+  background: rgba(34, 197, 94, 0.05);
 }
 .history-item.busy {
-  border-left: 2px solid #2196f3;
-  background: rgba(33, 150, 243, 0.05);
+  border-left: 2px solid var(--monster);
+  background: rgba(139, 92, 246, 0.05);
 }
 .history-item.waiting {
-  border-left: 2px solid #ff9800;
-  background: rgba(255, 152, 0, 0.05);
+  border-left: 2px solid var(--amber);
+  background: rgba(245, 158, 11, 0.05);
 }
 .history-item-title {
   font-size: 12px;
@@ -1338,8 +1372,7 @@ body {
 }
 .history-item-time {
   font-size: 11px;
-  color: var(--vscode-descriptionForeground);
-  opacity: 0.6;
+  color: var(--text-4);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -1378,11 +1411,11 @@ body {
   gap: 6px;
 }
 
-/* Input area - Refined Copilot Style */
+/* Input area */
 .input-area {
   padding: 10px 12px;
-  background: var(--vscode-sideBar-background);
-  border-top: 1px solid var(--vscode-panel-border);
+  background: var(--bg);
+  border-top: 1px solid var(--border);
   flex-shrink: 0;
   position: sticky;
   bottom: 0;
@@ -1390,13 +1423,14 @@ body {
 }
 
 .input-container {
-  background: var(--vscode-input-background);
-  border: 1px solid var(--vscode-input-border);
-  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  transition: border-color 0.15s;
 }
 @media (max-width: 300px) {
   .input-footer-toolbar .select-pill {
@@ -1405,8 +1439,7 @@ body {
 }
 
 .input-container:focus-within {
-  border-color: var(--vscode-focusBorder);
-  outline: 1px solid var(--vscode-focusBorder);
+  border-color: var(--monster);
 }
 
 .attachment-area {
@@ -1419,13 +1452,13 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: #3c3c3c;
-  color: #cccccc;
+  background: var(--card);
+  color: var(--text-2);
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 11px;
   user-select: none;
-  border: 1px solid #454545;
+  border: 1px solid var(--border);
 }
 
 .attachment-chip .chip-icon {
@@ -1437,9 +1470,9 @@ body {
 .attachment-chip .chip-thumb {
   width: 16px;
   height: 16px;
-  border-radius: 3px;
+  border-radius: 4px;
   object-fit: cover;
-  border: 1px solid #555555;
+  border: 1px solid var(--border);
 }
 
 .attachment-chip .chip-name {
@@ -1457,8 +1490,8 @@ body {
   height: 14px;
   margin-left: 2px;
   border-radius: 50%;
-  background: #cccccc;
-  color: #333333;
+  background: var(--text-4);
+  color: var(--bg);
   cursor: pointer;
   font-size: 12px;
   font-weight: bold;
@@ -1467,7 +1500,8 @@ body {
   line-height: 1;
 }
 .attachment-chip .chip-remove:hover {
-  background: #ffffff;
+  background: var(--red);
+  color: var(--text);
 }
 
 .input-wrapper {
@@ -1479,18 +1513,17 @@ body {
   min-height: 24px;
   max-height: 200px;
   padding: 4px 0;
-  font-family: var(--vscode-font-family);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 13px;
   background: transparent;
-  color: var(--vscode-input-foreground);
+  color: var(--text);
   border: none;
   resize: none;
   outline: none;
   line-height: 1.5;
 }
 .input-textarea::placeholder {
-  color: var(--vscode-input-placeholderForeground);
-  opacity: 0.6;
+  color: var(--text-4);
 }
 
 .input-footer-toolbar {
@@ -1516,19 +1549,18 @@ body {
 .icon-btn {
   background: transparent;
   border: none;
-  color: var(--vscode-icon-foreground);
+  color: var(--text-3);
   padding: 4px;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.8;
-  transition: all 0.2s;
+  transition: all 0.15s;
 }
 .icon-btn:hover {
-  background: var(--vscode-toolbar-hoverBackground);
-  opacity: 1;
+  background: var(--hover);
+  color: var(--text);
 }
 .icon-btn svg {
   width: 16px;
@@ -1543,14 +1575,14 @@ body {
   position: absolute;
   bottom: 32px;
   right: 0;
-  background: var(--vscode-editorWidget-background);
-  color: var(--vscode-editorWidget-foreground);
-  border: 1px solid var(--vscode-editorWidget-border);
+  background: var(--card);
+  color: var(--text-2);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 4px 8px;
   font-size: 11px;
   white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
   z-index: 500;
 }
 .icon-btn[data-tooltip-align="left"]:hover::after {
@@ -1576,8 +1608,8 @@ body {
   display: none !important;
 }
 .send-icon-btn {
-  background: #ffffff;
-  color: #1e1e1e;
+  background: var(--monster);
+  color: #ffffff;
   border: none;
   border-radius: 50%;
   width: 26px;
@@ -1586,15 +1618,15 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.15s;
 }
 .send-icon-btn:hover {
-  background: #f2f2f2;
+  background: var(--monster-dim);
 }
 .send-icon-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.3;
   cursor: not-allowed;
-  background: var(--vscode-disabledForeground);
+  background: var(--text-4);
 }
 .send-icon-btn svg {
   width: 14px;
@@ -1604,8 +1636,8 @@ body {
 
 .stop-icon-btn {
   background: transparent;
-  border: 1px solid var(--vscode-charts-red);
-  color: var(--vscode-charts-red);
+  border: 1px solid var(--red);
+  color: var(--red);
   border-radius: 50%;
   width: 26px;
   height: 26px;
@@ -1613,9 +1645,10 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition: all 0.15s;
 }
 .stop-icon-btn:hover {
-  background: rgba(255, 0, 0, 0.1);
+  background: rgba(239, 68, 68, 0.15);
 }
 
 /* Toast 通知 */
@@ -1624,13 +1657,15 @@ body {
   bottom: 80px;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--vscode-notifications-background);
-  border: 1px solid var(--vscode-notifications-border);
+  background: var(--card);
+  border: 1px solid var(--border);
   padding: 8px 16px;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 12px;
+  color: var(--text);
   z-index: 1000;
   animation: fadeInOut 2s ease-in-out;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
 }
 @keyframes fadeInOut {
   0% { opacity: 0; transform: translateX(-50%) translateY(10px); }
@@ -1648,14 +1683,17 @@ body {
   gap: 6px;
 }
 .followup-btn {
-  background: var(--vscode-button-secondaryBackground);
-  color: var(--vscode-button-secondaryForeground);
-  border: 1px solid var(--vscode-button-border);
-  padding: 4px 10px;
+  background: var(--card);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  padding: 4px 12px;
   border-radius: 12px;
   font-size: 11px;
   cursor: pointer;
+  transition: all 0.15s;
 }
 .followup-btn:hover {
-  background: var(--vscode-button-secondaryHoverBackground);
+  background: var(--hover);
+  border-color: var(--monster);
+  color: var(--text);
 }`;

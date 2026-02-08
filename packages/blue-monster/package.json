@@ -36,6 +36,14 @@
     "onCommand:blueMonster.openView",
     "onCommand:blueMonster.selectModel",
     "onCommand:blueMonster.clearHistory",
+    "onCommand:blueMonster.getStatus",
+    "onCommand:blueMonster.getPendingConfirmations",
+    "onCommand:blueMonster.respondToConfirmation",
+    "onCommand:blueMonster.sendMessage",
+    "onCommand:blueMonster.sendMessageExternal",
+    "onCommand:blueMonster.setTaskFolder",
+    "onCommand:blueMonster.createExternalTask",
+    "onCommand:blueMonster.addSystemNote",
     "onCommand:blueMonster.mcp.startAll",
     "onCommand:blueMonster.mcp.stopAll"
   ],
@@ -85,6 +93,18 @@
       {
         "command": "blueMonster.sendMessage",
         "title": "BlueMonster: Send Message"
+      },
+      {
+        "command": "blueMonster.sendMessageExternal",
+        "title": "BlueMonster: Send Message (External)"
+      },
+      {
+        "command": "blueMonster.addSystemNote",
+        "title": "BlueMonster: Add System Note"
+      },
+      {
+        "command": "blueMonster.setTaskFolder",
+        "title": "BlueMonster: Set Task Folder"
       },
       {
         "command": "blueMonster.mcp.startAll",
@@ -279,15 +299,20 @@
           ],
           "description": "GPT 模型的 Reasoning Effort 等級"
         },
-        "blueMonster.model": {
-          "type": "string",
-          "default": "",
-          "description": "Preferred Copilot model id (optional override)"
-        },
-        "blueMonster.terminalConfirmation": {
-          "type": "string",
-          "default": "chat",
-          "enum": [
+      "blueMonster.model": {
+        "type": "string",
+        "default": "",
+        "description": "Preferred Copilot model id (optional override)"
+      },
+      "blueMonster.primaryAgentName": {
+        "type": "string",
+        "default": "Jack",
+        "description": "Default agent display name for the first task/session."
+      },
+      "blueMonster.terminalConfirmation": {
+        "type": "string",
+        "default": "chat",
+        "enum": [
             "chat",
             "modal",
             "off"

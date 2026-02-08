@@ -50,12 +50,12 @@ export const WEBVIEW_HTML_TEMPLATE = `<!DOCTYPE html>
   <div class="panel" id="modelPanel" hidden>
     <div class="panel-title">🤖 Select Model</div>
     <div class="panel-meta" id="modelHint"></div>
-    <select id="modelSelect" style="width: 100%; margin-bottom: 8px; padding: 8px; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border); border-radius: 4px;"></select>
+    <select id="modelSelect" style="width: 100%; margin-bottom: 8px; padding: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; outline: none;"></select>
     <div id="reasoningSection" style="display: none; margin-bottom: 8px;">
-      <label style="display: block; margin-bottom: 4px; font-size: 12px; color: var(--vscode-descriptionForeground);">⚡ Reasoning Effort</label>
-      <select id="reasoningSelect" style="width: 100%; padding: 8px; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border); border-radius: 4px;"></select>
+      <label style="display: block; margin-bottom: 4px; font-size: 12px; color: var(--text-3);">⚡ Reasoning Effort</label>
+      <select id="reasoningSelect" style="width: 100%; padding: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; outline: none;"></select>
     </div>
-    <input id="modelInput" type="text" placeholder="Enter model name" style="width: 100%; margin-bottom: 8px; padding: 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px;" />
+    <input id="modelInput" type="text" placeholder="Enter model name" style="width: 100%; margin-bottom: 8px; padding: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; outline: none;" />
     <div class="panel-actions">
       <button class="btn-primary" id="modelApply">Apply</button>
       <button class="btn-secondary" id="modelCancel">Cancel</button>
