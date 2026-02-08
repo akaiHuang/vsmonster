@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import { useMissionStore } from '@/lib/store';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface NewTaskModalProps {
@@ -12,22 +11,35 @@ interface NewTaskModalProps {
 
 export function NewTaskModal({ isOpen, onClose }: NewTaskModalProps) {
   const [title, setTitle] = useState('');
-  const { addTask } = useMissionStore();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!title.trim()) return;
 
-    addTask({
-      title: title.trim(),
-      description: title.trim(),
-      status: 'backlog',
-      category: 'Other',
-    });
+    if (!title.trim() || isSubmitting) return;
 
-    setTitle('');
-    onClose();
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instruction: title.trim() }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+
+      // Task created on Gateway. The WebSocket sync will bring it into the local store.
+      setTitle('');
+      onClose();
+    } catch (err) {
+      console.error('Failed to create task:', err);
+      alert(`Failed to create task: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -83,10 +95,10 @@ export function NewTaskModal({ isOpen, onClose }: NewTaskModalProps) {
                 </button>
                 <button
                   type="submit"
-                  disabled={!title.trim()}
+                  disabled={!title.trim() || isSubmitting}
                   className="flex-1 btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Create Task
+                  {isSubmitting ? 'Creating...' : 'Create Task'}
                 </button>
               </div>
             </form>

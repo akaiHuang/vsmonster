@@ -4,6 +4,7 @@ import {
   uploadMedia,
   getMedia,
   getMediaFile,
+  getMediaThumbnailFile,
   listMedia,
   deleteMedia,
   getMediaStats,
@@ -29,12 +30,29 @@ router.post('/upload', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '無效的 source' });
     }
 
+    // Security: reject path traversal in filename
+    if (typeof originalFilename !== 'string' || /\.\.|[\/\\]/.test(originalFilename)) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    // Sanitize filename: keep only safe characters
+    const sanitizedFilename = originalFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    if (!sanitizedFilename || sanitizedFilename.length === 0) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
     // 轉換 Buffer（如果是 base64）
-    const fileBuffer = typeof buffer === 'string' 
-      ? Buffer.from(buffer, 'base64') 
+    const fileBuffer = typeof buffer === 'string'
+      ? Buffer.from(buffer, 'base64')
       : buffer;
 
-    const record = await uploadMedia(fileBuffer, originalFilename, mimeType, source);
+    // Security: enforce max file size (50MB)
+    const MAX_FILE_SIZE = 50 * 1024 * 1024;
+    if (fileBuffer.length > MAX_FILE_SIZE) {
+      return res.status(400).json({ error: 'File too large (max 50MB)' });
+    }
+
+    const record = await uploadMedia(fileBuffer, sanitizedFilename, mimeType, source);
 
     res.json({
       success: true,
@@ -43,6 +61,21 @@ router.post('/upload', async (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : '上傳失敗',
+    });
+  }
+});
+
+/**
+ * 取得統計資訊
+ * GET /api/media/stats/overview
+ */
+router.get('/stats/overview', (req: Request, res: Response) => {
+  try {
+    const stats = getMediaStats();
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : '統計失敗',
     });
   }
 });
@@ -130,7 +163,7 @@ router.get('/:mediaId/thumbnail', (req: Request, res: Response) => {
     }
 
     // 從磁碟讀取縮圖
-    const fileBuffer = getMediaFile(mediaId);
+    const fileBuffer = getMediaThumbnailFile(mediaId);
     if (!fileBuffer) {
       return res.status(404).json({ error: '縮圖檔案不存在' });
     }
@@ -187,21 +220,6 @@ router.get('/', (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : '列表查詢失敗',
-    });
-  }
-});
-
-/**
- * 取得統計資訊
- * GET /api/media/stats
- */
-router.get('/stats/overview', (req: Request, res: Response) => {
-  try {
-    const stats = getMediaStats();
-    res.json(stats);
-  } catch (error) {
-    res.status(500).json({
-      error: error instanceof Error ? error.message : '統計失敗',
     });
   }
 });

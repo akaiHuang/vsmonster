@@ -32,12 +32,6 @@ const ANIMAL_NAMES = [
   'Sparrow', 'Squirrel', 'Tiger', 'Turtle', 'Unicorn', 'Wolf'
 ];
 
-// 顏色形容詞（可選，讓名字更獨特）
-const COLOR_ADJECTIVES = [
-  'Blue', 'Coral', 'Crimson', 'Crystal', 'Golden', 'Jade', 'Midnight',
-  'Mint', 'Rose', 'Ruby', 'Silver', 'Sunset', 'Teal', 'Violet'
-];
-
 // 所有名稱池
 const ALL_NAMES = [...SIMPLE_NAMES, ...FRUIT_NAMES, ...ANIMAL_NAMES];
 

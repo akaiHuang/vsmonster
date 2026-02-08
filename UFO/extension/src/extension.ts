@@ -51,6 +51,14 @@ function isLocalhostUrl(url: string): boolean {
   return /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(String(url || ""));
 }
 
+/** Convert a WebSocket gateway URL (ws:// / wss://) to its HTTP equivalent. */
+function gatewayWsToHttp(wsUrl: string): string {
+  return String(wsUrl || "")
+    .replace(/^ws:/, "http:")
+    .replace(/^wss:/, "https:")
+    .replace(/\/+$/, "");
+}
+
 type CloudflaredQuickTunnelState = {
   localUrl: string;
   publicUrl?: string;
@@ -969,10 +977,7 @@ function buildDashboardState(
     !!discordBotToken && !isPlaceholder(discordBotToken) &&
     !!discordPublicKey && !isPlaceholder(discordPublicKey);
 
-  const gatewayHttpUrl = gatewayUrl
-    .replace(/^ws:/, 'http:')
-    .replace(/^wss:/, 'https:')
-    .replace(/\/+$/, '');
+  const gatewayHttpUrl = gatewayWsToHttp(gatewayUrl);
 
   return {
     connected,
@@ -1796,65 +1801,6 @@ function looksLikeTaskFollowup(text: string): boolean {
   return /(剛(剛|才)|上次|前面|剛做的|這個|那個|不滿意|不好看|怪怪的|有問題|有 bug|再優化|再改|再調整|再修|加一點|補上|延伸)/i.test(t);
 }
 
-async function delegateToBlueMonster(
-  context: vscode.ExtensionContext,
-  output: vscode.OutputChannel,
-  dashboardProvider: UfoDashboardProvider,
-  gatewayClient: GatewayClient,
-  meta: { channel: string; userId: string; messageId?: string; timestamp?: string },
-  requestText: string
-): Promise<void> {
-  const prompt = [
-    "你是 BlueMonster，請在本機 VS Code 專案中實際處理這個問題。",
-    "",
-    "需求：",
-    requestText,
-    "",
-    "輸出要求：",
-    "- 用精簡文字回覆你做了什麼、改了哪些檔案、以及如何驗證",
-    "- 如果需要跑指令或改檔，請照做；若遇到需要確認的危險操作，會產生 pending confirmation（由 UFO 轉達給使用者）",
-  ].join("\n");
-
-  try {
-    const result = await vscode.commands.executeCommand(
-      "blueMonster.sendMessageExternal",
-      prompt,
-      "agent"
-    ) as any;
-
-    const text = typeof result?.text === "string" ? result.text : "";
-    const pending = Array.isArray(result?.pendingConfirmations) ? result.pendingConfirmations : [];
-    if (text) {
-      sendToChannel(text);
-    } else {
-      sendToChannel("（BlueMonster 未回傳文字結果，可能仍在執行或需要確認。）");
-    }
-
-    if (pending.length > 0) {
-      const lines = [
-        "需要你確認要不要讓 BlueMonster 執行以下動作：",
-        ...pending.map((p: any) => `- id=${p.id} category=${p.category} cmd=${p.command}`),
-        "",
-        "回覆其中一個：",
-        "- run <id>  (允許執行)",
-        "- cancel <id> (取消)",
-        "- sessionAllow <id> (本次對話允許此類別)",
-        "- projectAllow <id> (本專案允許此類別)",
-      ].join("\n");
-      gatewayClient.send({ type: "copilot_response", channel: meta.channel, userId: meta.userId, content: lines });
-    }
-  } catch (err) {
-    output.appendLine(`[UFO] BlueMonster delegation failed: ${String(err)}`);
-    dashboardProvider.log("error", `BlueMonster delegation failed: ${String(err)}`, "error");
-    gatewayClient.send({
-      type: "copilot_response",
-      channel: meta.channel,
-      userId: meta.userId,
-      content: "❌ 無法呼叫 BlueMonster。請確認 BlueMonster extension 已安裝/啟用，且此 VS Code 視窗可執行 blueMonster.* commands。"
-    });
-  }
-}
-
 function guessTaskTitleFromRequest(requestText: string): string {
   const t = requestText.trim();
   if (!t) return "task";
@@ -2184,10 +2130,7 @@ async function executeUfoTaskWithBlueMonster(options: {
   const devSpecPath = findDevSpecFile(taskDir);
   const ufoCfg = vscode.workspace.getConfiguration("ufo");
   const gwUrlRaw = ufoCfg.get<string>("gatewayUrl", "ws://localhost:3000");
-  const gwHttp = String(gwUrlRaw || "ws://localhost:3000")
-    .replace(/^ws:/, "http:")
-    .replace(/^wss:/, "https:")
-    .replace(/\/+$/, "");
+  const gwHttp = gatewayWsToHttp(gwUrlRaw || "ws://localhost:3000");
   const bmSync = await syncBlueMonsterFromGateway(gwHttp, output);
 
   // Ensure the task shows up in BlueMonster's task list immediately (even before messages exist).
@@ -2290,10 +2233,7 @@ async function executeUfoTaskWithBlueMonster(options: {
 	    try {
 	      const config = vscode.workspace.getConfiguration("ufo");
 	      const gatewayUrl = config.get<string>("gatewayUrl", "ws://localhost:3000");
-	      const gatewayHttpUrl = gatewayUrl
-	        .replace(/^ws:/, "http:")
-	        .replace(/^wss:/, "https:")
-	        .replace(/\/+$/, "");
+	      const gatewayHttpUrl = gatewayWsToHttp(gatewayUrl);
 	      const overrideBaseRaw = config.get<string>("publicUrl", "") || "";
 		      const baseUrl = await resolvePublicBaseUrl(gatewayHttpUrl, overrideBaseRaw, output);
 
@@ -2778,10 +2718,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	    let taskDir = payload.taskDir;
 	    try { dashboardProvider?.log("info", `🚀 Send to BlueMonster: ${payload.taskId}`, "info"); } catch {}
 	    const ufoCfg = vscode.workspace.getConfiguration("ufo");
-	    const gw = ufoCfg.get<string>("gatewayUrl", "ws://localhost:3000")
-	      .replace(/^ws:/, "http:")
-	      .replace(/^wss:/, "https:")
-	      .replace(/\/+$/, "");
+	    const gw = gatewayWsToHttp(ufoCfg.get<string>("gatewayUrl", "ws://localhost:3000"));
 	    const bmSync = await syncBlueMonsterFromGateway(gw, output);
 	    const parent = path.basename(path.dirname(taskDir));
 	    if (parent === "pending") {

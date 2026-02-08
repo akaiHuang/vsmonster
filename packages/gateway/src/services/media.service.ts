@@ -156,6 +156,22 @@ export function getMediaFile(mediaId: string): Buffer | null {
 }
 
 /**
+ * 取得媒體縮圖檔案
+ */
+export function getMediaThumbnailFile(mediaId: string): Buffer | null {
+  const thumbPath = path.join(MEDIA_STORAGE_PATH, `${mediaId}-thumb.jpg`);
+  try {
+    if (fs.existsSync(thumbPath)) {
+      return fs.readFileSync(thumbPath);
+    }
+    return null;
+  } catch (e) {
+    console.error(`無法讀取縮圖: ${thumbPath}`, e);
+    return null;
+  }
+}
+
+/**
  * 列出媒體（分頁）
  */
 export function listMedia(skip: number = 0, limit: number = 20): MediaRecord[] {

@@ -53,7 +53,7 @@ export class HandshakeManager {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
     for (let i = 0; i < this.config.codeLength; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
+      code += chars.charAt(crypto.randomInt(chars.length));
     }
 
     const now = new Date();
@@ -72,7 +72,7 @@ export class HandshakeManager {
    */
   generateEmojiCode(channel: ChannelType, userId: string): string {
     const emoji = HandshakeManager.EMOJI_POOL[
-      Math.floor(Math.random() * HandshakeManager.EMOJI_POOL.length)
+      crypto.randomInt(HandshakeManager.EMOJI_POOL.length)
     ];
 
     const now = new Date();

@@ -93,6 +93,17 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+async function readLimited(filePath: string, maxChars: number): Promise<string | undefined> {
+  try {
+    const fs = await import('fs').then(m => m.promises);
+    const content = await fs.readFile(filePath, 'utf-8');
+    if (!content) return undefined;
+    return content.length > maxChars ? content.slice(0, maxChars) : content;
+  } catch {
+    return undefined;
+  }
+}
+
 // ========== Copilot SDK - 真正的並行多工系統 ==========
 import { CopilotClient, CopilotSession } from '@github/copilot-sdk';
 
@@ -170,7 +181,7 @@ class CopilotSDKManager {
       console.log(`[CopilotSDK] 🔄 Model changed from ${existingModel} to ${modelKey}, recreating session...`);
       try {
         await existing.destroy();
-      } catch {}
+      } catch (e) { console.error('[CopilotSDK] Error destroying old session:', e); }
       this.sessions.delete(chatId);
       this.sessionModels.delete(chatId);
     }
@@ -223,7 +234,7 @@ class CopilotSDKManager {
     if (session) {
       try {
         await session.destroy();
-      } catch {}
+      } catch (e) { console.error(`[CopilotSDK] Error destroying worker ${chatId}:`, e); }
       this.sessions.delete(chatId);
       this.sessionModels.delete(chatId);
       this.busySessions.delete(chatId);
@@ -284,13 +295,13 @@ class CopilotSDKManager {
   // 關閉所有
   async shutdown(): Promise<void> {
     for (const [chatId, session] of this.sessions) {
-      try { await session.destroy(); } catch {}
+      try { await session.destroy(); } catch (e) { console.error(`[CopilotSDK] Error destroying session ${chatId} during shutdown:`, e); }
     }
     this.sessions.clear();
     this.sessionModels.clear();
     this.busySessions.clear();
     if (this.client) {
-      try { await this.client.stop(); } catch {}
+      try { await this.client.stop(); } catch (e) { console.error('[CopilotSDK] Error stopping client during shutdown:', e); }
       this.client = null;
     }
     this.initPromise = null;
@@ -601,21 +612,10 @@ class BlueMonsterSession {
 	      return;
 	    }
 
-	    const fs = await import('fs').then(m => m.promises);
 	    const p = await import('path');
 	    const vscodeDir = p.join(taskFolder, '.vscode');
 	    const instructionsPath = p.join(vscodeDir, 'copilot-instructions.md');
 	    const mePath = p.join(vscodeDir, 'me.md');
-
-	    const readLimited = async (filePath: string, maxChars: number): Promise<string> => {
-	      try {
-	        const content = await fs.readFile(filePath, 'utf-8');
-	        if (!content) return '';
-	        return content.length > maxChars ? content.slice(0, maxChars) : content;
-	      } catch {
-	        return '';
-	      }
-	    };
 
 	    const [instructions, me] = await Promise.all([
 	      readLimited(instructionsPath, 4000),
@@ -1897,7 +1897,7 @@ class BlueMonsterSession {
     const resolved = this.resolvePath(raw);
     try {
       await vscode.workspace.fs.createDirectory(vscode.Uri.file(resolved));
-    } catch {}
+    } catch (e) { console.error('[BlueMonster] Error creating task directory:', e); }
 
 	    this.currentTask.taskFolder = resolved;
 	    await this.refreshPersonaMeta(this.currentTask);
@@ -1932,7 +1932,7 @@ class BlueMonsterSession {
     const resolvedFolder = this.resolvePath(rawFolder);
     try {
       await vscode.workspace.fs.createDirectory(vscode.Uri.file(resolvedFolder));
-    } catch {}
+    } catch (e) { console.error('[BlueMonster] Error creating external task directory:', e); }
 
     // Reuse existing task if the same external id already exists.
     for (const t of this.tasks.values()) {
@@ -2514,21 +2514,10 @@ class BlueMonsterSession {
 
   private async loadTaskPersonaPrompt(taskFolder?: string): Promise<string> {
     if (!taskFolder) return '';
-    const fs = await import('fs').then(m => m.promises);
-    const path = await import('path');
-    const vscodeDir = path.join(taskFolder, '.vscode');
-    const instructionsPath = path.join(vscodeDir, 'copilot-instructions.md');
-    const mePath = path.join(vscodeDir, 'me.md');
-
-    const readLimited = async (filePath: string, maxChars: number): Promise<string | undefined> => {
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        if (!content) return undefined;
-        return content.length > maxChars ? content.slice(0, maxChars) : content;
-      } catch {
-        return undefined;
-      }
-    };
+    const p = await import('path');
+    const vscodeDir = p.join(taskFolder, '.vscode');
+    const instructionsPath = p.join(vscodeDir, 'copilot-instructions.md');
+    const mePath = p.join(vscodeDir, 'me.md');
 
     const [instructions, me] = await Promise.all([
       readLimited(instructionsPath, 12000),

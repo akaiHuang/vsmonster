@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useRef, ReactNode, useCallback } from 'react';
 import { useMissionStore } from './store';
+import { mapGatewayStatus } from './utils';
 
 interface SocketContextType {
   isConnected: boolean;
@@ -20,21 +21,6 @@ interface SocketProviderProps {
 }
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || 'http://localhost:3000';
-
-/** Map Gateway task status to kanban column */
-function mapStatus(gatewayStatus: string) {
-  switch (gatewayStatus) {
-    case 'pending': return 'backlog' as const;
-    case 'running': return 'in_progress' as const;
-    case 'completed':
-    case 'delivered':
-    case 'approved': return 'completed' as const;
-    case 'rejected': return 'review' as const;
-    case 'failed':
-    case 'cancelled': return 'blocked' as const;
-    default: return 'backlog' as const;
-  }
-}
 
 export function SocketProvider({ children }: SocketProviderProps) {
   const [isConnected, setIsConnected] = useState(false);
@@ -85,7 +71,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
           upsertTask(t.id, {
             title: t.instruction || t.id,
             description: t.instruction || '',
-            status: mapStatus(t.status),
+            status: mapGatewayStatus(t.status),
             progress: t.progress,
             gatewayTaskId: t.id,
             gatewayStatus: t.status,

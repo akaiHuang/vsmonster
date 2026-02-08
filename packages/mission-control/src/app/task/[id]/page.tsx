@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
-import { MediaGallery } from '@/components/delivery/MediaGallery';
+import { MediaGallery, MediaRecord } from '@/components/delivery/MediaGallery';
 import { ReviewPanel } from '@/components/delivery/ReviewPanel';
 
 interface SubTask {
@@ -35,7 +35,7 @@ interface TaskDetail {
     updatedAt: string;
     completedAt?: string;
   };
-  media: any[];
+  media: MediaRecord[];
 }
 
 const STATUS_CONFIG: Record<string, { label: string; emoji: string; color: string }> = {

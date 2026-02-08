@@ -158,12 +158,53 @@ export function getSafeModeSettings(): SafeModeSettings {
 }
 
 /**
+ * Split a shell command into pipeline/chain segments (split by |, &&, ||, ;)
+ * and check whether any segment begins with the given pattern as a command token.
+ *
+ * For operator-style patterns (e.g. "> /", ">> /") that are not command names,
+ * we fall back to checking whether the pattern appears anywhere in any segment.
+ */
+export function isCommandToken(cmd: string, pattern: string): boolean {
+  // Operator-style patterns (redirects) — cannot be the first token of a segment,
+  // so we check each segment with includes() instead of startsWith().
+  const isOperatorPattern = pattern.startsWith('>');
+
+  // Split command string by shell chaining operators: |, &&, ||, ;
+  // We use a regex that handles ||, &&, |, and ; as delimiters.
+  const segments = cmd.split(/\s*(?:\|\||&&|[|;])\s*/);
+
+  // Normalise pattern: strip trailing whitespace so we can do a clean
+  // word-boundary check after the match.
+  const trimmedPattern = pattern.replace(/[\s]+$/, '');
+
+  for (const raw of segments) {
+    const seg = raw.trim();
+    if (!seg) continue;
+
+    if (isOperatorPattern) {
+      // For redirect operators, check anywhere in the segment
+      if (seg.includes(pattern)) return true;
+    } else {
+      // Check if segment starts with the pattern as a command token
+      if (seg.startsWith(trimmedPattern)) {
+        // Verify word boundary: next char must be whitespace, tab, or end-of-string
+        const nextChar = seg[trimmedPattern.length];
+        if (nextChar === undefined || nextChar === ' ' || nextChar === '\t') {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * 偵測危險命令
  */
 export function detectDangerousCommand(command: string): DangerInfo | null {
   const lowerCmd = command.toLowerCase();
   for (const { patterns, info } of DANGER_PATTERNS) {
-    if (patterns.some(p => lowerCmd.includes(p))) return info;
+    if (patterns.some(p => isCommandToken(lowerCmd, p))) return info;
   }
   return null;
 }

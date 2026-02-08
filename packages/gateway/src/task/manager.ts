@@ -3,6 +3,8 @@ import { Task, SubTask, TaskStatus, TaskPriority, TaskDelivery } from '../types'
 import { MediaItem } from '@vsmonster/holography';
 import { getTaskDatabase, TaskDatabase } from '../db/task-database';
 import { logger } from '../utils/logger';
+import { STATUS_EMOJI } from '../utils/constants';
+import { SimpleCache } from '../utils/cache';
 
 export interface CreateTaskParams {
   channel: string;
@@ -10,6 +12,11 @@ export interface CreateTaskParams {
   instruction: string;
   media?: MediaItem[];
   priority?: TaskPriority;
+}
+
+/** Validate that a task ID matches a safe pattern (alphanumeric + hyphens, max 100 chars). */
+export function isValidTaskId(id: string): boolean {
+  return typeof id === 'string' && id.length > 0 && id.length <= 100 && /^[a-zA-Z0-9-]+$/.test(id);
 }
 
 /**
@@ -20,8 +27,24 @@ export class TaskManager {
   private db: TaskDatabase;
   private eventListeners: Map<string, Function[]> = new Map();
 
+  // In-memory TTL caches to avoid redundant Array.from() / map lookups on
+  // frequently polled endpoints (GET /api/tasks, GET /api/tasks/:id).
+  // Caches are invalidated on every write operation so data is always fresh.
+  private allTasksCache = new SimpleCache<Task[]>(5000);
+  private taskCache = new SimpleCache<Task>(5000);
+
   constructor() {
     this.db = getTaskDatabase();
+  }
+
+  /** Invalidate all read caches. Must be called after every write. */
+  private invalidateCaches(taskId?: string): void {
+    this.allTasksCache.invalidate(); // always clear the list cache
+    if (taskId) {
+      this.taskCache.invalidate(taskId);
+    } else {
+      this.taskCache.invalidate();
+    }
   }
 
   /**
@@ -48,6 +71,7 @@ export class TaskManager {
     this.analyzeAndSplitTask(task);
 
     this.db.insert(task);
+    this.invalidateCaches(taskId);
 
     logger.info(`Task created: ${taskId} for user ${params.userId}`);
     this.emit('task:created', task);
@@ -124,6 +148,10 @@ export class TaskManager {
    * 更新任務狀態
    */
   updateTask(taskId: string, status: TaskStatus, progress?: number): void {
+    if (!isValidTaskId(taskId)) {
+      logger.warn(`Invalid task ID format: ${String(taskId).slice(0, 100)}`);
+      return;
+    }
     const task = this.db.findOne(taskId);
     if (!task) {
       logger.warn(`Task not found: ${taskId}`);
@@ -140,6 +168,7 @@ export class TaskManager {
     }
 
     this.db.updateOne(taskId, update);
+    this.invalidateCaches(taskId);
     logger.debug(`Task ${taskId} updated: ${status} (${update.progress ?? task.progress}%)`);
     this.emit('task:updated', this.db.findOne(taskId));
   }
@@ -167,6 +196,7 @@ export class TaskManager {
     }
 
     this.db.updateOne(taskId, update);
+    this.invalidateCaches(taskId);
     const updated = this.db.findOne(taskId)!;
     this.emit('task:updated', updated);
     this.emit('subtask:updated', { task: updated, subTask });
@@ -176,11 +206,13 @@ export class TaskManager {
    * 設定任務交付資料
    */
   setTaskDelivery(taskId: string, delivery: TaskDelivery): void {
+    if (!isValidTaskId(taskId)) return;
     const task = this.db.findOne(taskId);
     if (!task) return;
 
     const merged: TaskDelivery = { ...task.delivery, ...delivery };
     this.db.updateOne(taskId, { delivery: merged, updatedAt: new Date() });
+    this.invalidateCaches(taskId);
     this.emit('task:delivered', this.db.findOne(taskId));
   }
 
@@ -188,6 +220,7 @@ export class TaskManager {
    * 審核任務
    */
   reviewTask(taskId: string, approved: boolean, comment?: string): void {
+    if (!isValidTaskId(taskId)) return;
     const task = this.db.findOne(taskId);
     if (!task) return;
 
@@ -199,15 +232,25 @@ export class TaskManager {
     };
     const merged: TaskDelivery = { ...task.delivery, ...deliveryUpdate };
     this.db.updateOne(taskId, { delivery: merged, status, updatedAt: new Date() });
+    this.invalidateCaches(taskId);
     this.emit('task:reviewed', this.db.findOne(taskId));
   }
 
   getTask(taskId: string): Task | undefined {
-    return this.db.findOne(taskId);
+    if (!isValidTaskId(taskId)) return undefined;
+    const cached = this.taskCache.get(taskId);
+    if (cached !== undefined) return cached;
+    const task = this.db.findOne(taskId);
+    if (task) this.taskCache.set(taskId, task);
+    return task;
   }
 
   getAllTasks(): Task[] {
-    return this.db.findAll();
+    const cached = this.allTasksCache.get('__all__');
+    if (cached !== undefined) return cached;
+    const tasks = this.db.findAll();
+    this.allTasksCache.set('__all__', tasks);
+    return tasks;
   }
 
   getTasksForUser(userId: string): Task[] {
@@ -241,40 +284,33 @@ export class TaskManager {
   }
 
   failTask(taskId: string, error: string): void {
+    if (!isValidTaskId(taskId)) return;
     const task = this.db.findOne(taskId);
     if (!task) return;
 
     this.db.updateOne(taskId, { status: 'failed', error, updatedAt: new Date() });
+    this.invalidateCaches(taskId);
     logger.error(`Task ${taskId} failed: ${error}`);
     this.emit('task:failed', this.db.findOne(taskId));
   }
 
   cancelTask(taskId: string): void {
+    if (!isValidTaskId(taskId)) return;
     this.db.updateOne(taskId, { status: 'cancelled', updatedAt: new Date() });
+    this.invalidateCaches(taskId);
     logger.info(`Task ${taskId} cancelled`);
     this.emit('task:cancelled', this.db.findOne(taskId));
   }
 
   formatTaskStatus(task: Task): string {
-    const statusEmoji: Record<string, string> = {
-      pending: '⏳',
-      running: '🔄',
-      completed: '✅',
-      failed: '❌',
-      cancelled: '🚫',
-      delivered: '📦',
-      approved: '👍',
-      rejected: '↩️',
-    };
-
-    let result = `${statusEmoji[task.status] || '❓'} 任務: ${task.id}\n`;
+    let result = `${STATUS_EMOJI[task.status] || '❓'} 任務: ${task.id}\n`;
     result += `指令: ${task.instruction.slice(0, 50)}${task.instruction.length > 50 ? '...' : ''}\n`;
     result += `進度: ${task.progress}%\n`;
 
     if (task.subtasks && task.subtasks.length > 0) {
       result += '\n子任務:\n';
       for (const st of task.subtasks) {
-        const stEmoji = statusEmoji[st.status] || '❓';
+        const stEmoji = STATUS_EMOJI[st.status] || '❓';
         result += `  ${stEmoji} [${st.order}] ${st.description}\n`;
       }
     }

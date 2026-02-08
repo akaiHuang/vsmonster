@@ -12,7 +12,7 @@
     "start": "pnpm --filter @vsmonster/gateway start",
     "start:mission": "pnpm --filter @vsmonster/mission-control start",
     "lint": "pnpm -r lint",
-    "test": "pnpm -r test",
+    "test": "vitest run",
     "test:e2e": "pnpm --filter @vsmonster/mission-control test:e2e",
     "test:e2e:ui": "pnpm --filter @vsmonster/mission-control test:e2e:ui",
     "typecheck": "pnpm -r type-check",
@@ -26,7 +26,8 @@
   ],
   "devDependencies": {
     "concurrently": "^8.2.2",
-    "typescript": "^5.x"
+    "typescript": "^5.x",
+    "vitest": "^1.2.0"
   },
   "engines": {
     "node": ">=20.0.0",

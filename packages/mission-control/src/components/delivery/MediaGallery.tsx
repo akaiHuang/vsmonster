@@ -1,6 +1,6 @@
 'use client';
 
-interface MediaRecord {
+export interface MediaRecord {
   _id: string;
   filename: string;
   originalFilename: string;

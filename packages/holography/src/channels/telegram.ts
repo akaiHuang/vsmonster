@@ -6,33 +6,25 @@
 import { Bot, InputFile, webhookCallback } from 'grammy';
 import { HologramChannel } from './base';
 import { TelegramConfig, IncomingMessage, OutgoingMessage } from '../core/types';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
 
 /**
- * 自定義 API 請求函數，使用 curl 繞過 Node.js 網路問題
+ * 自定義 API 請求函數，使用 Node.js 原生 fetch 繞過 grammy 網路問題
+ * (Previously used child_process.exec + curl, which was a shell injection vulnerability)
  */
 async function customFetch(url: string, init?: RequestInit): Promise<Response> {
   const method = init?.method || 'GET';
-  const body = init?.body ? String(init.body) : '';
-  
+  const body = init?.body ? String(init.body) : undefined;
+
   try {
-    let cmd: string;
-    if (method === 'POST' && body) {
-      cmd = `curl -s -X POST "${url}" -H "Content-Type: application/json" -d '${body.replace(/'/g, "'\\''")}'`;
-    } else {
-      cmd = `curl -s "${url}"`;
-    }
-    
-    const { stdout } = await execAsync(cmd, { timeout: 30000 });
-    return new Response(stdout, {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
+    const response = await fetch(url, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body,
+      signal: AbortSignal.timeout(30000),
     });
+    return response;
   } catch (error) {
-    throw new Error(`Curl fetch failed: ${error}`);
+    throw new Error(`Native fetch failed: ${error}`);
   }
 }
 

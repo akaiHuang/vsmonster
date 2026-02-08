@@ -1,3 +1,4 @@
+// TODO: Implement actual Copilot WebSocket bridge
 import { logger } from '../utils/logger';
 
 /**

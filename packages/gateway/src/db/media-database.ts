@@ -1,6 +1,14 @@
 /**
- * MongoDB 適配器
- * 為多媒體資料庫提供持久化儲存
+ * Media Database
+ * JSON file persistence for media records (NoSQL-style).
+ *
+ * Performance notes:
+ * - Disk writes are debounced (500 ms) so rapid inserts (e.g. batch media
+ *   ingest) don't each trigger a synchronous writeFileSync.
+ * - Data is loaded lazily on first access rather than eagerly in the
+ *   constructor, shaving startup time when the database is not needed
+ *   immediately.
+ * - flush() forces an immediate write -- call during graceful shutdown.
  */
 
 interface MongoMediaRecord {
@@ -17,27 +25,33 @@ interface MongoMediaRecord {
   mediaType: 'image' | 'video' | 'file';
 }
 
-// 使用簡單的 JSON 檔案作為 NoSQL 替代方案
-// 實際應用可替換為真正的 MongoDB
-
 import fs from 'fs';
 import path from 'path';
+import { debounce } from '../utils/debounce';
 
 const DB_PATH = process.env.MEDIA_DB_PATH || path.join(process.cwd(), '.media-db.json');
 
 class MediaDatabase {
   private db: Map<string, MongoMediaRecord> = new Map();
   private dbPath: string;
+  private loaded = false;
 
   constructor(dbPath: string = DB_PATH) {
     this.dbPath = dbPath;
-    this.load();
+    // NOTE: load is deferred to first access (ensureLoaded).
+  }
+
+  /** Ensure data has been loaded from disk (lazy init). */
+  private ensureLoaded(): void {
+    if (this.loaded) return;
+    this.loaded = true;
+    this.loadFromDisk();
   }
 
   /**
-   * 從檔案載入資料庫
+   * Load records from JSON file on disk.
    */
-  private load(): void {
+  private loadFromDisk(): void {
     try {
       if (fs.existsSync(this.dbPath)) {
         const data = fs.readFileSync(this.dbPath, 'utf-8');
@@ -48,44 +62,64 @@ class MediaDatabase {
             uploadedAt: new Date(record.uploadedAt),
           });
         });
-        console.log(`✅ 從 ${this.dbPath} 載入 ${parsed.length} 筆記錄`);
+        console.log(`\u2705 \u5f9e ${this.dbPath} \u8f09\u5165 ${parsed.length} \u7b46\u8a18\u9304`);
       }
     } catch (error) {
-      console.warn(`⚠️  無法載入資料庫: ${error}`);
+      console.warn(`\u26a0\ufe0f  \u7121\u6cd5\u8f09\u5165\u8cc7\u6599\u5eab: ${error}`);
     }
   }
 
   /**
-   * 保存資料庫到檔案
+   * Debounced disk write (500 ms trailing edge).
    */
-  save(): void {
+  private debouncedSave = debounce(() => {
+    this.saveImmediate();
+  }, 500);
+
+  /** Write the database to disk immediately. */
+  private saveImmediate(): void {
     try {
       const data = Array.from(this.db.values());
       fs.writeFileSync(this.dbPath, JSON.stringify(data, null, 2));
     } catch (error) {
-      console.error(`❌ 無法保存資料庫: ${error}`);
+      console.error(`\u274c \u7121\u6cd5\u4fdd\u5b58\u8cc7\u6599\u5eab: ${error}`);
     }
   }
 
   /**
-   * 新增記錄
+   * Schedule a debounced save.
+   */
+  save(): void {
+    this.debouncedSave();
+  }
+
+  /** Force an immediate write -- call during graceful shutdown. */
+  flush(): void {
+    this.debouncedSave.flush();
+  }
+
+  /**
+   * Insert a record.
    */
   insert(id: string, record: MongoMediaRecord): void {
+    this.ensureLoaded();
     this.db.set(id, record);
     this.save();
   }
 
   /**
-   * 查詢單筆記錄
+   * Find a single record by ID.
    */
   findOne(id: string): MongoMediaRecord | undefined {
+    this.ensureLoaded();
     return this.db.get(id);
   }
 
   /**
-   * 查詢多筆記錄
+   * Find records matching a partial filter.
    */
   find(filter: Partial<MongoMediaRecord> = {}): MongoMediaRecord[] {
+    this.ensureLoaded();
     return Array.from(this.db.values()).filter(record => {
       for (const [key, value] of Object.entries(filter)) {
         if ((record as any)[key] !== value) return false;
@@ -95,9 +129,10 @@ class MediaDatabase {
   }
 
   /**
-   * 列表查詢（分頁）
+   * Paginated query (sorted by uploadedAt descending).
    */
   findPaginated(skip: number = 0, limit: number = 20): MongoMediaRecord[] {
+    this.ensureLoaded();
     const sorted = Array.from(this.db.values()).sort(
       (a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime()
     );
@@ -105,9 +140,10 @@ class MediaDatabase {
   }
 
   /**
-   * 刪除記錄
+   * Delete a single record.
    */
   deleteOne(id: string): boolean {
+    this.ensureLoaded();
     const result = this.db.delete(id);
     if (result) {
       this.save();
@@ -116,9 +152,10 @@ class MediaDatabase {
   }
 
   /**
-   * 刪除多筆記錄
+   * Delete multiple records matching a filter.
    */
   deleteMany(filter: Partial<MongoMediaRecord>): number {
+    this.ensureLoaded();
     const before = this.db.size;
     const toDelete = this.find(filter);
     toDelete.forEach(record => this.db.delete(record._id));
@@ -130,12 +167,13 @@ class MediaDatabase {
   }
 
   /**
-   * 更新記錄
+   * Update a record by ID.
    */
   updateOne(id: string, update: Partial<MongoMediaRecord>): boolean {
+    this.ensureLoaded();
     const record = this.db.get(id);
     if (!record) return false;
-    
+
     const updated = { ...record, ...update, _id: id };
     this.db.set(id, updated);
     this.save();
@@ -143,32 +181,36 @@ class MediaDatabase {
   }
 
   /**
-   * 統計
+   * Count records, optionally filtered.
    */
   count(filter?: Partial<MongoMediaRecord>): number {
+    this.ensureLoaded();
     if (!filter) return this.db.size;
     return this.find(filter).length;
   }
 
   /**
-   * 獲取所有記錄
+   * Get all records.
    */
   getAll(): MongoMediaRecord[] {
+    this.ensureLoaded();
     return Array.from(this.db.values());
   }
 
   /**
-   * 清空資料庫
+   * Clear all records.
    */
   clear(): void {
+    this.ensureLoaded();
     this.db.clear();
     this.save();
   }
 
   /**
-   * 狀態檢查
+   * Database status for diagnostics.
    */
   status() {
+    this.ensureLoaded();
     return {
       path: this.dbPath,
       exists: fs.existsSync(this.dbPath),
@@ -178,7 +220,7 @@ class MediaDatabase {
   }
 }
 
-// 單例實例
+// Singleton
 let instance: MediaDatabase | null = null;
 
 export function getMediaDatabase(): MediaDatabase {

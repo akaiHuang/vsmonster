@@ -6,6 +6,7 @@
 import { IncomingMessage } from '@vsmonster/holography';
 import { TaskManager } from '../task/manager';
 import { logger } from '../utils/logger';
+import { STATUS_EMOJI } from '../utils/constants';
 
 export interface CommandContext {
   message: IncomingMessage;
@@ -83,6 +84,13 @@ export class CommandProcessor {
           return {
             success: false,
             error: '請提供任務描述，例如: /task 建立登入頁面',
+          };
+        }
+
+        if (ctx.rawArgs.length > 10000) {
+          return {
+            success: false,
+            error: 'Task instruction too long (max 10,000 characters)',
           };
         }
 
@@ -313,6 +321,13 @@ export class CommandProcessor {
     }
 
     // 非指令文字，視為直接任務
+    if (text.length > 10000) {
+      return {
+        success: false,
+        error: 'Task instruction too long (max 10,000 characters)',
+      };
+    }
+
     // 建立任務
     const task = this.taskManager.createTask({
       channel: message.channel,
@@ -406,22 +421,14 @@ export class CommandProcessor {
    * 格式化任務狀態
    */
   private formatTaskStatus(task: any): string {
-    const statusEmoji: Record<string, string> = {
-      pending: '⏳',
-      running: '🔄',
-      completed: '✅',
-      failed: '❌',
-      cancelled: '🚫',
-    };
-
     let msg = `📋 任務 #${task.id}\n\n`;
-    msg += `狀態: ${statusEmoji[task.status] || '❓'} ${task.status}\n`;
+    msg += `狀態: ${STATUS_EMOJI[task.status] || '❓'} ${task.status}\n`;
     msg += `進度: ${task.progress}%\n`;
-    
+
     if (task.subtasks?.length > 0) {
       msg += '\n子任務:\n';
       task.subtasks.forEach((st: any) => {
-        const emoji = statusEmoji[st.status] || '⏳';
+        const emoji = STATUS_EMOJI[st.status] || '⏳';
         msg += `  ${emoji} ${st.description}\n`;
       });
     }
@@ -437,18 +444,10 @@ export class CommandProcessor {
    * 格式化任務列表
    */
   private formatTaskList(tasks: any[]): string {
-    const statusEmoji: Record<string, string> = {
-      pending: '⏳',
-      running: '🔄',
-      completed: '✅',
-      failed: '❌',
-      cancelled: '🚫',
-    };
-
     let msg = '📋 你的任務列表:\n\n';
-    
+
     tasks.forEach((task, i) => {
-      const emoji = statusEmoji[task.status] || '❓';
+      const emoji = STATUS_EMOJI[task.status] || '❓';
       const shortInstruction = task.instruction.slice(0, 30);
       msg += `${i + 1}. ${emoji} #${task.id}\n`;
       msg += `   ${shortInstruction}${task.instruction.length > 30 ? '...' : ''}\n`;

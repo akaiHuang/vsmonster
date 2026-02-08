@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
+import { mapGatewayStatus } from './utils';
 
 export type TaskStatus =
   | 'backlog'
@@ -15,7 +16,7 @@ export interface SubTask {
   description: string;
   status: string;
   order: number;
-  result?: any;
+  result?: string | Record<string, unknown>;
 }
 
 export interface TaskDelivery {
@@ -58,6 +59,18 @@ export interface Worker {
   currentTask?: string;
 }
 
+interface GatewayTask {
+  id: string;
+  instruction?: string;
+  status: string;
+  progress?: number;
+  createdAt: string;
+  updatedAt: string;
+  channel?: string;
+  subtasks?: SubTask[];
+  delivery?: TaskDelivery;
+}
+
 interface MissionState {
   tasks: Task[];
   workers: Worker[];
@@ -69,7 +82,7 @@ interface MissionState {
   deleteTask: (id: string) => void;
 
   /** Bulk-set tasks from Gateway (initial fetch) */
-  setTasks: (gatewayTasks: any[]) => void;
+  setTasks: (gatewayTasks: GatewayTask[]) => void;
   /** Insert or update a task by gatewayTaskId */
   upsertTask: (gatewayTaskId: string, updates: Partial<Task>) => void;
 
@@ -77,21 +90,6 @@ interface MissionState {
   addWorker: (worker: Omit<Worker, 'id'>) => void;
   updateWorker: (id: string, updates: Partial<Worker>) => void;
   removeWorker: (id: string) => void;
-}
-
-/** Map Gateway status → kanban column */
-function mapGatewayStatus(status: string): TaskStatus {
-  switch (status) {
-    case 'pending': return 'backlog';
-    case 'running': return 'in_progress';
-    case 'completed':
-    case 'delivered':
-    case 'approved': return 'completed';
-    case 'rejected': return 'review';
-    case 'failed':
-    case 'cancelled': return 'blocked';
-    default: return 'backlog';
-  }
 }
 
 export const useMissionStore = create<MissionState>((set) => ({
@@ -136,7 +134,7 @@ export const useMissionStore = create<MissionState>((set) => ({
 
   setTasks: (gatewayTasks) =>
     set(() => ({
-      tasks: gatewayTasks.map((t: any) => ({
+      tasks: gatewayTasks.map((t) => ({
         id: t.id,
         title: t.instruction || t.id,
         description: t.instruction || '',

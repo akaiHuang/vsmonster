@@ -1,0 +1,106 @@
+/**
+ * Gateway Middleware
+ * Centralises all Express middleware setup: body parsing, security headers,
+ * rate limiting, request ID injection, input sanitisation, and request logging.
+ * Extracted from server.ts for improved maintainability.
+ */
+
+import express, { Express, Request, Response, NextFunction } from 'express';
+import helmet from 'helmet';
+import { createRateLimiter } from './utils/rate-limiter';
+import { createLogger } from './utils/logger';
+import * as crypto from 'crypto';
+
+/**
+ * Register all middleware on the Express app.
+ * Must be called BEFORE route registration so middleware runs first.
+ */
+export function setupMiddleware(app: Express): void {
+  // ── Body parsing ──────────────────────────────────────────
+
+  app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+  // ── Security headers via helmet ───────────────────────────
+
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    // Relax CSP for the inline-script test/send pages served by Gateway
+    contentSecurityPolicy: false,
+  }));
+
+  // ── Rate limiting ─────────────────────────────────────────
+
+  const generalLimiter = createRateLimiter({ windowMs: 60000, maxRequests: 100 });
+  const strictLimiter = createRateLimiter({ windowMs: 60000, maxRequests: 10 });
+
+  // General rate limiter for all routes except /health
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.path === '/health') return next();
+    generalLimiter(req, res, next);
+  });
+
+  // Stricter rate limiter for sensitive endpoints
+  app.use('/webhook', strictLimiter);
+  app.use('/api/handshake', strictLimiter);
+  app.use('/api/send', strictLimiter);
+
+  // ── Request tracing ───────────────────────────────────────
+
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    const requestId = crypto.randomUUID();
+    res.setHeader('X-Request-ID', requestId);
+    next();
+  });
+
+  // ── Cache control ─────────────────────────────────────────
+
+  app.use('/api', (_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
+
+  // ── Input sanitisation ────────────────────────────────────
+
+  // Reject excessively long URLs (> 2048 chars)
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.originalUrl.length > 2048) {
+      res.status(414).json({ error: 'URI too long' });
+      return;
+    }
+    if (req.originalUrl.includes('\0')) {
+      res.status(400).json({ error: 'Bad request: null bytes not allowed' });
+      return;
+    }
+    next();
+  });
+
+  // Reject null bytes in request body (JSON payloads)
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.body && typeof req.body === 'object') {
+      const bodyStr = JSON.stringify(req.body);
+      if (bodyStr.includes('\\u0000') || bodyStr.includes('\0')) {
+        res.status(400).json({ error: 'Bad request: null bytes not allowed in body' });
+        return;
+      }
+    }
+    next();
+  });
+
+  // ── Request logging (skip /health) ────────────────────────
+
+  const reqLogger = createLogger('http');
+  app.use((req, res, next) => {
+    if (req.path === '/health') return next();
+    const start = Date.now();
+    res.on('finish', () => {
+      reqLogger.info('request', {
+        method: req.method,
+        url: req.url,
+        status: res.statusCode,
+        ms: Date.now() - start,
+      });
+    });
+    next();
+  });
+}
