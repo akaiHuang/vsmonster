@@ -172,14 +172,13 @@ cloudflare tunnel info <tunnel-name>
 
 ## 📚 相關文檔
 
-- [BLUEMONSTER-SKILLS.md](./BLUEMONSTER-SKILLS.md) - 技能文檔
-- [newSkill.md](./newSkill.md) - 新技能發現日誌
-- [MEDIA-CDN-SETUP.md](./MEDIA-CDN-SETUP.md) - Cloudflare 隧道設定
-- [setup-ngrok.md](./setup-ngrok.md) - ngrok 快速開始
+- [BLUEMONSTER-SKILLS.md](./bluemonster/BLUEMONSTER-SKILLS.md) - 技能文檔
+- [newSkill.md](./bluemonster/newSkill.md) - 新技能發現日誌
+- [MEDIA-CDN-SETUP.md](./media/MEDIA-CDN-SETUP.md) - Cloudflare 隧道設定
+- [setup-ngrok.md](./setup/setup-ngrok.md) - ngrok 快速開始
 
 ---
 
 **最後更新**：2026-02-04  
 **活躍隧道數**：2 個永久隧道 (Cloudflare) + N 個臨時隧道 (ngrok)  
 **狀態**：✅ 正常
-

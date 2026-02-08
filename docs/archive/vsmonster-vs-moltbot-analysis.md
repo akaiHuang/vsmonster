@@ -90,7 +90,7 @@
 
 ---
 
-## ![VSMONSTER](../packages/vscode-extension/resources/bluemonster.svg) VSMONSTER 原創功能
+## ![VSMONSTER](../../packages/blue-monster/resources/blueMonster.svg) VSMONSTER 原創功能
 
 以下功能是 **VSMONSTER 獨立開發**，不依賴 Moltbot：
 
@@ -228,16 +228,16 @@ export class CopilotBridge {
 | 目錄/檔案 | 歸屬 | 說明 |
 |----------|------|------|
 | `packages/gateway/src/moltbot-integration.ts` | 🦞 依賴 | Moltbot WebSocket 客戶端 |
-| `packages/gateway/src/server.ts` | ![VSMONSTER](../packages/vscode-extension/resources/bluemonster.svg) 原創 | Gateway 服務器 |
-| `packages/gateway/src/task/` | ![VSMONSTER](../packages/vscode-extension/resources/bluemonster.svg) 原創 | 任務管理 |
-| `packages/gateway/src/copilot/` | ![VSMONSTER](../packages/vscode-extension/resources/bluemonster.svg) 原創 | Copilot 橋接 (Gateway 端) |
-| `packages/gateway/src/mcp/` | ![VSMONSTER](../packages/vscode-extension/resources/bluemonster.svg) 原創 | MCP 控制器 |
-| `packages/gateway/src/tunnel/` | ![VSMONSTER](../packages/vscode-extension/resources/bluemonster.svg) 原創 | ngrok 隧道 |
-| `packages/gateway/src/setup/` | ![VSMONSTER](../packages/vscode-extension/resources/bluemonster.svg) 原創 | 設定向導 |
+| `packages/gateway/src/server.ts` | ![VSMONSTER](../../packages/blue-monster/resources/blueMonster.svg) 原創 | Gateway 服務器 |
+| `packages/gateway/src/task/` | ![VSMONSTER](../../packages/blue-monster/resources/blueMonster.svg) 原創 | 任務管理 |
+| `packages/gateway/src/copilot/` | ![VSMONSTER](../../packages/blue-monster/resources/blueMonster.svg) 原創 | Copilot 橋接 (Gateway 端) |
+| `packages/gateway/src/mcp/` | ![VSMONSTER](../../packages/blue-monster/resources/blueMonster.svg) 原創 | MCP 控制器 |
+| `packages/gateway/src/tunnel/` | ![VSMONSTER](../../packages/blue-monster/resources/blueMonster.svg) 原創 | ngrok 隧道 |
+| `packages/gateway/src/setup/` | ![VSMONSTER](../../packages/blue-monster/resources/blueMonster.svg) 原創 | 設定向導 |
 | `packages/gateway/src/channels/` | 🔀 混合 | 頻道抽象層 (使用 Moltbot 但有原創抽象) |
-| `packages/vscode-extension/` | ![VSMONSTER](../packages/vscode-extension/resources/bluemonster.svg) 原創 | 完全原創 |
-| `packages/shared/` | ![VSMONSTER](../packages/vscode-extension/resources/bluemonster.svg) 原創 | 類型定義 |
-| `configs/` | ![VSMONSTER](../packages/vscode-extension/resources/bluemonster.svg) 原創 | 配置格式 |
+| `packages/blue-monster/` | ![VSMONSTER](../../packages/blue-monster/resources/blueMonster.svg) 原創 | VS Code Extension |
+| `packages/shared/` | ![VSMONSTER](../../packages/blue-monster/resources/blueMonster.svg) 原創 | 類型定義 |
+| `configs/` | ![VSMONSTER](../../packages/blue-monster/resources/blueMonster.svg) 原創 | 配置格式 |
 | `docs/` | 👾 原創 | 文件 |
 | `scripts/` | 👾 原創 | 腳本 |
 

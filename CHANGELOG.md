@@ -163,20 +163,20 @@ Discord channel support, and interactive setup wizard.
 
 #### 📚 Enterprise Documentation Suite
 
-- **[Enterprise Use Cases](docs/enterprise-use-cases.md)** - Apple Inc. case study
+- **[Enterprise Use Cases](docs/enterprise/enterprise-use-cases.md)** - Apple Inc. case study
   - 5,000+ developers, 200+ AI agents
   - $2.4M annual cost savings
   - 73% productivity improvement
 
-- **[8-Brand Case Studies](docs/enterprise-cases-brands.md)** - Cost optimization focus
+- **[8-Brand Case Studies](docs/enterprise/enterprise-cases-brands.md)** - Cost optimization focus
   - Tesla, Microsoft, Amazon, Google, Meta, Netflix, Nvidia, Salesforce
   - Combined savings: $15.2M annually
 
-- **[Revenue Generation Cases](docs/enterprise-cases-revenue.md)** - Growth scenarios
+- **[Revenue Generation Cases](docs/enterprise/enterprise-cases-revenue.md)** - Growth scenarios
   - Shopify, Stripe, Twilio, Datadog, MongoDB, Cloudflare, Confluent, HashiCorp
   - Combined new revenue: $127.5M
 
-- **[Implementation Guide](docs/enterprise-implementation-guide.md)** - Technical deployment
+- **[Implementation Guide](docs/enterprise/enterprise-implementation-guide.md)** - Technical deployment
   - Phase-by-phase rollout strategy
   - Security & compliance frameworks
   - ROI calculation models
@@ -240,7 +240,7 @@ Discord channel support, and interactive setup wizard.
 
 ---
 
-[Unreleased]: https://github.com/vsmonster/vsmonster/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/vsmonster/vsmonster/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/vsmonster/vsmonster/compare/v0.0.1...v0.1.0
-[0.0.1]: https://github.com/vsmonster/vsmonster/releases/tag/v0.0.1
+[Unreleased]: https://github.com/akaiHuang/vsmonster/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/akaiHuang/vsmonster/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/akaiHuang/vsmonster/compare/v0.0.1...v0.1.0
+[0.0.1]: https://github.com/akaiHuang/vsmonster/releases/tag/v0.0.1

@@ -76,9 +76,9 @@ BlueMonster: 日誌已準備好在以下位置查看
 
 ### 相關文檔
 
-- [ActiveTunnels.md](./ActiveTunnels.md) - 活躍隧道管理
-- [setup-ngrok.md](./setup-ngrok.md) - ngrok 快速開始
-- [MEDIA-CDN-SETUP.md](./MEDIA-CDN-SETUP.md) - Cloudflare 隧道設置
+- [ActiveTunnels.md](../ActiveTunnels.md) - 活躍隧道管理
+- [setup-ngrok.md](../setup/setup-ngrok.md) - ngrok 快速開始
+- [MEDIA-CDN-SETUP.md](../media/MEDIA-CDN-SETUP.md) - Cloudflare 隧道設置
 - [newSkill.md](./newSkill.md) - 已驗證的技能組合
 
 ---
@@ -223,7 +223,7 @@ $ ls .env.backup 2>&1
 
 ### 相關文檔
 
-- [copilot-instructions.md](../packages/blue-monster/.github/copilot-instructions.md) - 完整規則
+- [copilot-instructions.md](../../packages/blue-monster/.github/copilot-instructions.md) - 完整規則
 
 ---
 
@@ -310,7 +310,7 @@ BlueMonster 在刪除前應：
 
 ### 相關文檔
 
-- [copilot-instructions.md](../packages/blue-monster/.github/copilot-instructions.md) - 完整清單和規則
+- [copilot-instructions.md](../../packages/blue-monster/.github/copilot-instructions.md) - 完整清單和規則
 
 ---
 
@@ -338,7 +338,7 @@ BlueMonster 在刪除前應：
 1. **了解 BlueMonster 能力**
    - 讀 [BLUEMONSTER-SKILLS.md](./BLUEMONSTER-SKILLS.md) 了解基本能力
    - 讀 [newSkill.md](./newSkill.md) 了解高級技能
-   - 讀 [ActiveTunnels.md](./ActiveTunnels.md) 管理隧道
+   - 讀 [ActiveTunnels.md](../ActiveTunnels.md) 管理隧道
 
 2. **享受新功能**
    - 要求 BlueMonster 分享檔案
@@ -355,18 +355,18 @@ BlueMonster 在刪除前應：
 ## 📚 相關文檔
 
 ### 核心文檔
-- [copilot-instructions.md](../packages/blue-monster/.github/copilot-instructions.md) - BlueMonster 系統提示（包含所有新功能）
+- [copilot-instructions.md](../../packages/blue-monster/.github/copilot-instructions.md) - BlueMonster 系統提示（包含所有新功能）
 - [BLUEMONSTER-SKILLS.md](./BLUEMONSTER-SKILLS.md) - 技能總覽
-- [INDEX.md](./INDEX.md) - 文檔導航
+- [INDEX.md](../INDEX.md) - 文檔導航
 
 ### 新增文檔
 - [newSkill.md](./newSkill.md) - 技能學習日誌
-- [ActiveTunnels.md](./ActiveTunnels.md) - 活躍隧道管理
+- [ActiveTunnels.md](../ActiveTunnels.md) - 活躍隧道管理
 
 ### 相關指南
-- [setup-ngrok.md](./setup-ngrok.md) - ngrok 快速開始
-- [MEDIA-CDN-SETUP.md](./MEDIA-CDN-SETUP.md) - Cloudflare 隧道設置
-- [bluemonster-media-guide.md](./bluemonster-media-guide.md) - 多媒體使用指南
+- [setup-ngrok.md](../setup/setup-ngrok.md) - ngrok 快速開始
+- [MEDIA-CDN-SETUP.md](../media/MEDIA-CDN-SETUP.md) - Cloudflare 隧道設置
+- [bluemonster-media-guide.md](../media/bluemonster-media-guide.md) - 多媒體使用指南
 
 ---
 
@@ -400,4 +400,3 @@ BlueMonster 在刪除前應：
 **最後更新**：2026-02-04  
 **版本**：1.0 - 完整功能實施  
 **狀態**：✅ 就緒生產使用
-

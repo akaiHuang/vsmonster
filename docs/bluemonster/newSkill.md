@@ -259,11 +259,10 @@ ngrok http 8001
 
 - [BLUEMONSTER-SKILLS.md](./BLUEMONSTER-SKILLS.md) - 主技能表
 - [packages/blue-monster/.github/copilot-instructions.md](../../packages/blue-monster/.github/copilot-instructions.md) - BlueMonster 系統提示
-- [SETUP-CHECKLIST.md](../SETUP-CHECKLIST.md) - 安裝檢查清單
+- [SETUP-CHECKLIST.md](../archive/SETUP-CHECKLIST.md) - 安裝檢查清單
 
 ---
 
 **最後更新**：2026-02-04  
 **條目數量**：3 個新技能  
 **已驗證**：3 / 3
-

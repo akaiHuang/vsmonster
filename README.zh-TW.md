@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="packages/vscode-extension/resources/banner.svg" alt="VSMONSTER Banner" width="600">
+  <img src="packages/blue-monster/resources/blueMonster.svg" alt="VSMONSTER Banner" width="600">
 </p>
 
 # 👾 VSMONSTER
@@ -178,8 +178,8 @@ VSMONSTER 會引導你設定對外連線，**避免暴露你的真實 IP**：
 > - **絕不建議**直接暴露你的家用 IP 給社群平台
 
 設定方式會在安裝過程中引導，或參考：
-- [Cloudflare Tunnel 設定指南](docs/setup-cloudflare-tunnel.md)
-- [ngrok 設定指南](docs/setup-ngrok.md)
+- [Cloudflare Tunnel 設定指南](docs/setup/setup-cloudflare-tunnel.md)
+- [ngrok 設定指南](docs/setup/setup-ngrok.md)
 
 #### 🔌 啟動 Gateway
 
@@ -212,9 +212,9 @@ pnpm dev:gateway
 
 | 平台 | 難易度 | 適合對象 | 設定教學 |
 |------|--------|----------|----------|
-| 💚 **LINE** | ⭐⭐ | 台灣/日本用戶 | [📖 docs/setup-line.md](docs/setup-line.md) |
-| 🔵 **Telegram** | ⭐ | 最簡單，推薦新手 | [📖 docs/setup-telegram.md](docs/setup-telegram.md) |
-| 🟣 **Discord** | ⭐⭐⭐ | 團隊協作 | [📖 docs/setup-discord.md](docs/setup-discord.md) |
+| 💚 **LINE** | ⭐⭐ | 台灣/日本用戶 | [📖 docs/setup/setup-line.md](docs/setup/setup-line.md) |
+| 🔵 **Telegram** | ⭐ | 最簡單，推薦新手 | [📖 docs/setup/setup-telegram.md](docs/setup/setup-telegram.md) |
+| 🟣 **Discord** | ⭐⭐⭐ | 團隊協作 | [📖 docs/setup/setup-discord.md](docs/setup/setup-discord.md) |
 
 **第二步：人類手動編輯 `.env` 檔案**
 
@@ -273,9 +273,9 @@ Copilot 會：
 
 | 平台 | 說明 | 設定指南 |
 |------|------|----------|
-| 💚 LINE | 適合台灣/日本用戶 | [docs/setup-line.md](docs/setup-line.md) |
-| 🔵 Telegram | 設定最簡單 | [docs/setup-telegram.md](docs/setup-telegram.md) |
-| 🟣 Discord | 團隊協作首選 | [docs/setup-discord.md](docs/setup-discord.md) |
+| 💚 LINE | 適合台灣/日本用戶 | [docs/setup/setup-line.md](docs/setup/setup-line.md) |
+| 🔵 Telegram | 設定最簡單 | [docs/setup/setup-telegram.md](docs/setup/setup-telegram.md) |
+| 🟣 Discord | 團隊協作首選 | [docs/setup/setup-discord.md](docs/setup/setup-discord.md) |
 
 ---
 
@@ -355,12 +355,12 @@ VS Code 設定：
 ## 📚 文件
 
 - 快速開始：`docs/quick-start.md`
-- 平台設定：`docs/setup-line.md` / `docs/setup-telegram.md` / `docs/setup-discord.md`
-- Moltbot 整合：`docs/moltbot-integration.md`
-- 企業應用案例：`docs/enterprise-use-cases.md`（Apple 案例）
-- 多品牌節流案例：`docs/enterprise-cases-brands.md`（效率提升、成本降低）
-- 多品牌開源案例：`docs/enterprise-cases-revenue.md`（營收增長、新商業模式）
-- **🛠️ 實作指南**：`docs/enterprise-implementation-guide.md`（詳細設定與程式碼）
+- 平台設定：`docs/setup/setup-line.md` / `docs/setup/setup-telegram.md` / `docs/setup/setup-discord.md`
+- Moltbot 整合：`docs/setup/moltbot-integration.md`
+- 企業應用案例：`docs/enterprise/enterprise-use-cases.md`（Apple 案例）
+- 多品牌節流案例：`docs/enterprise/enterprise-cases-brands.md`（效率提升、成本降低）
+- 多品牌開源案例：`docs/enterprise/enterprise-cases-revenue.md`（營收增長、新商業模式）
+- **🛠️ 實作指南**：`docs/enterprise/enterprise-implementation-guide.md`（詳細設定與程式碼）
 - VSMONSTER vs Moltbot：`docs/vsmonster-vs-moltbot-analysis.md`
 
 ---
@@ -371,7 +371,7 @@ VSMONSTER 專注於 **VS Code + Copilot + 任務流程**，
 社群平台連接能力由 **🦞 Moltbot** 提供支援。
 
 如果你要深入了解 Moltbot 或自行擴充頻道連接器，請參考：
-`docs/moltbot-integration.md`
+`docs/setup/moltbot-integration.md`
 
 ---
 

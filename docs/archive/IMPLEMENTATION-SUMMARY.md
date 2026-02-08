@@ -13,7 +13,7 @@
 - Cloudflare: `tunnelId`, `accountId`, `token`
 
 📁 **修改的檔案：**
-- [packages/vscode-extension/package.json](packages/vscode-extension/package.json)
+- [packages/blue-monster/package.json](../../packages/blue-monster/package.json)
 
 ---
 
@@ -37,11 +37,11 @@
 - 驗證 URL 路徑密鑰
 
 📁 **修改的檔案：**
-- [packages/gateway/src/channels/line/index.ts](packages/gateway/src/channels/line/index.ts)
-- [packages/gateway/src/server.ts](packages/gateway/src/server.ts)
+- `packages/gateway/src/channels/line/index.ts` (archived path; may differ in current repo)
+- [packages/gateway/src/server.ts](../../packages/gateway/src/server.ts)
 
 📘 **教學文件：**
-- [docs/line-security-setup.md](docs/line-security-setup.md)
+- [docs/setup/line-security-setup.md](../setup/line-security-setup.md)
 
 ---
 
@@ -60,7 +60,7 @@
 - 狀態欄提示：`$(error) VSMONSTER (Disabled)`
 
 📁 **修改的檔案：**
-- [packages/vscode-extension/src/extension.ts](packages/vscode-extension/src/extension.ts)
+- [packages/blue-monster/src/extension.ts](../../packages/blue-monster/src/extension.ts)
 
 ---
 
@@ -85,10 +85,10 @@ http://localhost:3000/web
 - `DELETE /api/web/conversations/:id` - 清除會話
 
 📁 **新增的檔案：**
-- [packages/gateway/src/web-interface.ts](packages/gateway/src/web-interface.ts)
+- `packages/gateway/src/web-interface.ts` (archived path; may differ in current repo)
 
 📁 **修改的檔案：**
-- [packages/gateway/src/server.ts](packages/gateway/src/server.ts)
+- [packages/gateway/src/server.ts](../../packages/gateway/src/server.ts)
 
 ---
 
@@ -114,13 +114,13 @@ VSMONSTER 現在會智能區分「閒聊」和「工作任務」！
 - "修改這個函數"
 
 📁 **新增的檔案：**
-- [soul.md](soul.md) - AI 個性配置
-- [packages/gateway/src/soul/manager.ts](packages/gateway/src/soul/manager.ts)
+- [soul.md](../../soul.md) - AI 個性配置
+- [packages/gateway/src/soul/manager.ts](../../packages/gateway/src/soul/manager.ts)
 
 📁 **修改的檔案：**
-- [packages/gateway/src/server.ts](packages/gateway/src/server.ts)
-- [packages/vscode-extension/src/extension.ts](packages/vscode-extension/src/extension.ts)
-- [packages/vscode-extension/src/gateway-client.ts](packages/vscode-extension/src/gateway-client.ts)
+- [packages/gateway/src/server.ts](../../packages/gateway/src/server.ts)
+- [packages/blue-monster/src/extension.ts](../../packages/blue-monster/src/extension.ts)
+- `packages/vscode-extension/src/gateway-client.ts` (archived path; may differ in current repo)
 
 ---
 
@@ -128,7 +128,7 @@ VSMONSTER 現在會智能區分「閒聊」和「工作任務」！
 
 新增教學文件：
 - ✅ [UPDATE-NOTES.md](UPDATE-NOTES.md) - 完整更新說明
-- ✅ [docs/line-security-setup.md](docs/line-security-setup.md) - LINE 安全設定教學
+- ✅ [docs/setup/line-security-setup.md](../setup/line-security-setup.md) - LINE 安全設定教學
 - ✅ [IMPLEMENTATION-SUMMARY.md](IMPLEMENTATION-SUMMARY.md) - 本檔案
 
 ---

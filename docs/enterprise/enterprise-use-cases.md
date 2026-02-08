@@ -516,4 +516,4 @@ pnpm dev
 
 ---
 
-[← 返回主文件](../README.md) | [Moltbot 整合指南 →](./moltbot-integration.md)
+[← 返回主文件](../../README.md) | [Moltbot 整合指南 →](../setup/moltbot-integration.md)

@@ -308,7 +308,7 @@ pnpm dev
 
 ## 📝 開發日誌
 
-詳見 [CHANGELOG.md](./CHANGELOG.md)
+詳見 [CHANGELOG.md](../CHANGELOG.md)
 
 ---
 

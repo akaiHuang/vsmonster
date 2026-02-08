@@ -11,9 +11,9 @@
 **功能**：使用 Cloudflare/ngrok 為用戶快速生成檔案下載連結
 
 **文檔位置**：
-- 核心規則：[copilot-instructions.md](../packages/blue-monster/.github/copilot-instructions.md#進階功能)
-- 隧道管理：[ActiveTunnels.md](./ActiveTunnels.md)
-- 完整指南：[BLUEMONSTER-ENHANCEMENTS.md](./BLUEMONSTER-ENHANCEMENTS.md#1️⃣-url-分享與文件分發)
+- 核心規則：[copilot-instructions.md](../../packages/blue-monster/.github/copilot-instructions.md#進階功能)
+- 隧道管理：[ActiveTunnels.md](../ActiveTunnels.md)
+- 完整指南：[BLUEMONSTER-ENHANCEMENTS.md](../bluemonster/BLUEMONSTER-ENHANCEMENTS.md#1️⃣-url-分享與文件分發)
 
 **核心命令**：
 ```bash
@@ -29,9 +29,9 @@ python3 -m http.server 8000        # Python 伺服器
 **功能**：當遇到複雜問題時，組合現有技能創造新解決方案
 
 **文檔位置**：
-- 思考框架：[copilot-instructions.md (46-86 行)](../packages/blue-monster/.github/copilot-instructions.md#技能組合思考框架skillcombination)
-- 技能日誌：[newSkill.md](./newSkill.md)
-- 完整指南：[BLUEMONSTER-ENHANCEMENTS.md](./BLUEMONSTER-ENHANCEMENTS.md#2️⃣-技能組合學習模式)
+- 思考框架：[copilot-instructions.md (46-86 行)](../../packages/blue-monster/.github/copilot-instructions.md#技能組合思考框架skillcombination)
+- 技能日誌：[newSkill.md](../bluemonster/newSkill.md)
+- 完整指南：[BLUEMONSTER-ENHANCEMENTS.md](../bluemonster/BLUEMONSTER-ENHANCEMENTS.md#2️⃣-技能組合學習模式)
 
 **思考框架**：
 ```
@@ -53,8 +53,8 @@ python3 -m http.server 8000        # Python 伺服器
 **功能**：執行刪除前詢問用戶，防止意外損失
 
 **文檔位置**：
-- 完整規則：[copilot-instructions.md (221-268 行)](../packages/blue-monster/.github/copilot-instructions.md#📋-檔案刪除安全規則)
-- 完整指南：[BLUEMONSTER-ENHANCEMENTS.md](./BLUEMONSTER-ENHANCEMENTS.md#3️⃣-檔案刪除安全確認)
+- 完整規則：[copilot-instructions.md (221-268 行)](../../packages/blue-monster/.github/copilot-instructions.md#📋-檔案刪除安全規則)
+- 完整指南：[BLUEMONSTER-ENHANCEMENTS.md](../bluemonster/BLUEMONSTER-ENHANCEMENTS.md#3️⃣-檔案刪除安全確認)
 
 **三層確認**：
 1. 查詢檔案信息（大小、類型、內容預覽）
@@ -69,8 +69,8 @@ python3 -m http.server 8000        # Python 伺服器
 **功能**：學習系統檔案知識，防止刪除重要檔案
 
 **文檔位置**：
-- 完整清單：[copilot-instructions.md (269-315 行)](../packages/blue-monster/.github/copilot-instructions.md#🔐-受保護的系統檔案清單)
-- 完整指南：[BLUEMONSTER-ENHANCEMENTS.md](./BLUEMONSTER-ENHANCEMENTS.md#4️⃣-系統檔案保護)
+- 完整清單：[copilot-instructions.md (269-315 行)](../../packages/blue-monster/.github/copilot-instructions.md#🔐-受保護的系統檔案清單)
+- 完整指南：[BLUEMONSTER-ENHANCEMENTS.md](../bluemonster/BLUEMONSTER-ENHANCEMENTS.md#4️⃣-系統檔案保護)
 
 **風險分類**：
 - 🔴 絕對禁止：/etc, /sys, ~/.ssh, ~/.git

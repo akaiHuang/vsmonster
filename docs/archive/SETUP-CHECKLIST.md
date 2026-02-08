@@ -177,8 +177,7 @@ cloudflared tunnel info media-cdn
 ---
 
 📖 **更多文檔**：
-- [媒體 CDN 完整設置指南](./docs/MEDIA-CDN-SETUP.md)
-- [BlueMonster 多媒體使用指南](./docs/bluemonster-media-guide.md)
-- [API 文檔](./docs/media-database-guide.md)
-- [Cloudflare 維護日誌](./docs/CLOUDFLARE-MAINTENANCE.md)
-
+- [媒體 CDN 完整設置指南](../media/MEDIA-CDN-SETUP.md)
+- [BlueMonster 多媒體使用指南](../media/bluemonster-media-guide.md)
+- [API 文檔](../media/media-database-guide.md)
+- [Cloudflare 維護日誌](./CLOUDFLARE-MAINTENANCE.md)

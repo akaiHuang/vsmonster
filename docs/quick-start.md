@@ -14,8 +14,8 @@
 ### 1. 複製專案
 
 ```bash
-git clone https://github.com/your-username/VSMONSTER.git
-cd VSMONSTER
+git clone https://github.com/akaiHuang/vsmonster.git
+cd vsmonster
 ```
 
 ### 2. 安裝依賴
@@ -55,7 +55,7 @@ pnpm exec ts-node bin/cli.ts init
 3. 複製 Bot Token
 4. 在設定向導中貼上 Token
 
-[詳細教學 →](setup-telegram.md)
+[詳細教學 →](./setup/setup-telegram.md)
 
 ### 選項 2: LINE
 
@@ -66,7 +66,7 @@ pnpm exec ts-node bin/cli.ts init
 3. 取得 Channel Access Token 和 Channel Secret
 4. 設定 Webhook URL
 
-[詳細教學 →](setup-line.md)
+[詳細教學 →](./setup/setup-line.md)
 
 ### 選項 3: Discord
 
@@ -77,13 +77,13 @@ pnpm exec ts-node bin/cli.ts init
 3. 邀請 Bot 到伺服器
 4. 取得 Bot Token
 
-[詳細教學 →](setup-discord.md)
+[詳細教學 →](./setup/setup-discord.md)
 
 ## 🔧 VS Code 設定
 
 ### 安裝 VSMONSTER 擴展
 
-目前擴展尚未發布到市集，請按照以下步驟手動安裝:
+若你無法使用 Marketplace，可按照以下步驟手動安裝:
 
 1. 建置擴展:
    ```bash
@@ -93,7 +93,7 @@ pnpm exec ts-node bin/cli.ts init
 2. 在 VS Code 中:
    - 按 `Cmd+Shift+P` (Mac) 或 `Ctrl+Shift+P` (Windows/Linux)
    - 輸入 "Install from VSIX"
-   - 選擇 `packages/vscode-extension/vsmonster-*.vsix`
+   - 選擇你下載的 `vsix` 檔（例如 `blue-monster-*.vsix` 或 `vsmonster-*.vsix`）
 
 ### 連接 Gateway
 
@@ -179,16 +179,15 @@ pnpm exec ts-node bin/cli.ts doctor
 
 ## 📚 進階主題
 
-- [MCP 服務器整合](mcp-usage.md)
-- [自訂頻道適配器](custom-channel.md)
-- [Docker 部署](docker-deploy.md)
-- [API 參考](api-reference.md)
+- [MCP / 工具能力總覽](./bluemonster/BLUEMONSTER-SKILLS.md)
+- [自訂頻道指南](./custom-channel-guide.md)
+- [API 指南（Extension）](../packages/blue-monster/docs/API-GUIDE.md)
 
 ## 🆘 需要幫助？
 
-- 📖 [完整文件](https://github.com/your-username/VSMONSTER/docs)
-- 🐛 [問題回報](https://github.com/your-username/VSMONSTER/issues)
-- 💬 [討論區](https://github.com/your-username/VSMONSTER/discussions)
+- 📖 [完整文件](https://github.com/akaiHuang/vsmonster/tree/main/docs)
+- 🐛 [問題回報](https://github.com/akaiHuang/vsmonster/issues)
+- 💬 [討論區](https://github.com/akaiHuang/vsmonster/discussions)
 
 ---
 

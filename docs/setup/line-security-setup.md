@@ -323,4 +323,4 @@ GET /api/whitelist/line
 
 **最後更新：** 2026-02-01  
 **版本：** v0.1.0  
-**相關文件：** [UPDATE-NOTES.md](./UPDATE-NOTES.md)
+**相關文件：** [UPDATE-NOTES.md](../archive/UPDATE-NOTES.md)

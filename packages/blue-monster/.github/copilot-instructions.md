@@ -559,9 +559,9 @@ cat ~/.cloudflared/config.yml
 - 檔案存儲: `media-storage/YYYY-MM/` (根目錄)
 
 **詳細文檔**:
-- [多媒體使用指南](../../../docs/bluemonster-media-guide.md)
-- [媒體 CDN 設置指南](../../../docs/MEDIA-CDN-SETUP.md)
-- [API 文檔](../../../docs/media-database-guide.md)
+- [多媒體使用指南](../../../docs/media/bluemonster-media-guide.md)
+- [媒體 CDN 設置指南](../../../docs/media/MEDIA-CDN-SETUP.md)
+- [API 文檔](../../../docs/media/media-database-guide.md)
 
 **用途**：快速開發測試環境的隧道解決方案（相比 Cloudflare 更簡單快速）
 

@@ -103,8 +103,8 @@ VS Code Marketplace 基於安全性考量，禁止在 `README.md` 中直接嵌�
 
 ### 解決方案
 將 `README.md` 中的圖片轉為 PNG 或 JPG 格式。
-- ✅ `![Icon](resources/icon.png)`
-- ❌ `![Icon](resources/icon.svg)`
+- ✅ `![Icon] (resources/icon.png)`
+- ❌ `![Icon] (resources/icon.svg)`
 
 ---
 

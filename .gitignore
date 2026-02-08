@@ -42,6 +42,13 @@ configs/line-whitelist.json
 
 # Gateway data (含敏感資訊)
 packages/gateway/data/
+packages/gateway/.media-db.json
+packages/gateway/media-storage/
+packages/gateway/configs/*-whitelist.json
+packages/gateway/configs/verified-users.json
+
+# Local AI settings (user specific)
+configs/ai-settings.json
 
 # UFO tasks (開發任務追蹤)
 UFO/tasks/

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="packages/vscode-extension/resources/banner.svg" alt="VSMONSTER Banner" width="600">
+  <img src="packages/blue-monster/resources/blueMonster.svg" alt="VSMONSTER Banner" width="600">
 </p>
 
 # 👾 VSMONSTER
@@ -179,8 +179,8 @@ VSMONSTER will guide you through setting up external connections, **while keepin
 > - **Never recommended** to directly expose your home IP to messaging platforms
 
 Setup instructions will be provided during installation, or refer to:
-- [Cloudflare Tunnel Setup Guide](docs/setup-cloudflare-tunnel.md)
-- [ngrok Setup Guide](docs/setup-ngrok.md)
+- [Cloudflare Tunnel Setup Guide](docs/setup/setup-cloudflare-tunnel.md)
+- [ngrok Setup Guide](docs/setup/setup-ngrok.md)
 
 #### 🔌 Start Gateway
 
@@ -214,9 +214,9 @@ Verify status: `http://localhost:3000/health`
 
 | Platform | Difficulty | Best For | Setup Guide |
 |----------|------------|----------|-------------|
-| 💚 **LINE** | ⭐⭐ | Taiwan/Japan users | [📖 docs/setup-line.md](docs/setup-line.md) |
-| 🔵 **Telegram** | ⭐ | Easiest, recommended for beginners | [📖 docs/setup-telegram.md](docs/setup-telegram.md) |
-| 🟣 **Discord** | ⭐⭐⭐ | Team collaboration | [📖 docs/setup-discord.md](docs/setup-discord.md) |
+| 💚 **LINE** | ⭐⭐ | Taiwan/Japan users | [📖 docs/setup/setup-line.md](docs/setup/setup-line.md) |
+| 🔵 **Telegram** | ⭐ | Easiest, recommended for beginners | [📖 docs/setup/setup-telegram.md](docs/setup/setup-telegram.md) |
+| 🟣 **Discord** | ⭐⭐⭐ | Team collaboration | [📖 docs/setup/setup-discord.md](docs/setup/setup-discord.md) |
 
 **Step 2: Manually edit the `.env` file**
 
@@ -275,9 +275,9 @@ After setup, VSMONSTER automatically:
 
 | Platform | Description | Setup Guide |
 |----------|-------------|-------------|
-| 💚 LINE | Best for Taiwan/Japan users | [docs/setup-line.md](docs/setup-line.md) |
-| 🔵 Telegram | Easiest setup | [docs/setup-telegram.md](docs/setup-telegram.md) |
-| 🟣 Discord | Best for team collaboration | [docs/setup-discord.md](docs/setup-discord.md) |
+| 💚 LINE | Best for Taiwan/Japan users | [docs/setup/setup-line.md](docs/setup/setup-line.md) |
+| 🔵 Telegram | Easiest setup | [docs/setup/setup-telegram.md](docs/setup/setup-telegram.md) |
+| 🟣 Discord | Best for team collaboration | [docs/setup/setup-discord.md](docs/setup/setup-discord.md) |
 
 ---
 
@@ -357,12 +357,12 @@ VS Code Settings:
 ## 📚 Documentation
 
 - Quick Start: `docs/quick-start.md`
-- Platform Setup: `docs/setup-line.md` / `docs/setup-telegram.md` / `docs/setup-discord.md`
-- Moltbot Integration: `docs/moltbot-integration.md`
-- Enterprise Use Cases: `docs/enterprise-use-cases.md` (Apple case study)
-- Multi-brand Throttling: `docs/enterprise-cases-brands.md` (Efficiency, cost reduction)
-- Multi-brand Open Source: `docs/enterprise-cases-revenue.md` (Revenue growth, new business models)
-- **🛠️ Implementation Guide**: `docs/enterprise-implementation-guide.md` (Detailed setup & code)
+- Platform Setup: `docs/setup/setup-line.md` / `docs/setup/setup-telegram.md` / `docs/setup/setup-discord.md`
+- Moltbot Integration: `docs/setup/moltbot-integration.md`
+- Enterprise Use Cases: `docs/enterprise/enterprise-use-cases.md` (Apple case study)
+- Multi-brand Throttling: `docs/enterprise/enterprise-cases-brands.md` (Efficiency, cost reduction)
+- Multi-brand Open Source: `docs/enterprise/enterprise-cases-revenue.md` (Revenue growth, new business models)
+- **🛠️ Implementation Guide**: `docs/enterprise/enterprise-implementation-guide.md` (Detailed setup & code)
 - VSMONSTER vs Moltbot: `docs/vsmonster-vs-moltbot-analysis.md`
 
 ---

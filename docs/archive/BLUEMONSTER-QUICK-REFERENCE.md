@@ -4,10 +4,10 @@
 
 | 功能 | 描述 | 快速開始 | 文檔 |
 |------|------|---------|------|
-| 🌐 URL 分享 | 快速生成公開下載連結 | `ngrok http 3000` | [ActiveTunnels.md](./docs/ActiveTunnels.md) |
-| 🧠 技能組合 | 組合技能解決新問題 | 使用 `<SkillCombination>` 框架 | [newSkill.md](./docs/newSkill.md) |
-| ⚠️ 刪除確認 | 刪除檔案前自動詢問 | 用戶明確確認三次 | [copilot-instructions.md](./packages/blue-monster/.github/copilot-instructions.md) |
-| 🔐 檔案保護 | 保護系統和關鍵檔案 | 檢查風險等級 | [copilot-instructions.md](./packages/blue-monster/.github/copilot-instructions.md) |
+| 🌐 URL 分享 | 快速生成公開下載連結 | `ngrok http 3000` | [ActiveTunnels.md](../ActiveTunnels.md) |
+| 🧠 技能組合 | 組合技能解決新問題 | 使用 `<SkillCombination>` 框架 | [newSkill.md](../bluemonster/newSkill.md) |
+| ⚠️ 刪除確認 | 刪除檔案前自動詢問 | 用戶明確確認三次 | [copilot-instructions.md](../../packages/blue-monster/.github/copilot-instructions.md) |
+| 🔐 檔案保護 | 保護系統和關鍵檔案 | 檢查風險等級 | [copilot-instructions.md](../../packages/blue-monster/.github/copilot-instructions.md) |
 
 ---
 
@@ -54,7 +54,7 @@ cloudflared tunnel run moltbot
 ```
 
 ### 管理隧道
-👉 見 [ActiveTunnels.md](./docs/ActiveTunnels.md)
+👉 見 [ActiveTunnels.md](../ActiveTunnels.md)
 
 ---
 
@@ -81,7 +81,7 @@ cloudflared tunnel run moltbot
 3. **日誌查看服務** - 遠端查看日誌
 
 ### 發現新技能
-👉 見 [newSkill.md](./docs/newSkill.md) - 填寫模板並記錄
+👉 見 [newSkill.md](../bluemonster/newSkill.md) - 填寫模板並記錄
 
 ---
 
@@ -159,19 +159,19 @@ cloudflared tunnel run moltbot
 ## 📖 完整文檔
 
 ### 新手入門 (30 分鐘)
-1. [BLUEMONSTER-ENHANCEMENTS.md](./docs/BLUEMONSTER-ENHANCEMENTS.md) - 功能概覽
-2. [ActiveTunnels.md](./docs/ActiveTunnels.md) - 隧道快速開始
-3. [newSkill.md](./docs/newSkill.md) - 看範例技能
+1. [BLUEMONSTER-ENHANCEMENTS.md](../bluemonster/BLUEMONSTER-ENHANCEMENTS.md) - 功能概覽
+2. [ActiveTunnels.md](../ActiveTunnels.md) - 隧道快速開始
+3. [newSkill.md](../bluemonster/newSkill.md) - 看範例技能
 
 ### 開發者深入 (1-2 小時)
-1. [BLUEMONSTER-ENHANCEMENTS.md](./docs/BLUEMONSTER-ENHANCEMENTS.md) - 全部詳讀
-2. [packages/blue-monster/.github/copilot-instructions.md](./packages/blue-monster/.github/copilot-instructions.md) - 系統提示
-3. [BLUEMONSTER-SKILLS.md](./docs/BLUEMONSTER-SKILLS.md) - 基礎能力
+1. [BLUEMONSTER-ENHANCEMENTS.md](../bluemonster/BLUEMONSTER-ENHANCEMENTS.md) - 全部詳讀
+2. [packages/blue-monster/.github/copilot-instructions.md](../../packages/blue-monster/.github/copilot-instructions.md) - 系統提示
+3. [BLUEMONSTER-SKILLS.md](../bluemonster/BLUEMONSTER-SKILLS.md) - 基礎能力
 
 ### BlueMonster AI 開機清單
-1. 讀取 [copilot-instructions.md](./packages/blue-monster/.github/copilot-instructions.md)
-2. 參考 [BLUEMONSTER-SKILLS.md](./docs/BLUEMONSTER-SKILLS.md)
-3. 查看 [BLUEMONSTER-ENHANCEMENTS.md](./docs/BLUEMONSTER-ENHANCEMENTS.md)
+1. 讀取 [copilot-instructions.md](../../packages/blue-monster/.github/copilot-instructions.md)
+2. 參考 [BLUEMONSTER-SKILLS.md](../bluemonster/BLUEMONSTER-SKILLS.md)
+3. 查看 [BLUEMONSTER-ENHANCEMENTS.md](../bluemonster/BLUEMONSTER-ENHANCEMENTS.md)
 
 ---
 
