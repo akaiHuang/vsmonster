@@ -1,182 +1,133 @@
-# @vsmonster/holography
+<h1 align="center">Holography 🛰️</h1>
 
-> VSMonster 獨立通訊模組 - 完全取代 Moltbot/Clawdbot 依賴
+<p align="center">
+  <strong>The Messaging Bridge</strong><br>
+  <em>Your phone talks. VS Code listens.</em>
+</p>
 
-## 概述
+---
 
-Holography 是一個獨立的通訊模組，提供：
+## What is Holography?
 
-- **多頻道支援**：LINE、Telegram、Discord
-- **安全機制**：Whitelist + Handshake 雙重認證
-- **傳輸層**：WebSocket 與 Webhook 整合
-- **API 層**：UFO ↔ BlueMonster 任務派發協議
+Holography is the messaging bridge that connects your phone to VSMONSTER.
 
-## 安裝
+It receives messages from LINE, Telegram, and Discord, translates them into commands, and sends results back — all through a single unified interface.
+
+It's the reason you can text your computer from your phone and it starts coding.
+
+---
+
+## Supported Platforms
+
+| Platform | Library | Difficulty |
+|----------|---------|-----------|
+| 💚 **LINE** | @line/bot-sdk | Medium |
+| 🔵 **Telegram** | grammy | Easy (recommended for beginners) |
+| 🟣 **Discord** | discord.js | Advanced |
+
+You can enable one, two, or all three — they all work simultaneously.
+
+---
+
+## What Holography Handles
+
+**Message routing** — Incoming messages from any platform get normalized into a unified format, then forwarded to UFO and Gateway.
+
+**Response delivery** — When BlueMonster finishes a task, Holography sends the results back to the same platform and user who requested it.
+
+**Media support** — Images, files, and other media from messaging apps are received and stored locally for processing.
+
+**Security** — Two layers of protection:
+- **Whitelist** — Only approved users can interact with your VSMONSTER
+- **Handshake verification** — Time-limited authentication for new devices
+
+**Real-time sync** — WebSocket transport keeps VS Code extensions connected and updated in real-time.
+
+---
+
+## How It Fits Together
+
+```
+📱 LINE / Telegram / Discord
+          ↓ webhook
+   ┌──────────────┐
+   │ Holography 🛰️ │
+   │              │
+   │  Receives    │
+   │  Translates  │
+   │  Delivers    │
+   └──────┬───────┘
+          ↓ WebSocket
+   ┌──────────────┐
+   │   Gateway    │ → UFO 🛸 → BlueMonster 👾
+   └──────────────┘
+```
+
+Holography is the first thing that touches your message and the last thing that delivers your result.
+
+---
+
+## Quick Setup
+
+### 1. Install
 
 ```bash
 pnpm add @vsmonster/holography
 ```
 
-## 快速開始
+### 2. Configure your platform
 
-### 啟動 Holography Server
+Choose one (or more) and get your tokens:
 
-```typescript
-import { HolographyServer } from '@vsmonster/holography';
+| Platform | Where to get tokens |
+|----------|-------------------|
+| Telegram | Talk to [@BotFather](https://t.me/BotFather) |
+| LINE | [LINE Developers Console](https://developers.line.biz/) |
+| Discord | [Discord Developer Portal](https://discord.com/developers/) |
 
-const server = new HolographyServer({
-  port: 3000,
-  wsPath: '/ws',
-  
-  // 頻道設定
-  channels: {
-    line: {
-      channelSecret: process.env.LINE_CHANNEL_SECRET!,
-      accessToken: process.env.LINE_ACCESS_TOKEN!,
-    },
-    telegram: {
-      botToken: process.env.TELEGRAM_BOT_TOKEN!,
-    },
-  },
-  
-  // 安全設定
-  security: {
-    whitelist: {
-      enabled: true,
-      users: ['U1234567890'],
-    },
-    handshake: {
-      enabled: true,
-      code: 'your-secret-code',
-    },
-  },
-});
+### 3. Set environment variables
 
-// 監聽訊息
-server.on('message', (message) => {
-  console.log(`收到來自 ${message.channel} 的訊息:`, message.content);
-});
-
-// 啟動
-await server.start();
+```env
+# Pick one or more:
+TELEGRAM_BOT_TOKEN=your_token
+LINE_CHANNEL_ACCESS_TOKEN=your_token
+LINE_CHANNEL_SECRET=your_secret
+DISCORD_BOT_TOKEN=your_token
 ```
 
-### 使用 Holography Client (VS Code Extension)
+> Never share your tokens with anyone — including AI assistants.
 
-```typescript
-import { HolographyClient } from '@vsmonster/holography';
+### 4. Start
 
-const client = new HolographyClient({
-  wsUrl: 'ws://localhost:3000/ws',
-  reconnect: true,
-});
+Holography starts automatically with the Gateway:
 
-client.on('message', (message) => {
-  // 處理來自 Gateway 的訊息
-});
-
-await client.connect();
+```bash
+pnpm dev:gateway
 ```
 
-### UFO ↔ BlueMonster API
+---
 
-```typescript
-import { BlueMonsterAPI } from '@vsmonster/holography';
+## Tunnel (Public URL)
 
-const api = new BlueMonsterAPI({
-  wsUrl: 'ws://localhost:3000/api',
-});
+To receive webhooks from messaging platforms, you need a public URL. Holography works with:
 
-await api.connect();
+| Method | Best for |
+|--------|----------|
+| **Cloudflare Tunnel** | Production — hides your IP completely, free |
+| **ngrok** | Development — easy setup, temporary URL |
 
-// 派發任務
-const result = await api.dispatchTask('修復登入問題', {
-  description: '用戶無法登入，錯誤代碼 500',
-  priority: 'high',
-  channel: 'line',
-  userId: 'U1234567890',
-});
+See the [setup guides](../../docs/setup/) for step-by-step instructions.
 
-// 取得任務列表
-const tasks = await api.getTasks({ status: 'pending' });
+---
 
-// 取得聊天歷史
-const { messages } = await api.getChatHistory({ userId: 'U1234567890' });
-```
+## Part of VSMONSTER
 
-## 架構
+Holography 🛰️ is the messaging bridge. It works with:
+- **UFO** 🛸 — The control center that plans and dispatches tasks
+- **BlueMonster** 👾 — The AI worker that writes code
 
-```
-                    ┌─────────────────────────────────────┐
-                    │        HolographyServer             │
-                    │  ┌───────────────────────────────┐  │
-  LINE ────────────▶│  │      ChannelManager          │  │
-  Telegram ────────▶│  │  (LINE, Telegram, Discord)    │  │
-  Discord ─────────▶│  └───────────────────────────────┘  │
-                    │                 │                    │
-                    │                 ▼                    │
-                    │  ┌───────────────────────────────┐  │
-                    │  │     SecurityManager           │  │
-                    │  │  (Whitelist + Handshake)      │  │
-                    │  └───────────────────────────────┘  │
-                    │                 │                    │
-                    │                 ▼                    │
-                    │  ┌───────────────────────────────┐  │
-                    │  │    WebSocket Transport        │◀─┼──── VS Code Extension
-                    │  │     + Webhook Router          │  │      (HolographyClient)
-                    │  └───────────────────────────────┘  │
-                    └─────────────────────────────────────┘
-```
+Together, they form VSMONSTER.
 
-## 模組結構
+---
 
-```
-packages/holography/
-├── src/
-│   ├── core/           # 核心元件
-│   │   ├── server.ts   # HolographyServer
-│   │   ├── manager.ts  # ChannelManager
-│   │   └── types.ts    # 型別定義
-│   │
-│   ├── channels/       # 頻道實作
-│   │   ├── base.ts     # HologramChannel 基類
-│   │   ├── line.ts     # LINE Channel
-│   │   ├── telegram.ts # Telegram Channel
-│   │   └── discord.ts  # Discord Channel
-│   │
-│   ├── security/       # 安全機制
-│   │   ├── whitelist.ts # Whitelist 管理
-│   │   ├── handshake.ts # Handshake 認證
-│   │   └── storage.ts   # 永久儲存
-│   │
-│   ├── transports/     # 傳輸層
-│   │   ├── websocket.ts # WebSocket 處理
-│   │   └── webhook.ts   # Webhook 路由
-│   │
-│   ├── api/            # UFO ↔ BlueMonster API
-│   │   ├── types.ts    # API 型別定義
-│   │   └── client.ts   # BlueMonsterAPI Client
-│   │
-│   ├── client.ts       # HolographyClient (for Extension)
-│   └── index.ts        # 統一匯出
-│
-├── package.json
-├── tsconfig.json
-└── README.md
-```
-
-## 與舊版比較
-
-| 功能 | Moltbot 整合 | Holography |
-|------|-------------|------------|
-| LINE 支援 | ✅ 依賴 Moltbot | ✅ 獨立實作 |
-| Telegram 支援 | ✅ 依賴 Moltbot | ✅ 獨立實作 |
-| Discord 支援 | ✅ 依賴 Moltbot | ✅ 獨立實作 |
-| Whitelist | ✅ Moltbot 提供 | ✅ 自建 |
-| Handshake | ❌ | ✅ 自建 |
-| 外部依賴 | moltbot-sdk | 僅 axios, ws |
-| 型別安全 | 部分 | ✅ 完整 |
-
-## License
-
-MIT
+MIT License

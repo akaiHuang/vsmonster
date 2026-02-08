@@ -1,160 +1,106 @@
 <p align="center">
-  <img src="packages/blue-monster/resources/blueMonster.svg" alt="VSMONSTER Banner" width="600">
+  <img src="packages/blue-monster/resources/blueMonster.svg" alt="VSMONSTER" width="220">
 </p>
 
-# 👾 VSMONSTER
+<h1 align="center">VSMONSTER</h1>
 
-> Connect LINE / Telegram / Discord messages to VS Code Copilot - A local-first bridge platform
+<p align="center">
+  <strong>Text from your phone.<br>Your computer codes while you sleep.</strong>
+</p>
 
-**Version**: 0.2.0 | [CHANGELOG](CHANGELOG.md) | [中文版](README.zh-TW.md)
-
-VSMONSTER lets you send commands and track task progress from messaging apps, with all execution happening locally in your VS Code environment.
-The project uses 🦞 Moltbot as the messaging layer, while VSMONSTER focuses on Copilot and task workflow.
-
----
-
-## ✨ Core Features
-
-- **Local-first**: Gateway and task execution run locally - your data never leaves your computer
-- **Multi-platform**: LINE / Telegram / Discord - unified command interface
-- **VS Code Visualization**: Task list, channel status, MCP services at a glance
-- **Task Decomposition**: Support for `/task` commands, task splitting, and progress reporting
-- **MCP Extension**: Optional MCP service integration (Email / Browser / File, etc.)
-- **Tunnel Support**: Generate public preview links with ngrok
+<p align="center">
+  The first <strong>Gemini 3</strong> multi-agent swarm for VS Code.<br>
+  <a href="https://vsmonster.pages.dev">Live Demo</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="README.zh-TW.md">中文版</a>
+</p>
 
 ---
 
-## 🧭 Message Flow (Simple Diagram)
+## What is VSMONSTER?
+
+VSMONSTER turns VS Code into an autonomous AI factory you control from your phone.
+Send one message → a squad of agents starts coding for you in parallel.
+
+It's made up of three core agents:
+
+| Agent | Role | What It Does |
+|-------|---------|-------------|
+| **UFO** 🛸 | Control Center | Manages, plans, and dispatches tasks. When a request comes in, UFO breaks it into specs, organizes the work queue, and hands off approved tasks to BlueMonster. |
+| **BlueMonster** 👾 | Task Worker | The one who actually writes code. BlueMonster uses GitHub Copilot SDK to execute tasks — reading files, writing code, running terminals, analyzing images — all in parallel. |
+| **Holography** 🛰️ | Message Translator (the messaging bridge) | Translates messages from your phone (LINE / Telegram / Discord) into commands that UFO understands, and sends results back to you. |
 
 ```
-User (LINE/Telegram/Discord)
-          |
-       Webhook
-          |
-VSMONSTER Gateway (Express + WS)
-          |
-     WebSocket
-          |
- VS Code Extension
-          |
-  Copilot (LM API or Chat UI)
+You (on your phone)
+  📱 "Fix the login bug and add dark mode"
+    ↓
+Holography 🛰️ translates your message
+    ↓
+UFO 🛸 creates task specs, plans the work
+    ↓
+BlueMonster 👾 writes code using Copilot
+    ↓
+📱 You get a notification: "Done. Here's the preview."
 ```
 
 ---
 
-## 🚀 Quick Start
+## What Can It Do For You?
 
-### Step 0️⃣ Prerequisites (One-time)
+**Code from anywhere** — Send tasks from your phone while commuting, eating, or walking the dog. Your computer does the work.
 
-- **VS Code** (see Step 1 below)
-- **Git** (for cloning the repo)
-- **Node.js 20+** and **pnpm 8+** (for running the Gateway)
-- Optional: **VS Code CLI** (`code` or `code-insiders`) for one-line VSIX install
+**Run multiple tasks at once** — Unlike regular Copilot (one thing at a time), BlueMonster handles parallel tasks in the background. Queue 10 refactoring jobs, go get coffee, come back to all green.
 
-> If you only want to install the extension (no Gateway), you can skip Node.js/pnpm.
+**See everything happening** — Real-time task dashboard in VS Code sidebar + Mission Control web portal on your phone. Watch tasks move from Pending → Running → Done.
 
-### Step 1️⃣ Install VS Code & Set Up GitHub Copilot
+**Use Gemini 3, Claude, GPT — all at flat rate** — Powered by your GitHub Copilot subscription, which gives you access to Gemini 3 Pro, Claude Opus, GPT-5 and more. No per-token API bills. Run 100 complex tasks a day and pay the same $10–$39/month.
 
-#### Download VS Code
+**Review & approve from your phone** — When tasks complete, get a delivery link on your messaging app. Preview results, check the code, then approve or reject.
 
-Download and install from the official website:
-
-| Platform | Download Link |
-|----------|---------------|
-| 🍎 **macOS** | [Download VS Code for Mac](https://code.visualstudio.com/sha/download?build=stable&os=darwin-universal) |
-| 🪟 **Windows** | [Download VS Code for Windows](https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user) |
-| 🐧 **Linux** | [Download VS Code for Linux](https://code.visualstudio.com/sha/download?build=stable&os=linux-x64) |
-
-> Or visit [code.visualstudio.com](https://code.visualstudio.com/) for other versions.
-
-#### Set Up GitHub Copilot
-
-Install the **GitHub Copilot** extension in VS Code:
-1. Open Extensions (`Cmd+Shift+X` / `Ctrl+Shift+X`)
-2. Search for "GitHub Copilot"
-3. Click Install
-
-#### 💰 Free vs Paid Plans
-
-| Plan | Price | Models | Best For |
-|------|-------|--------|----------|
-| **Free** | $0 | GPT-4o mini, Claude 3.5 Sonnet | Students, light users |
-| **Pro** | $10/mo | GPT-4o, Claude 3.5 Sonnet | General developers |
-| **Pro+** | $39/mo | **Claude Opus 4.5**, **GPT-5.2 Codex** | Professional developers ⭐ |
-| **Business** | $19/user/mo | Same as Pro, with admin features | Teams |
-
-> 💡 **Author's Pick**: I personally use the **$39 Pro+** plan because **Claude Opus 4.5** and **GPT-5.2 Codex** are currently the best models for complex programming tasks. They excel at large-scale refactoring, cross-file modifications, and architecture design.
+**Stay secure** — Everything runs locally on your machine. Your code never leaves your computer. Tokens are never exposed to AI.
 
 ---
 
-### Step 2️⃣ Install VSMONSTER VS Code Extension
+## Getting Started (4 Steps)
 
-Install the **VSMONSTER** extension in VS Code:
+### Step 1: Get VS Code + Copilot
 
-1. Open Extensions (`Cmd+Shift+X` / `Ctrl+Shift+X`)
-2. Search for "VSMONSTER"
-3. Click Install
+1. **Download VS Code**
 
-Or click directly: [Install VSMONSTER in VS Code](vscode:extension/vsmonster.vsmonster)
+| Platform | Link |
+|----------|------|
+| macOS | [Download](https://code.visualstudio.com/sha/download?build=stable&os=darwin-universal) |
+| Windows | [Download](https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user) |
+| Linux | [Download](https://code.visualstudio.com/sha/download?build=stable&os=linux-x64) |
 
-> 📦 **Marketplace Link**: [marketplace.visualstudio.com/items?itemName=vsmonster.vsmonster](https://marketplace.visualstudio.com/items?itemName=vsmonster.vsmonster)
+2. **Install GitHub Copilot extension** — Open VS Code → Extensions (`Cmd+Shift+X`) → Search "GitHub Copilot" → Install
 
-#### 🧩 Option B: Install via VSIX (No Marketplace)
+3. **Choose a plan**
 
-If you can't use Marketplace, install from a VSIX:
+| Plan | Price | Best For |
+|------|-------|----------|
+| Free | $0/mo | Try it out |
+| Pro | $10/mo | General use |
+| **Pro+** | **$39/mo** | **Best models (Claude Opus, GPT-5 Codex)** |
 
-**Download (no pnpm required):**
-- GitHub Releases: [github.com/akaiHuang/vsmonster/releases/latest](https://github.com/akaiHuang/vsmonster/releases/latest)
-- Install via **Extensions → ... → Install from VSIX...**  
-  or CLI: `code --install-extension /path/to/vsmonster-*.vsix`
-
-**One-line (Windows, PowerShell):**
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/install-extension.ps1
-```
-
-**One-line (macOS/Linux, build from source):**
-```bash
-bash scripts/install-extension.sh
-```
-
-**Manual build from source:**
-```bash
-bash packages/vscode-extension/scripts/package.sh
-code --install-extension packages/vscode-extension/vsmonster-0.0.2.vsix
-```
-
-> If `code` is not found, open VS Code and run: **"Shell Command: Install 'code' command in PATH"**  
-> The PowerShell script will download the latest VSIX from GitHub Releases if no local VSIX is found.
+> The author uses Pro+ because the top-tier models handle complex multi-file tasks significantly better.
 
 ---
 
-#### 🪟 Single-Window Mode
+### Step 2: Install VSMONSTER
 
-VSMONSTER runs in **one** VS Code window at a time. The first window that activates becomes the **primary** window.
-Other windows will show VSMONSTER as inactive. To switch, run **"VSMONSTER: Set Primary Window"** or click the
-status bar indicator in the window you want to make primary.
+**Option A: One-click with Copilot (Recommended)**
 
----
-
-### Step 3️⃣ Install 👾 VSMONSTER 👾 Gateway
-
-#### 🤖 One-Click Install with Copilot (Recommended)
-
-Open Copilot Chat in VS Code and type:
+Open Copilot Chat in VS Code and paste:
 
 ```
 Help me install 👾 VSMONSTER 👾
 https://github.com/akaiHuang/vsmonster.git
 ```
 
-Copilot will automatically:
-1. Clone the project to your specified directory
-2. Run `pnpm install`
-3. Copy `.env.example` to `.env`
-4. Guide you through the setup process
+Copilot will clone, install dependencies, and guide you through setup automatically.
 
-#### 📦 Manual Installation
+**Option B: Manual**
 
 ```bash
 git clone https://github.com/akaiHuang/vsmonster.git
@@ -163,237 +109,136 @@ pnpm install
 cp .env.example .env
 ```
 
-#### 🌐 Domain & Tunnel Setup
+Then install the VS Code extension:
+- From Marketplace: Search "VSMONSTER" in Extensions
+- Or from VSIX: [Download latest release](https://github.com/akaiHuang/vsmonster/releases/latest)
 
-VSMONSTER will guide you through setting up external connections, **while keeping your real IP hidden**:
+**Set up your messaging platform:**
 
-| Option | Security | Difficulty | Description |
-|--------|----------|------------|-------------|
-| ☁️ **Cloudflare Tunnel** | ⭐⭐⭐ | ⭐⭐ | **Recommended**: Completely hides IP, free |
-| 🌐 **GoDaddy + Cloudflare** | ⭐⭐⭐ | ⭐⭐⭐ | Professional domain + hidden IP |
-| 🚇 **ngrok** | ⭐⭐ | ⭐ | Easiest, but IP changes frequently |
+> Tokens are sensitive — do this step yourself, don't show tokens to AI.
 
-> 🔒 **IP Security Notes**:
-> - With **Cloudflare Tunnel**, the outside world only sees Cloudflare's IP - your real IP is completely hidden
-> - With **ngrok**, ngrok provides a temporary URL, but ngrok servers know your IP
-> - **Never recommended** to directly expose your home IP to messaging platforms
+| Platform | Difficulty | Guide |
+|----------|-----------|-------|
+| Telegram | Easiest | [Setup Guide](docs/setup/setup-telegram.md) |
+| LINE | Medium | [Setup Guide](docs/setup/setup-line.md) |
+| Discord | Advanced | [Setup Guide](docs/setup/setup-discord.md) |
 
-Setup instructions will be provided during installation, or refer to:
-- [Cloudflare Tunnel Setup Guide](docs/setup/setup-cloudflare-tunnel.md)
-- [ngrok Setup Guide](docs/setup/setup-ngrok.md)
-
-#### 🔌 Start Gateway
+Edit your `.env` file with your platform tokens, then start the Gateway:
 
 ```bash
 pnpm dev:gateway
 ```
 
-> Need Mission Control too? Use `pnpm dev`.
+---
 
-Verify status: `http://localhost:3000/health`
+### Step 3: Your First Hello World
+
+Before using it from your phone, try it inside VS Code first:
+
+1. Open VS Code with your project
+2. Look for the VSMONSTER icon in the sidebar — click it
+3. You'll see the UFO 🛸 dashboard with connection status, task list, and channels
+4. Try creating a task: open a new file and ask BlueMonster to write a "Hello World" program
+5. Watch BlueMonster work — it plans, writes code, and reports completion
+
+Congratulations — you just let AI write code for you while you watched.
 
 ---
 
-### Step 4️⃣ ⚠️ Human Setup for Messaging Platforms ⚠️
+### Step 4: Go Mobile
 
-> 🛡️ **Why Manual Setup?**
-> 
-> Tokens and Secret Keys are **extremely sensitive** data - equivalent to your account password.
-> For security, this step must be completed **manually by a human**, not through AI.
+Now the fun part — control everything from your phone:
 
-#### 🔐 Secure Setup Process
+1. Open your messaging app (LINE / Telegram / Discord)
+2. Send a message to your VSMONSTER bot:
+   ```
+   Create a landing page with a hero section and contact form
+   ```
+3. Watch your computer start coding (or check Mission Control on your phone at `http://your-tunnel-url:3001`)
+4. Get notified when it's done — review, approve, and ship
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  ⚠️  Complete the following steps yourself - don't let AI  │
-│      see your Tokens!                                       │
-└─────────────────────────────────────────────────────────────┘
-```
+You're now coding from your couch. Enjoy your life.
 
-**Step 1: Choose a platform and get your Token**
+---
 
-| Platform | Difficulty | Best For | Setup Guide |
-|----------|------------|----------|-------------|
-| 💚 **LINE** | ⭐⭐ | Taiwan/Japan users | [📖 docs/setup/setup-line.md](docs/setup/setup-line.md) |
-| 🔵 **Telegram** | ⭐ | Easiest, recommended for beginners | [📖 docs/setup/setup-telegram.md](docs/setup/setup-telegram.md) |
-| 🟣 **Discord** | ⭐⭐⭐ | Team collaboration | [📖 docs/setup/setup-discord.md](docs/setup/setup-discord.md) |
-
-**Step 2: Manually edit the `.env` file**
-
-```bash
-# Open .env with your favorite editor
-nano .env
-# or
-code .env
-```
-
-```env
-# ⚠️ Paste the following Tokens manually - don't show to AI!
-
-# 💚 LINE (fill one)
-LINE_CHANNEL_ACCESS_TOKEN=your_LINE_Token
-LINE_CHANNEL_SECRET=your_LINE_Secret
-
-# 🔵 Telegram (fill one)
-TELEGRAM_BOT_TOKEN=your_Telegram_Token
-
-# 🟣 Discord (fill one)
-DISCORD_BOT_TOKEN=your_Discord_Token
-DISCORD_APPLICATION_ID=your_Application_ID
-```
-
-**Step 3: Tell Copilot you're done**
-
-In VS Code Copilot Chat, type:
+## Architecture
 
 ```
-I've configured .env, help me set up the messaging platform
+📱 Phone (LINE / Telegram / Discord)
+         ↓ webhook
+   ┌─────────────────┐
+   │ Holography 🛰️    │  Message translation layer
+   └────────┬────────┘
+            ↓
+   ┌─────────────────┐
+   │ Gateway          │  Orchestration hub (port 3000)
+   └──┬─────┬─────┬──┘
+      ↓     ↓     ↓
+   UFO 🛸  👾    Mission Control
+   Spec &  BlueMonster  Dashboard
+   Queue   Execution    (port 3001)
+            ↓
+      GitHub Copilot SDK
 ```
 
-Copilot will:
-1. ✅ Verify `.env` file exists (without reading contents)
-2. ✅ Test connection to messaging platform
-3. ✅ Guide you through Webhook setup
-4. ✅ Send a test message to confirm connection
+| Component | What | Where |
+|-----------|------|-------|
+| **UFO** 🛸 | VS Code extension — task specs & queue | `UFO/extension/` |
+| **BlueMonster** 👾 | VS Code extension — AI task execution | `packages/blue-monster/` |
+| **Holography** 🛰️ | Messaging integration (LINE/TG/Discord) | `packages/holography/` |
+| **Gateway** | HTTP + WebSocket server | `packages/gateway/` |
+| **Mission Control** | Next.js task dashboard | `packages/mission-control/` |
 
-> 🔒 **Security Guarantee**: Copilot **will not read** your Token contents, only checks connection status.
+---
 
-#### 🛡️ Security Enhancements
+## Commands
 
-After setup, VSMONSTER automatically:
+Send these from your messaging app or use them in VS Code:
 
-| Measure | Description |
+| Command | What It Does |
 |---------|-------------|
-| 🔐 **File Permissions** | Sets `.env` to `600` (only you can read) |
-| 🚫 **Git Ignore** | `.env` is already in `.gitignore` |
-| 🔍 **Token Detection** | Prevents accidentally pasting Tokens in chat |
-| 📝 **Operation Logs** | Records all sensitive operations (without Tokens) |
+| `/task create login page` | Create a new task |
+| `/status` | Check all task progress |
+| `/model gpt-4` | Switch AI model |
+| `/preview` | Get a preview link |
+| `/cancel task-001` | Cancel a task |
+| `/help` | Show available commands |
+
+> Any non-command message is automatically treated as a new task.
 
 ---
 
-## 📣 Supported Platforms
+## Tunnel Setup (Exposing to Internet)
 
-| Platform | Description | Setup Guide |
-|----------|-------------|-------------|
-| 💚 LINE | Best for Taiwan/Japan users | [docs/setup/setup-line.md](docs/setup/setup-line.md) |
-| 🔵 Telegram | Easiest setup | [docs/setup/setup-telegram.md](docs/setup/setup-telegram.md) |
-| 🟣 Discord | Best for team collaboration | [docs/setup/setup-discord.md](docs/setup/setup-discord.md) |
+To receive messages from LINE/Telegram/Discord, your Gateway needs a public URL:
 
----
+| Method | Security | Difficulty |
+|--------|----------|------------|
+| **Cloudflare Tunnel** | Best (hides IP completely) | Medium |
+| **ngrok** | Good (temporary URL) | Easy |
 
-## 🧠 How It Works
+> Never expose your home IP directly. Always use a tunnel.
 
-```
-User → Messaging Platform → Moltbot → VSMONSTER Gateway → VS Code Extension → Copilot Chat
-   ↘ Task updates / Progress reports / Preview links ←───────────────────────────────────↗
-```
-
-VSMONSTER converts messaging app messages into tasks, hands them to VS Code Copilot for execution, and returns progress and results to the original platform.
+See: [Cloudflare Setup](docs/setup/setup-cloudflare-tunnel.md) · [ngrok Setup](docs/setup/setup-ngrok.md)
 
 ---
 
-## ⚙️ Environment Variables
+## Security
 
-All sensitive settings are stored in the `.env` file (already in `.gitignore`, won't be uploaded).
-
-### Quick Setup
-
-```bash
-cp .env.example .env   # Copy template
-nano .env              # Edit and fill in your Tokens
-```
-
-### Variable Reference
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `VSMONSTER_PORT` | Gateway port (default 3000) | ❌ |
-| `LINE_CHANNEL_ACCESS_TOKEN` | LINE Bot Token | LINE users |
-| `LINE_CHANNEL_SECRET` | LINE Channel Secret | LINE users |
-| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token | Telegram users |
-| `DISCORD_BOT_TOKEN` | Discord Bot Token | Discord users |
-| `DISCORD_APPLICATION_ID` | Discord App ID | Discord users |
-| `NGROK_AUTHTOKEN` | ngrok Auth Token | ❌ Optional |
-
-> 💡 See [.env.example](.env.example) for detailed template
+- All execution is local — your code never leaves your computer
+- Tokens stored only in `.env` (gitignored, chmod 600)
+- Token detection prevents accidental exposure in chat
+- Whitelist + handshake verification for messaging platforms
 
 ---
 
-## 💬 Chat Commands
-
-VSMONSTER supports commands and natural language:
-
-| Command | Description | Example |
-|---------|-------------|---------|
-| `/task` | Create a task | `/task create login page` |
-| `/status` | Check task status | `/status` or `/status task-001` |
-| `/model` | Switch model | `/model gpt-4` |
-| `/preview` | Get preview link | `/preview` |
-| `/cancel` | Cancel task | `/cancel task-001` |
-| `/help` | Show help | `/help` |
-| `/mcp` | Trigger MCP service | `/mcp email send ...` |
-
-> Non-command messages are treated as new tasks and sent directly to Copilot.
-
----
-
-## 🧩 VS Code Extension Features
-
-- Gateway connection status display
-- Task list with progress
-- Channel status view
-- MCP service management
-
-VS Code Settings:
-
-- `vsmonster.gatewayUrl` (default: `ws://localhost:3000`)
-- `vsmonster.autoConnect`
-- `vsmonster.showNotifications`
-- `vsmonster.defaultModel`
-- `vsmonster.copilotMode` (`lm` or `chat-ui`)
-
----
-
-## 📚 Documentation
-
-- Quick Start: `docs/quick-start.md`
-- Platform Setup: `docs/setup/setup-line.md` / `docs/setup/setup-telegram.md` / `docs/setup/setup-discord.md`
-- Moltbot Integration: `docs/setup/moltbot-integration.md`
-- Enterprise Use Cases: `docs/enterprise/enterprise-use-cases.md` (Apple case study)
-- Multi-brand Throttling: `docs/enterprise/enterprise-cases-brands.md` (Efficiency, cost reduction)
-- Multi-brand Open Source: `docs/enterprise/enterprise-cases-revenue.md` (Revenue growth, new business models)
-- **🛠️ Implementation Guide**: `docs/enterprise/enterprise-implementation-guide.md` (Detailed setup & code)
-- VSMONSTER vs Moltbot: `docs/vsmonster-vs-moltbot-analysis.md`
-
----
-
-## 🤝 VSMONSTER × Moltbot
-
-VSMONSTER focuses on **VS Code + Copilot + Task Workflow**,
-while messaging platform connectivity is powered by **🦞 Moltbot**.
-
-To learn more about Moltbot or extend channel connectors, see:
-`docs/moltbot-integration.md`
-
----
-
-## 🔐 Security & Privacy
-
-- Runs entirely locally, no cloud dependency
-- Tokens never uploaded, stored only in local config files or environment variables
-- Restrict available features through permissions and command rules
-
----
-
-## 📝 License
+## License
 
 MIT
 
 ---
 
-## 🦞 Acknowledgments
-
-Special thanks to Moltbot for their open source contribution,
-enabling VSMONSTER to focus on VS Code Copilot integration and task workflow.
-
-👾 VSMONSTER + 🦞 Moltbot = ❤️
+<p align="center">
+  <strong>UFO 🛸 + BlueMonster 👾 + Holography 🛰️ = VSMONSTER</strong><br>
+  <em>Stop sitting at your desk. Start coding from anywhere.</em>
+</p>

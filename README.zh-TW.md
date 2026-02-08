@@ -1,159 +1,106 @@
 <p align="center">
-  <img src="packages/blue-monster/resources/blueMonster.svg" alt="VSMONSTER Banner" width="600">
+  <img src="packages/blue-monster/resources/blueMonster.svg" alt="VSMONSTER" width="220">
 </p>
 
-# 👾 VSMONSTER
+<h1 align="center">VSMONSTER</h1>
 
-> 把 LINE / Telegram / Discord 的訊息帶進 VS Code Copilot 的本地橋接平台
+<p align="center">
+  <strong>手機傳一句話。<br>你的電腦在你睡覺時寫程式。</strong>
+</p>
 
-**Version**: 0.2.0 | [CHANGELOG](CHANGELOG.md) | [English](README.md)
-
-VSMONSTER 讓你在社群軟體中下指令、追蹤任務進度，所有執行都在你的 VS Code 本機環境完成。
-專案以 🦞 Moltbot 作為社群連接層，VSMONSTER 專注於 Copilot 與任務流程。
-
----
-
-## ✨ 核心特色
-
-- **Local-first**：Gateway 與任務執行都在本機，資料不離開你的電腦
-- **多平台整合**：LINE / Telegram / Discord 三選一，統一指令介面
-- **VS Code 視覺化**：任務列表、頻道狀態、MCP 服務一目了然
-- **任務分解與回報**：支援 `/task` 指令、任務拆分與進度回報
-- **MCP 擴充**：可選的 MCP 服務整合（Email / Browser / File 等）
-- **隧道支援**：可用 ngrok 產生公開預覽連結
+<p align="center">
+  第一個 <strong>Gemini 3</strong> 多 Agent 蟲群協作 for VS Code。<br>
+  <a href="https://vsmonster.pages.dev">線上展示</a> ·
+  <a href="CHANGELOG.md">更新日誌</a> ·
+  <a href="README.md">English</a>
+</p>
 
 ---
 
-## 🧭 訊息流程（簡圖）
+## 這是什麼？
+
+VSMONSTER 把 VS Code 變成你用手機操控的 AI 工廠。
+傳一句話 → 一群 Agent 立刻開始幫你同時寫程式。
+
+它由三個核心 Agent 組成：
+
+| Agent | 角色 | 做什麼 |
+|-------|------|--------|
+| **UFO** 🛸 | 控制中心 | 管理、規劃、分配任務。收到你的需求後，UFO 把它拆成任務規格書，管理排程，再把核准的任務交給 BlueMonster 去做。 |
+| **BlueMonster** 👾 | 任務執行者 | 真正動手寫程式的那位。BlueMonster 透過 GitHub Copilot SDK 執行任務 — 讀檔案、寫程式、跑終端機、分析圖片 — 而且可以同時跑多個任務。 |
+| **Holography** 🛰️ | 訊息翻譯官（通訊橋樑） | 把你手機上的訊息（LINE / Telegram / Discord）翻譯成 UFO 聽得懂的指令，再把結果傳回你的手機。 |
 
 ```
-使用者（LINE/Telegram/Discord）
-              |
-           Webhook
-              |
-VSMONSTER Gateway（Express + WS）
-              |
-           WebSocket
-              |
-      VS Code 擴充
-              |
-   Copilot（LM API 或 Chat UI）
+你（拿著手機）
+  📱 「修好登入的 bug，再加一個深色模式」
+    ↓
+Holography 🛰️ 翻譯你的訊息
+    ↓
+UFO 🛸 建立任務規格、規劃工作
+    ↓
+BlueMonster 👾 用 Copilot 開始寫程式
+    ↓
+📱 手機收到通知：「完成了，預覽在這裡。」
 ```
 
 ---
 
-## 🚀 快速開始
+## 它能幫你什麼？
 
-### Step 0️⃣ 事前準備（一次性）
+**在任何地方寫程式** — 通勤、吃飯、遛狗時用手機傳任務，你的電腦幫你做。
 
-- **VS Code**（見下方 Step 1）
-- **Git**（用於 clone 專案）
-- **Node.js 20+** 與 **pnpm 8+**（用於啟動 Gateway）
-- 可選：**VS Code CLI**（`code` 或 `code-insiders`）用於一行安裝 VSIX
+**同時跑多個任務** — 不像普通 Copilot 一次只能做一件事，BlueMonster 在背景同時處理多個任務。排 10 個重構工作，去喝杯咖啡，回來全部完成。
 
-> 若你只需要安裝擴充套件（不跑 Gateway），可以略過 Node.js/pnpm。
+**看見一切正在發生** — VS Code 側邊欄的即時任務面板 + Mission Control 手機網頁。看著任務從 Pending → Running → Done。
 
-### Step 1️⃣ 安裝 VS Code 與設定 GitHub Copilot
+**Gemini 3、Claude、GPT — 全部固定費率** — 靠你的 GitHub Copilot 訂閱，就能用 Gemini 3 Pro、Claude Opus、GPT-5 等頂級模型。不用按 token 計費。一天跑 100 個任務，月費還是 $10–$39。
 
-#### 下載 VS Code
+**手機上審核與批准** — 任務完成後，手機收到交付連結。預覽結果、檢查程式碼，批准或退回。
 
-前往官網下載並安裝：
+**安全到底** — 所有執行都在你的本機。程式碼不會離開你的電腦。Token 絕不暴露給 AI。
+
+---
+
+## 開始使用（4 個步驟）
+
+### 第一步：裝好 VS Code + Copilot
+
+1. **下載 VS Code**
 
 | 平台 | 下載連結 |
 |------|----------|
-| 🍎 **macOS** | [下載 VS Code for Mac](https://code.visualstudio.com/sha/download?build=stable&os=darwin-universal) |
-| 🪟 **Windows** | [下載 VS Code for Windows](https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user) |
-| 🐧 **Linux** | [下載 VS Code for Linux](https://code.visualstudio.com/sha/download?build=stable&os=linux-x64) |
+| macOS | [下載](https://code.visualstudio.com/sha/download?build=stable&os=darwin-universal) |
+| Windows | [下載](https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user) |
+| Linux | [下載](https://code.visualstudio.com/sha/download?build=stable&os=linux-x64) |
 
-> 或前往 [code.visualstudio.com](https://code.visualstudio.com/) 選擇其他版本。
+2. **安裝 GitHub Copilot 擴充功能** — 開啟 VS Code → Extensions（`Cmd+Shift+X`）→ 搜尋 "GitHub Copilot" → 安裝
 
-#### 設定 GitHub Copilot
+3. **選擇方案**
 
-在 VS Code 中安裝 **GitHub Copilot** 擴充功能：
-1. 開啟 Extensions（`Cmd+Shift+X` / `Ctrl+Shift+X`）
-2. 搜尋 "GitHub Copilot"
-3. 點擊 Install
+| 方案 | 價格 | 適合誰 |
+|------|------|--------|
+| Free | $0/月 | 先試用看看 |
+| Pro | $10/月 | 一般使用 |
+| **Pro+** | **$39/月** | **最強模型（Claude Opus、GPT-5 Codex）** |
 
-#### 💰 免費 vs 付費方案
-
-| 方案 | 價格 | 模型 | 適合對象 |
-|------|------|------|----------|
-| **Free** | $0 | GPT-4o mini, Claude 3.5 Sonnet | 學生、輕度使用者 |
-| **Pro** | $10/月 | GPT-4o, Claude 3.5 Sonnet | 一般開發者 |
-| **Pro+** | $39/月 | **Claude Opus 4.5**, **GPT-5.2 Codex** | 專業開發者 ⭐ |
-| **Business** | $19/用戶/月 | 同 Pro，含管理功能 | 團隊 |
-
-> 💡 **作者推薦**：我個人使用 **$39 Pro+** 方案，因為 **Claude Opus 4.5** 和 **GPT-5.2 Codex** 是目前最能勝任複雜編程任務的模型組合。在處理大型專案重構、跨文件修改、架構設計時，這兩個模型的表現遠超其他選項。
+> 作者推薦 Pro+，因為頂級模型處理複雜的跨檔案任務能力明顯更強。
 
 ---
 
-### Step 2️⃣ 安裝 VSMONSTER VS Code 擴充功能
+### 第二步：安裝 VSMONSTER
 
-在 VS Code 中安裝 **VSMONSTER** 擴充功能：
+**方法 A：用 Copilot 一鍵安裝（推薦）**
 
-1. 開啟 Extensions（`Cmd+Shift+X` / `Ctrl+Shift+X`）
-2. 搜尋 "VSMONSTER"
-3. 點擊 Install
-
-或直接點擊：[在 VS Code 中安裝 VSMONSTER](vscode:extension/vsmonster.vsmonster)
-
-> 📦 **Marketplace 連結**：[marketplace.visualstudio.com/items?itemName=vsmonster.vsmonster](https://marketplace.visualstudio.com/items?itemName=vsmonster.vsmonster)
-
-#### 🧩 方案 B：透過 VSIX 安裝（不使用 Marketplace）
-
-如果無法使用 Marketplace，可改用 VSIX 安裝：
-
-**下載（不需要 pnpm）：**
-- GitHub Releases: [github.com/akaiHuang/vsmonster/releases/latest](https://github.com/akaiHuang/vsmonster/releases/latest)
-- 透過 **Extensions → ... → Install from VSIX...** 安裝  
-  或 CLI：`code --install-extension /path/to/vsmonster-*.vsix`
-
-**一行指令（Windows, PowerShell）：**
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/install-extension.ps1
-```
-
-**一行指令（macOS/Linux，從原始碼打包）：**
-```bash
-bash scripts/install-extension.sh
-```
-
-**手動從原始碼打包：**
-```bash
-bash packages/vscode-extension/scripts/package.sh
-code --install-extension packages/vscode-extension/vsmonster-0.0.2.vsix
-```
-
-> 若找不到 `code` 指令，請在 VS Code 執行：**"Shell Command: Install 'code' command in PATH"**  
-> PowerShell 腳本在本機找不到 VSIX 時，會自動從 GitHub Releases 下載最新版本。
-
----
-
-#### 🪟 單一視窗模式
-
-VSMONSTER 同時間只會在**一個** VS Code 視窗運作。第一個啟動的視窗會自動成為**主視窗**，
-其他視窗會顯示為停用。若要切換主視窗，請執行 **「VSMONSTER: 設為主視窗」** 或點擊狀態列提示。
-
----
-
-### Step 3️⃣ 安裝 👾 VSMONSTER 👾 Gateway
-
-#### 🤖 使用 Copilot 一鍵安裝（推薦）
-
-在 VS Code 中開啟 Copilot Chat，輸入：
+在 VS Code 開啟 Copilot Chat，貼上：
 
 ```
 幫我安裝 👾 VSMONSTER 👾
 https://github.com/akaiHuang/vsmonster.git
 ```
 
-Copilot 會自動：
-1. Clone 專案到指定目錄
-2. 執行 `pnpm install`
-3. 複製 `.env.example` 為 `.env`
-4. 引導你進行後續設定
+Copilot 會自動 clone、安裝依賴、引導你完成設定。
 
-#### 📦 手動安裝
+**方法 B：手動安裝**
 
 ```bash
 git clone https://github.com/akaiHuang/vsmonster.git
@@ -162,236 +109,136 @@ pnpm install
 cp .env.example .env
 ```
 
-#### 🌐 Domain 與隧道設定
+然後安裝 VS Code 擴充功能：
+- 從 Marketplace：在 Extensions 搜尋 "VSMONSTER"
+- 或下載 VSIX：[最新版本](https://github.com/akaiHuang/vsmonster/releases/latest)
 
-VSMONSTER 會引導你設定對外連線，**避免暴露你的真實 IP**：
+**設定通訊軟體：**
 
-| 方案 | 安全性 | 難度 | 說明 |
-|------|--------|------|------|
-| ☁️ **Cloudflare Tunnel** | ⭐⭐⭐ | ⭐⭐ | **推薦**：完全隱藏 IP，免費 |
-| 🌐 **GoDaddy + Cloudflare** | ⭐⭐⭐ | ⭐⭐⭐ | 專業網址 + 隱藏 IP |
-| 🚇 **ngrok** | ⭐⭐ | ⭐ | 最簡單，但 IP 會變動 |
+> Token 很敏感 — 這步請自己動手，不要讓 AI 看到。
 
-> 🔒 **IP 安全說明**：
-> - 使用 **Cloudflare Tunnel** 時，外界只能看到 Cloudflare 的 IP，你的真實 IP 完全隱藏
-> - 使用 **ngrok** 時，ngrok 會提供臨時網址，但 ngrok 伺服器知道你的 IP
-> - **絕不建議**直接暴露你的家用 IP 給社群平台
+| 平台 | 難易度 | 教學 |
+|------|--------|------|
+| Telegram | 最簡單 | [設定教學](docs/setup/setup-telegram.md) |
+| LINE | 中等 | [設定教學](docs/setup/setup-line.md) |
+| Discord | 進階 | [設定教學](docs/setup/setup-discord.md) |
 
-設定方式會在安裝過程中引導，或參考：
-- [Cloudflare Tunnel 設定指南](docs/setup/setup-cloudflare-tunnel.md)
-- [ngrok 設定指南](docs/setup/setup-ngrok.md)
-
-#### 🔌 啟動 Gateway
+把平台的 Token 填入 `.env` 檔案，然後啟動 Gateway：
 
 ```bash
 pnpm dev:gateway
 ```
 
-> 需要同時啟動 Mission Control 時，可改用 `pnpm dev`。
+---
 
-驗證狀態：`http://localhost:3000/health`
+### 第三步：你的第一個 Hello World
+
+在用手機操控之前，先在 VS Code 裡面練習：
+
+1. 用 VS Code 開啟你的專案
+2. 找到側邊欄的 VSMONSTER 圖示 — 點開它
+3. 你會看到 UFO 🛸 儀表板：連線狀態、任務列表、頻道資訊
+4. 試著建立一個任務：開一個新檔案，叫 BlueMonster 幫你寫一個「Hello World」程式
+5. 看著 BlueMonster 工作 — 它會規劃、寫程式、回報完成
+
+恭喜 — 你剛剛讓 AI 幫你寫了程式，而你只是在旁邊看。
 
 ---
 
-### Step 4️⃣ ⚠️ 人類設定通訊平台 ⚠️
+### 第四步：開始用手機操控
 
-> 🛡️ **為什麼需要人類操作？**
-> 
-> Token 和 Secret Key 是**極度敏感**的資料，相當於你帳號的密碼。
-> 為了安全，這個步驟必須由**人類手動完成**，不經過 AI。
+最爽的部分來了 — 用手機操控一切：
 
-#### 🔐 安全設定流程
+1. 打開你的通訊軟體（LINE / Telegram / Discord）
+2. 傳一句話給你的 VSMONSTER 機器人：
+   ```
+   幫我做一個有 hero section 和聯絡表單的 landing page
+   ```
+3. 看著你的電腦自己開始寫程式（或在手機上打開 Mission Control：`http://你的tunnel網址:3001`）
+4. 完成時收到通知 — 審核、批准、上線
+
+你現在正躺在沙發上寫程式。享受你的人生吧。
+
+---
+
+## 架構
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  ⚠️  以下操作請由人類親自完成，不要讓 AI 看到你的 Token！    │
-└─────────────────────────────────────────────────────────────┘
+📱 手機（LINE / Telegram / Discord）
+         ↓ webhook
+   ┌─────────────────┐
+   │ Holography 🛰️    │  訊息翻譯層
+   └────────┬────────┘
+            ↓
+   ┌─────────────────┐
+   │ Gateway          │  指揮調度中心（port 3000）
+   └──┬─────┬─────┬──┘
+      ↓     ↓     ↓
+   UFO 🛸  👾    Mission Control
+   規格 &  BlueMonster  任務面板
+   排程    執行程式碼    （port 3001）
+            ↓
+      GitHub Copilot SDK
 ```
 
-**第一步：選擇平台並取得 Token**
-
-| 平台 | 難易度 | 適合對象 | 設定教學 |
-|------|--------|----------|----------|
-| 💚 **LINE** | ⭐⭐ | 台灣/日本用戶 | [📖 docs/setup/setup-line.md](docs/setup/setup-line.md) |
-| 🔵 **Telegram** | ⭐ | 最簡單，推薦新手 | [📖 docs/setup/setup-telegram.md](docs/setup/setup-telegram.md) |
-| 🟣 **Discord** | ⭐⭐⭐ | 團隊協作 | [📖 docs/setup/setup-discord.md](docs/setup/setup-discord.md) |
-
-**第二步：人類手動編輯 `.env` 檔案**
-
-```bash
-# 用你喜歡的編輯器開啟 .env
-nano .env
-# 或
-code .env
-```
-
-```env
-# ⚠️ 以下 Token 由人類手動貼上，不要給 AI 看！
-
-# 💚 LINE（擇一填寫）
-LINE_CHANNEL_ACCESS_TOKEN=你的_LINE_Token
-LINE_CHANNEL_SECRET=你的_LINE_Secret
-
-# 🔵 Telegram（擇一填寫）
-TELEGRAM_BOT_TOKEN=你的_Telegram_Token
-
-# 🟣 Discord（擇一填寫）
-DISCORD_BOT_TOKEN=你的_Discord_Token
-DISCORD_APPLICATION_ID=你的_Application_ID
-```
-
-**第三步：告訴 Copilot 設定完成**
-
-在 VS Code Copilot Chat 中輸入：
-
-```
-我已經設定好 .env，幫我設定通訊軟體
-```
-
-Copilot 會：
-1. ✅ 驗證 `.env` 檔案存在（不讀取內容）
-2. ✅ 測試與社群平台的連線
-3. ✅ 引導你完成 Webhook 設定
-4. ✅ 發送測試訊息確認連線成功
-
-> 🔒 **安全保證**：Copilot **不會讀取**你的 Token 內容，只會檢查連線狀態。
-
-#### 🛡️ 安全強化措施
-
-設定完成後，VSMONSTER 會自動：
-
-| 措施 | 說明 |
-|------|------|
-| 🔐 **檔案權限** | 將 `.env` 設為 `600`（只有你能讀取） |
-| 🚫 **Git 忽略** | `.env` 已加入 `.gitignore` |
-| 🔍 **Token 檢測** | 防止意外將 Token 貼到聊天中 |
-| 📝 **操作日誌** | 記錄所有敏感操作（不含 Token） |
+| 元件 | 做什麼 | 位置 |
+|------|--------|------|
+| **UFO** 🛸 | VS Code 擴充 — 任務規格與排程 | `UFO/extension/` |
+| **BlueMonster** 👾 | VS Code 擴充 — AI 任務執行 | `packages/blue-monster/` |
+| **Holography** 🛰️ | 多平台通訊整合（LINE/TG/Discord） | `packages/holography/` |
+| **Gateway** | HTTP + WebSocket 伺服器 | `packages/gateway/` |
+| **Mission Control** | Next.js 任務面板 | `packages/mission-control/` |
 
 ---
 
-## 📣 支援平台
+## 指令
 
-| 平台 | 說明 | 設定指南 |
-|------|------|----------|
-| 💚 LINE | 適合台灣/日本用戶 | [docs/setup/setup-line.md](docs/setup/setup-line.md) |
-| 🔵 Telegram | 設定最簡單 | [docs/setup/setup-telegram.md](docs/setup/setup-telegram.md) |
-| 🟣 Discord | 團隊協作首選 | [docs/setup/setup-discord.md](docs/setup/setup-discord.md) |
+從通訊軟體或 VS Code 中使用：
 
----
+| 指令 | 做什麼 |
+|------|--------|
+| `/task 建立登入頁面` | 建立新任務 |
+| `/status` | 查看所有任務進度 |
+| `/model gpt-4` | 切換 AI 模型 |
+| `/preview` | 取得預覽連結 |
+| `/cancel task-001` | 取消任務 |
+| `/help` | 顯示可用指令 |
 
-## 🧠 工作原理
-
-```
-User → 社群平台 → Moltbot → VSMONSTER Gateway → VS Code Extension → Copilot Chat
-   ↘ 任務更新 / 進度回報 / 預覽連結 ←───────────────────────────────────────────↗
-```
-
-VSMONSTER 將社群訊息轉成任務，交給 VS Code Copilot 執行，並回傳進度與結果到原平台。
+> 不是指令的訊息，會自動被當成新任務處理。
 
 ---
 
-## ⚙️ 環境變數設定
+## 隧道設定（對外連線）
 
-所有敏感設定都放在 `.env` 檔案中（已加入 `.gitignore`，不會上傳）。
+要接收 LINE / Telegram / Discord 的訊息，Gateway 需要一個公開網址：
 
-### 快速設定
+| 方法 | 安全性 | 難度 |
+|------|--------|------|
+| **Cloudflare Tunnel** | 最好（完全隱藏 IP） | 中等 |
+| **ngrok** | 好（臨時網址） | 簡單 |
 
-```bash
-cp .env.example .env   # 複製範本
-nano .env              # 編輯並填入你的 Token
-```
+> 絕對不要直接暴露你的家用 IP。請務必使用隧道。
 
-### 環境變數說明
-
-| 變數 | 說明 | 必填 |
-|------|------|------|
-| `VSMONSTER_PORT` | Gateway 埠號（預設 3000） | ❌ |
-| `LINE_CHANNEL_ACCESS_TOKEN` | LINE Bot Token | LINE 用戶 |
-| `LINE_CHANNEL_SECRET` | LINE Channel Secret | LINE 用戶 |
-| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token | Telegram 用戶 |
-| `DISCORD_BOT_TOKEN` | Discord Bot Token | Discord 用戶 |
-| `DISCORD_APPLICATION_ID` | Discord App ID | Discord 用戶 |
-| `NGROK_AUTHTOKEN` | ngrok 認證 Token | ❌ 可選 |
-
-> 💡 詳細範本請參考 [.env.example](.env.example)
+參考：[Cloudflare 設定](docs/setup/setup-cloudflare-tunnel.md) · [ngrok 設定](docs/setup/setup-ngrok.md)
 
 ---
 
-## 💬 社群指令
+## 安全性
 
-VSMONSTER 支援指令與自然語句：
-
-| 指令 | 說明 | 範例 |
-|------|------|------|
-| `/task` | 建立任務 | `/task 建立登入頁面` |
-| `/status` | 查看任務狀態 | `/status` 或 `/status task-001` |
-| `/model` | 切換模型 | `/model gpt-4` |
-| `/preview` | 取得預覽連結 | `/preview` |
-| `/cancel` | 取消任務 | `/cancel task-001` |
-| `/help` | 顯示指令說明 | `/help` |
-| `/mcp` | 觸發 MCP 服務 | `/mcp email send ...` |
-
-> 非指令訊息會被視為新任務，直接交給 Copilot 處理。
+- 全程本地執行 — 程式碼不會離開你的電腦
+- Token 只存在 `.env`（已 gitignore，chmod 600）
+- Token 偵測機制防止意外暴露
+- 白名單 + 握手驗證機制保護通訊平台
 
 ---
 
-## 🧩 VS Code Extension 功能
-
-- Gateway 連線狀態顯示
-- 任務列表與進度
-- 頻道狀態檢視
-- MCP 服務管理
-
-VS Code 設定：
-
-- `vsmonster.gatewayUrl`（預設：`ws://localhost:3000`）
-- `vsmonster.autoConnect`
-- `vsmonster.showNotifications`
-- `vsmonster.defaultModel`
-- `vsmonster.copilotMode`（`lm` 或 `chat-ui`）
-
----
-
-## 📚 文件
-
-- 快速開始：`docs/quick-start.md`
-- 平台設定：`docs/setup/setup-line.md` / `docs/setup/setup-telegram.md` / `docs/setup/setup-discord.md`
-- Moltbot 整合：`docs/setup/moltbot-integration.md`
-- 企業應用案例：`docs/enterprise/enterprise-use-cases.md`（Apple 案例）
-- 多品牌節流案例：`docs/enterprise/enterprise-cases-brands.md`（效率提升、成本降低）
-- 多品牌開源案例：`docs/enterprise/enterprise-cases-revenue.md`（營收增長、新商業模式）
-- **🛠️ 實作指南**：`docs/enterprise/enterprise-implementation-guide.md`（詳細設定與程式碼）
-- VSMONSTER vs Moltbot：`docs/vsmonster-vs-moltbot-analysis.md`
-
----
-
-## 🤝 VSMONSTER × Moltbot
-
-VSMONSTER 專注於 **VS Code + Copilot + 任務流程**，
-社群平台連接能力由 **🦞 Moltbot** 提供支援。
-
-如果你要深入了解 Moltbot 或自行擴充頻道連接器，請參考：
-`docs/setup/moltbot-integration.md`
-
----
-
-## 🔐 安全與隱私
-
-- 全程本地執行，不依賴雲端
-- Token 不上傳，僅保留在本機設定檔或環境變數中
-- 可透過權限與指令規範限制可用功能
-
----
-
-## 📝 License
+## License
 
 MIT
 
 ---
 
-## 🦞 致謝
-
-特別感謝 Moltbot 的開源貢獻，
-讓 VSMONSTER 能專注於 VS Code Copilot 整合與任務流程。
-
-👾 VSMONSTER + 🦞 Moltbot = ❤️
+<p align="center">
+  <strong>UFO 🛸 + BlueMonster 👾 + Holography 🛰️ = VSMONSTER</strong><br>
+  <em>不要坐在辦公桌前了。在任何地方開始寫程式吧。</em>
+</p>
