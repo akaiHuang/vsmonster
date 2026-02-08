@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { CopilotClient, CopilotSession } from "@github/copilot-sdk";
 import { GatewayClient } from "./gateway-client";
 import { getDashboardHtml, type DashboardState } from "./dashboard";
@@ -37,6 +38,116 @@ process.emitWarning = (warning, ...args) => {
 type TaskStatus = (typeof STATUS_DIRS)[number]["id"];
 const MAX_RECENT_MESSAGE_IDS = 200;
 const DEFAULT_TASK_FOLDER = "pending";
+
+// ============================================================
+// Public URL / Tunnel helpers
+// ============================================================
+
+function stripTrailingSlashes(url: string): string {
+  return String(url || "").replace(/\/+$/, "");
+}
+
+function isLocalhostUrl(url: string): boolean {
+  return /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(String(url || ""));
+}
+
+type CloudflaredQuickTunnelState = {
+  localUrl: string;
+  publicUrl?: string;
+  proc?: ChildProcessWithoutNullStreams;
+  inFlight?: Promise<string>;
+};
+
+const cloudflaredTunnel: CloudflaredQuickTunnelState = { localUrl: "" };
+
+async function ensureCloudflaredQuickTunnel(localUrlRaw: string, output?: vscode.OutputChannel): Promise<string> {
+  const localUrl = stripTrailingSlashes(localUrlRaw);
+  if (!localUrl) {
+    throw new Error("No localUrl provided for tunnel");
+  }
+
+  // Reuse active tunnel for the same local URL.
+  if (cloudflaredTunnel.publicUrl && cloudflaredTunnel.proc && !cloudflaredTunnel.proc.killed && cloudflaredTunnel.localUrl === localUrl) {
+    return cloudflaredTunnel.publicUrl;
+  }
+  if (cloudflaredTunnel.inFlight && cloudflaredTunnel.localUrl === localUrl) {
+    return cloudflaredTunnel.inFlight;
+  }
+
+  // If previous proc exists (or URL changed), stop it before starting a new one.
+  try {
+    if (cloudflaredTunnel.proc && !cloudflaredTunnel.proc.killed) {
+      cloudflaredTunnel.proc.kill();
+    }
+  } catch {}
+
+  cloudflaredTunnel.localUrl = localUrl;
+  cloudflaredTunnel.publicUrl = undefined;
+
+  const startedAt = Date.now();
+  const promise = new Promise<string>((resolve, reject) => {
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    const settle = (err?: any, value?: string) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      try { proc.stdout.removeAllListeners(); } catch {}
+      try { proc.stderr.removeAllListeners(); } catch {}
+      if (err) reject(err);
+      else resolve(value || "");
+    };
+
+    const proc = spawn(
+      "cloudflared",
+      ["tunnel", "--url", localUrl, "--no-autoupdate"],
+      { stdio: ["ignore", "pipe", "pipe"] }
+    );
+    cloudflaredTunnel.proc = proc;
+
+    const buf: { text: string } = { text: "" };
+    const tryExtract = (chunk: Buffer | string) => {
+      buf.text += chunk.toString();
+      const m = buf.text.match(/https?:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+      if (m && m[0]) {
+        const url = stripTrailingSlashes(m[0]);
+        cloudflaredTunnel.publicUrl = url;
+        output?.appendLine?.(`[UFO] Cloudflared tunnel ready: ${url} -> ${localUrl}`);
+        settle(undefined, url);
+      }
+    };
+
+    proc.stdout.on("data", tryExtract);
+    proc.stderr.on("data", tryExtract);
+    proc.on("error", (err) => settle(err));
+    proc.on("exit", (code) => {
+      if (cloudflaredTunnel.publicUrl) return;
+      settle(new Error(`cloudflared exited before URL was ready (code=${code ?? "unknown"})`));
+    });
+
+    // Quick tunnel should be ready fast; fail closed if it doesn't.
+    timer = setTimeout(() => {
+      settle(new Error(`cloudflared tunnel timed out after ${Math.round((Date.now() - startedAt) / 1000)}s`));
+    }, 20000);
+  });
+
+  cloudflaredTunnel.inFlight = promise.finally(() => {
+    if (cloudflaredTunnel.inFlight === promise) cloudflaredTunnel.inFlight = undefined;
+  });
+  return cloudflaredTunnel.inFlight;
+}
+
+function stopCloudflaredQuickTunnel(): void {
+  try {
+    if (cloudflaredTunnel.proc && !cloudflaredTunnel.proc.killed) {
+      cloudflaredTunnel.proc.kill();
+    }
+  } catch {}
+  cloudflaredTunnel.proc = undefined;
+  cloudflaredTunnel.publicUrl = undefined;
+  cloudflaredTunnel.inFlight = undefined;
+  cloudflaredTunnel.localUrl = "";
+}
 
 type UfoRole = "user" | "assistant";
 
@@ -1894,9 +2005,13 @@ async function getJson(url: string): Promise<any> {
   });
 }
 
-async function resolvePublicBaseUrl(gatewayHttpUrl: string, overrideBaseRaw: string): Promise<string> {
+async function resolvePublicBaseUrl(
+  gatewayHttpUrl: string,
+  overrideBaseRaw: string,
+  output?: vscode.OutputChannel
+): Promise<string> {
   const overrideBase = overrideBaseRaw && !isPlaceholder(overrideBaseRaw)
-    ? overrideBaseRaw.replace(/\/+$/, "")
+    ? stripTrailingSlashes(overrideBaseRaw)
     : "";
   if (overrideBase) return overrideBase;
   try {
@@ -1904,12 +2019,25 @@ async function resolvePublicBaseUrl(gatewayHttpUrl: string, overrideBaseRaw: str
     const active = Boolean(st?.active);
     const url = typeof st?.url === "string" ? st.url : "";
     if (active && url) {
-      return url.replace(/\/+$/, "");
+      return stripTrailingSlashes(url);
     }
   } catch {
     // ignore
   }
-  return gatewayHttpUrl.replace(/\/+$/, "");
+
+  const localBase = stripTrailingSlashes(gatewayHttpUrl);
+  // If the gateway is local-only, spin up a Cloudflare Quick Tunnel automatically so the
+  // preview URL we send to end-users is reachable without extra manual setup.
+  if (isLocalhostUrl(localBase)) {
+    try {
+      const publicBase = await ensureCloudflaredQuickTunnel(localBase, output);
+      if (publicBase) return stripTrailingSlashes(publicBase);
+    } catch (err) {
+      output?.appendLine?.(`[UFO] Failed to start cloudflared tunnel, using local URL: ${String(err)}`);
+    }
+  }
+
+  return localBase;
 }
 
 async function syncBlueMonsterFromGateway(gatewayHttpUrl: string, output: vscode.OutputChannel): Promise<{ requestedModelId?: string; agentMode?: string; reasoningEffort?: string }> {
@@ -2167,7 +2295,7 @@ async function executeUfoTaskWithBlueMonster(options: {
 	        .replace(/^wss:/, "https:")
 	        .replace(/\/+$/, "");
 	      const overrideBaseRaw = config.get<string>("publicUrl", "") || "";
-	      const baseUrl = await resolvePublicBaseUrl(gatewayHttpUrl, overrideBaseRaw);
+		      const baseUrl = await resolvePublicBaseUrl(gatewayHttpUrl, overrideBaseRaw, output);
 
       const previewPath = findPreviewHtmlFile(taskDir);
       if (previewPath) {
@@ -2731,7 +2859,7 @@ export function activate(context: vscode.ExtensionContext): void {
     let previewUrl: string | undefined;
 		    try {
 		      const overrideBaseRaw = ufoCfg.get<string>("publicUrl", "") || "";
-		      const baseUrl = await resolvePublicBaseUrl(gw, overrideBaseRaw);
+		      const baseUrl = await resolvePublicBaseUrl(gw, overrideBaseRaw, output);
 		      const previewPath = findPreviewHtmlFile(taskDir);
 		      if (previewPath) {
 		        const buf = fs.readFileSync(previewPath);
@@ -3489,4 +3617,5 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   void copilotSdk.shutdown();
+  stopCloudflaredQuickTunnel();
 }

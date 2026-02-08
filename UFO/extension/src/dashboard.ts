@@ -636,6 +636,8 @@ export function getDashboardHtml(
         color: var(--text-3);
         font-size: 11px;
       }
+      /* 'hidden' attribute can be overridden by class styles, so restate it. */
+      .modal-working[hidden] { display: none; }
       .spinner {
         width: 12px;
         height: 12px;
