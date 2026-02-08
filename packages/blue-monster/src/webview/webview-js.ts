@@ -54,6 +54,12 @@ export const WEBVIEW_JS = `(function() {
   const modelApplyEl = document.getElementById('modelApply');
   const modelCancelEl = document.getElementById('modelCancel');
   const modelHintEl = document.getElementById('modelHint');
+  const agentDetailPanelEl = document.getElementById('agentDetailPanel');
+  const agentDetailTitleEl = document.getElementById('agentDetailTitle');
+  const agentDetailMetaEl = document.getElementById('agentDetailMeta');
+  const agentDetailBodyEl = document.getElementById('agentDetailBody');
+  const agentDetailCloseEl = document.getElementById('agentDetailClose');
+  const agentDetailSwitchEl = document.getElementById('agentDetailSwitch');
 
   let pendingConfirmId = '';
   let pendingChoiceId = '';
@@ -67,6 +73,7 @@ export const WEBVIEW_JS = `(function() {
   let isViewingHistory = false;
   let currentModeValue = 'agent';
   let currentModelValue = '';
+  let currentDetailId = '';
   const modeLabels = { 'chat': '計畫', 'agent': '代理-安全', 'agent-full': '代理-危險' };
   const messageRawTexts = new Map();
   let currentModelOptions = [];
@@ -75,6 +82,8 @@ export const WEBVIEW_JS = `(function() {
   function escapeHtml(v) { return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
   function el(tag, cls, props) { const e = document.createElement(tag); if (cls) e.className = cls; if (typeof props === 'string') e.textContent = props; else if (props) Object.assign(e, props); return e; }
   function showToast(msg) { const t = el('div', 'toast', msg); document.body.appendChild(t); setTimeout(() => t.remove(), 2000); }
+  function clearTaskDetails() { currentDetailId = ''; if (agentDetailMetaEl) agentDetailMetaEl.textContent = ''; if (agentDetailBodyEl) agentDetailBodyEl.innerHTML = ''; if (agentDetailTitleEl) agentDetailTitleEl.textContent = '👾 Agent'; if (agentDetailPanelEl) agentDetailPanelEl.hidden = true; }
+  function showTaskDetails(d) { if (!d) return; currentDetailId = d.id || ''; if (agentDetailTitleEl) agentDetailTitleEl.textContent = (d.agentEmoji || '👾') + ' ' + (d.agentName || 'BlueMonster'); if (agentDetailMetaEl) agentDetailMetaEl.textContent = (d.taskId ? String(d.taskId) + ' · ' : '') + (d.title || ''); if (agentDetailBodyEl) { const model = (d.modelId || d.modelName || '').trim(); const reasoning = (d.reasoningEffort || '').trim(); const persona = (d.personaTitle || '').trim(); const folder = (d.taskFolder || '').trim(); const mode = (d.mode || '').trim(); const lines = []; if (model) lines.push('<div class=\"agent-kv\"><div class=\"k\">Model</div><div class=\"v\">' + escapeHtml(model + (reasoning ? ' (' + reasoning + ')' : '')) + '</div></div>'); if (mode) lines.push('<div class=\"agent-kv\"><div class=\"k\">Mode</div><div class=\"v\">' + escapeHtml(mode) + '</div></div>'); if (persona) lines.push('<div class=\"agent-kv\"><div class=\"k\">Persona</div><div class=\"v\">' + escapeHtml(persona) + '</div></div>'); if (folder) lines.push('<div class=\"agent-kv\"><div class=\"k\">Folder</div><div class=\"v\"><code>' + escapeHtml(folder) + '</code></div></div>'); const statusBits = []; if (d.isBusy) statusBits.push('🔄 Busy'); else if (d.isWaiting) statusBits.push('⏳ Waiting'); else if (d.isActive) statusBits.push('● Active'); else statusBits.push('📁 Archived'); lines.push('<div class=\"agent-kv\"><div class=\"k\">Status</div><div class=\"v\">' + escapeHtml(statusBits.join(' · ')) + '</div></div>'); if (typeof d.messageCount === 'number') lines.push('<div class=\"agent-kv\"><div class=\"k\">Messages</div><div class=\"v\">' + escapeHtml(String(d.messageCount)) + '</div></div>'); if (d.date) lines.push('<div class=\"agent-kv\"><div class=\"k\">Time</div><div class=\"v\">' + escapeHtml(String(d.date)) + '</div></div>'); agentDetailBodyEl.innerHTML = lines.join(''); } if (agentDetailPanelEl) agentDetailPanelEl.hidden = false; }
   function updateEmptyState() { if (emptyStateEl) emptyStateEl.hidden = hasContent || messagesEl.children.length > 0; }
   function markHasContent() { hasContent = true; updateEmptyState(); }
   function updateLayoutPadding() { if (inputAreaEl && messagesEl) messagesEl.style.paddingBottom = (inputAreaEl.offsetHeight + 12) + 'px'; }
@@ -172,14 +181,14 @@ export const WEBVIEW_JS = `(function() {
   function showBackButton(t) { if (headerBackEl) headerBackEl.hidden = false; if (headerTitleTextEl) headerTitleTextEl.textContent = t || 'BlueMonster'; currentHistoryTitle = t; isViewingHistory = true; }
   function hideBackButton() { if (headerBackEl) headerBackEl.hidden = true; if (headerTitleTextEl) headerTitleTextEl.textContent = currentAgentName; if (headerEmojiEl) headerEmojiEl.textContent = currentAgentEmoji; currentHistoryTitle = ''; isViewingHistory = false; }
   function goBackToHistory() { vscode.postMessage({ type: 'newChat' }); hideBackButton(); toggleHistory(); }
-  function renderHistory(hs) { if (!hs || hs.length === 0) { historyListEl.innerHTML = (historySearchEl && historySearchEl.value.trim().length > 0) ? '<div class="history-empty">找不到符合的任務</div>' : '<div class="history-empty">尚無任務紀錄</div>'; return; } const tc = hs.length; historyListEl.innerHTML = hs.map((h, i) => { const tid = h.taskId || '#' + String(tc - i).padStart(4, '0'); const emoji = h.agentEmoji || '👾'; const name = h.agentName || 'BlueMonster'; const isActive = h.isActive || false; const isBusy = h.isBusy || false; const isWaiting = h.isWaiting || false; let statusBadge = ''; if (isBusy) { statusBadge = '<span class="history-item-status busy">🔄 執行中</span>'; } else if (isWaiting) { statusBadge = '<span class="history-item-status waiting">⏳ 等待中</span>'; } else if (isActive) { statusBadge = '<span class="history-item-status active">● 活動中</span>'; } else { statusBadge = '<span class="history-item-status archived">📁 歷史</span>'; } const itemClass = 'history-item' + (isActive ? ' active' : '') + (isBusy ? ' busy' : '') + (isWaiting ? ' waiting' : ''); return '<div class="' + itemClass + '" data-id="' + escapeHtml(h.id) + '" data-title="' + escapeHtml(h.title) + '" data-taskid="' + escapeHtml(tid) + '" data-agent="' + escapeHtml(name) + '"><div class="history-item-avatar">' + emoji + '</div><div class="history-item-content"><div class="history-item-header"><span class="history-item-taskid">' + escapeHtml(tid) + '</span><span class="history-item-agent">' + escapeHtml(name) + '</span>' + statusBadge + '</div><div class="history-item-title">' + escapeHtml(h.title) + '</div><div class="history-item-time">' + escapeHtml(h.date || '') + '</div></div></div>'; }).join(''); historyListEl.querySelectorAll('.history-item').forEach(it => { it.addEventListener('click', function() { const id = this.getAttribute('data-id'); const tt = this.getAttribute('data-title'); const agent = this.getAttribute('data-agent'); if (id) { vscode.postMessage({ type: 'loadHistory', id: id }); historyPanelEl.hidden = true; showBackButton(agent || tt || 'Task'); } }); }); }
+  function renderHistory(hs) { if (!hs || hs.length === 0) { historyListEl.innerHTML = (historySearchEl && historySearchEl.value.trim().length > 0) ? '<div class="history-empty">找不到符合的任務</div>' : '<div class="history-empty">尚無任務紀錄</div>'; return; } const tc = hs.length; historyListEl.innerHTML = hs.map((h, i) => { const tid = h.taskId || '#' + String(tc - i).padStart(4, '0'); const emoji = h.agentEmoji || '👾'; const name = h.agentName || 'BlueMonster'; const isActive = h.isActive || false; const isBusy = h.isBusy || false; const isWaiting = h.isWaiting || false; const model = (h.modelId || h.modelName || '').trim(); const reasoning = (h.reasoningEffort || '').trim(); const persona = (h.personaTitle || '').trim(); let statusBadge = ''; if (isBusy) { statusBadge = '<span class="history-item-status busy">🔄 執行中</span>'; } else if (isWaiting) { statusBadge = '<span class="history-item-status waiting">⏳ 等待中</span>'; } else if (isActive) { statusBadge = '<span class="history-item-status active">● 活動中</span>'; } else { statusBadge = '<span class="history-item-status archived">📁 歷史</span>'; } let metaHtml = ''; if (model || persona) { metaHtml = '<div class="history-item-meta">' + (model ? '<span class="pill pill-model">🤖 ' + escapeHtml(model + (reasoning ? ' (' + reasoning + ')' : '')) + '</span>' : '') + (persona ? '<span class="pill pill-persona">🧬 ' + escapeHtml(persona) + '</span>' : '') + '</div>'; } const itemClass = 'history-item' + (isActive ? ' active' : '') + (isBusy ? ' busy' : '') + (isWaiting ? ' waiting' : ''); return '<div class="' + itemClass + '" data-id="' + escapeHtml(h.id) + '" data-title="' + escapeHtml(h.title) + '" data-taskid="' + escapeHtml(tid) + '" data-agent="' + escapeHtml(name) + '"><div class="history-item-avatar">' + emoji + '</div><div class="history-item-content"><div class="history-item-header"><span class="history-item-taskid">' + escapeHtml(tid) + '</span><span class="history-item-agent">' + escapeHtml(name) + '</span>' + statusBadge + '<button class="history-item-info" data-detail-id="' + escapeHtml(h.id) + '" title="Details">ⓘ</button></div><div class="history-item-title">' + escapeHtml(h.title) + '</div>' + metaHtml + '<div class="history-item-time">' + escapeHtml(h.date || '') + '</div></div></div>'; }).join(''); historyListEl.querySelectorAll('.history-item').forEach(it => { it.addEventListener('click', function() { const id = this.getAttribute('data-id'); const tt = this.getAttribute('data-title'); const agent = this.getAttribute('data-agent'); if (id) { vscode.postMessage({ type: 'loadHistory', id: id }); historyPanelEl.hidden = true; showBackButton(agent || tt || 'Task'); } }); }); historyListEl.querySelectorAll('.history-item-info').forEach(btn => { btn.addEventListener('click', function(e) { e.stopPropagation(); const id = this.getAttribute('data-detail-id'); if (id) vscode.postMessage({ type: 'getTaskDetails', id: id }); }); }); }
   window.loadHistoryItem = (id, t) => { vscode.postMessage({ type: 'loadHistory', id: id }); historyPanelEl.hidden = true; showBackButton(t); };
   window.loadHistory = id => { vscode.postMessage({ type: 'loadHistory', id: id }); historyPanelEl.hidden = true; };
 
   sendEl.addEventListener('click', sendMessage);
   stopEl.addEventListener('click', stopGeneration);
   inputEl.addEventListener('keydown', e => { if (e.isComposing) return; if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
-  const clickHandlers = { headerHistory: toggleHistory, headerSettings: () => vscode.postMessage({ type: 'openSettings' }), headerNewChat: () => { vscode.postMessage({ type: 'newChat' }); hideBackButton(); }, headerBack: goBackToHistory, closeHistory: () => { historyPanelEl.hidden = true; }, closeHistoryPanel: closeHistoryPanel, addImage: () => { if (imageInputEl) { imageInputEl.value = ''; imageInputEl.click(); } } };
+  const clickHandlers = { headerHistory: toggleHistory, headerSettings: () => vscode.postMessage({ type: 'openSettings' }), headerNewChat: () => { vscode.postMessage({ type: 'newChat' }); hideBackButton(); }, headerBack: goBackToHistory, closeHistory: () => { historyPanelEl.hidden = true; }, closeHistoryPanel: closeHistoryPanel, addImage: () => { if (imageInputEl) { imageInputEl.value = ''; imageInputEl.click(); } }, agentDetailClose: () => clearTaskDetails(), agentDetailSwitch: () => { if (!currentDetailId) return; vscode.postMessage({ type: 'loadHistory', id: currentDetailId }); if (agentDetailPanelEl) agentDetailPanelEl.hidden = true; if (historyPanelEl) historyPanelEl.hidden = true; showBackButton((agentDetailTitleEl && agentDetailTitleEl.textContent) || 'Task'); } };
   Object.entries(clickHandlers).forEach(([id, h]) => { const e = document.getElementById(id); if (e) e.addEventListener('click', h); });
   if (historySearchEl) historySearchEl.addEventListener('input', requestHistory);
   if (inputEl) inputEl.addEventListener('input', updateLayoutPadding);
@@ -244,12 +253,13 @@ export const WEBVIEW_JS = `(function() {
     else if (m.type === 'choice') showChoicePanel(m);
     else if (m.type === 'choiceClear') clearChoicePanel();
     else if (m.type === 'modelOptions') showModelPanel(m);
-    else if (m.type === 'chatHistories') renderHistory(m.histories || []);
-    else if (m.type === 'toast') showToast(m.text);
-    else if (m.type === 'agentInfo') updateAgentDisplay(m.name, m.emoji, m.requestCount);
-    else if (m.type === 'queueStatus') updateQueueStatus(m);
-    else if (m.type === 'filesSelected') { pendingFiles = pendingFiles.concat(m.files || []); updateImagePreview(); }
-  });
+	    else if (m.type === 'chatHistories') renderHistory(m.histories || []);
+	    else if (m.type === 'toast') showToast(m.text);
+	    else if (m.type === 'agentInfo') updateAgentDisplay(m.name, m.emoji, m.requestCount);
+	    else if (m.type === 'queueStatus') updateQueueStatus(m);
+	    else if (m.type === 'taskDetails') showTaskDetails(m.details);
+	    else if (m.type === 'filesSelected') { pendingFiles = pendingFiles.concat(m.files || []); updateImagePreview(); }
+	  });
 
   setBusy(false);
   vscode.postMessage({ type: 'ready' });

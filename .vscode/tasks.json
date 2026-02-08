@@ -9,6 +9,13 @@
         "$tsc"
       ],
       "group": "build"
+    },
+    {
+      "label": "UFO: build",
+      "type": "shell",
+      "command": "pnpm -C UFO/extension build",
+      "problemMatcher": [],
+      "group": "build"
     }
   ]
 }

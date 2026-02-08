@@ -307,6 +307,12 @@ interface TaskState {
   createdAt: number;
   agentName: string;
   agentEmoji: string;
+  modelId?: string;
+  modelName?: string;
+  reasoningEffort?: string;
+  personaTitle?: string;
+  hasPersona?: boolean;
+  hasInstructions?: boolean;
   // Optional display metadata (e.g. injected by UFO)
   displayTaskId?: string;
   displayTitle?: string;
@@ -339,6 +345,12 @@ function createTaskState(chatId: string, agentName: string, agentEmoji: string):
     createdAt: Date.now(),
     agentName,
     agentEmoji,
+    modelId: undefined,
+    modelName: undefined,
+    reasoningEffort: undefined,
+    personaTitle: undefined,
+    hasPersona: false,
+    hasInstructions: false,
     messages: [],
     busy: false,
     activityStatus: 'Idle',
@@ -435,6 +447,10 @@ interface ChatHistoryEntry {
   taskId: string;  // 任務 ID，格式: #0001
   agentName: string; // BlueMonster 的名稱，例如: Apple, Berry, Mochi
   agentEmoji?: string; // BlueMonster 的 emoji
+  modelId?: string;
+  modelName?: string;
+  reasoningEffort?: string;
+  personaTitle?: string;
   title: string;
   date: string;
   messageCount: number;
@@ -569,11 +585,57 @@ class BlueMonsterSession {
       task.agentEmoji
     );
     
-    if (taskFolder) {
-      task.taskFolder = taskFolder;
-      console.log(`[BlueMonster] Task folder created: ${taskFolder}`);
-    }
-  }
+	    if (taskFolder) {
+	      task.taskFolder = taskFolder;
+	      await this.refreshPersonaMeta(task);
+	      console.log(`[BlueMonster] Task folder created: ${taskFolder}`);
+	    }
+	  }
+
+	  private async refreshPersonaMeta(task: TaskState): Promise<void> {
+	    const taskFolder = task.taskFolder;
+	    if (!taskFolder) {
+	      task.hasPersona = false;
+	      task.hasInstructions = false;
+	      task.personaTitle = undefined;
+	      return;
+	    }
+
+	    const fs = await import('fs').then(m => m.promises);
+	    const p = await import('path');
+	    const vscodeDir = p.join(taskFolder, '.vscode');
+	    const instructionsPath = p.join(vscodeDir, 'copilot-instructions.md');
+	    const mePath = p.join(vscodeDir, 'me.md');
+
+	    const readLimited = async (filePath: string, maxChars: number): Promise<string> => {
+	      try {
+	        const content = await fs.readFile(filePath, 'utf-8');
+	        if (!content) return '';
+	        return content.length > maxChars ? content.slice(0, maxChars) : content;
+	      } catch {
+	        return '';
+	      }
+	    };
+
+	    const [instructions, me] = await Promise.all([
+	      readLimited(instructionsPath, 4000),
+	      readLimited(mePath, 6000),
+	    ]);
+
+	    task.hasInstructions = Boolean(instructions && instructions.trim());
+	    task.hasPersona = Boolean(me && me.trim());
+
+	    const lines = String(me || '').split('\n');
+	    let title = '';
+	    for (const line of lines) {
+	      const t = line.trim();
+	      if (!t) continue;
+	      const h = t.match(/^#+\\s+(.+)$/);
+	      title = (h ? h[1] : t).trim();
+	      break;
+	    }
+	    task.personaTitle = title || (task.hasPersona ? 'Persona' : undefined);
+	  }
 
   // 切換到指定任務（只切換顯示，不中斷背景任務）
   private switchToTask(chatId: string): boolean {
@@ -1837,10 +1899,11 @@ class BlueMonsterSession {
       await vscode.workspace.fs.createDirectory(vscode.Uri.file(resolved));
     } catch {}
 
-    this.currentTask.taskFolder = resolved;
-    this.addMessage('system', `📁 Working directory set:\n${resolved}`);
-    return `Task folder set: ${resolved}`;
-  }
+	    this.currentTask.taskFolder = resolved;
+	    await this.refreshPersonaMeta(this.currentTask);
+	    this.addMessage('system', `📁 Working directory set:\n${resolved}`);
+	    return `Task folder set: ${resolved}`;
+	  }
 
   /**
    * External entrypoint: append a non-LLM system note to the current task.
@@ -1873,11 +1936,12 @@ class BlueMonsterSession {
 
     // Reuse existing task if the same external id already exists.
     for (const t of this.tasks.values()) {
-      if (t.displayTaskId === extId) {
-        t.taskFolder = resolvedFolder;
-        if (title && String(title).trim()) {
-          t.displayTitle = String(title).trim();
-        }
+	      if (t.displayTaskId === extId) {
+	        t.taskFolder = resolvedFolder;
+	        await this.refreshPersonaMeta(t);
+	        if (title && String(title).trim()) {
+	          t.displayTitle = String(title).trim();
+	        }
         this.activeChatId = t.chatId;
         this.broadcast({ type: 'history', messages: t.messages });
         this.broadcast({ type: 'busy', value: t.busy });
@@ -1909,10 +1973,11 @@ class BlueMonsterSession {
       task.displayTitle = t;
     } else {
       task.displayTitle = path.basename(resolvedFolder) || 'UFO Task';
-    }
-    task.taskFolder = resolvedFolder;
-    this.tasks.set(chatId, task);
-    this.activeChatId = chatId;
+	    }
+	    task.taskFolder = resolvedFolder;
+	    await this.refreshPersonaMeta(task);
+	    this.tasks.set(chatId, task);
+	    this.activeChatId = chatId;
 
     // Update UI + task list.
     this.broadcast({ type: 'history', messages: task.messages });
@@ -2336,11 +2401,14 @@ class BlueMonsterSession {
   ): Promise<ChatResult> {
     // 取得或創建獨立的 Worker Session
     this.appendThinking('🏭 啟動並行 Worker...');
-    const preferredModel = getPreferredModelId() || 'gpt-4.1';
-    const configuredReasoning = getReasoningEffort();
-    const reasoningSupported = supportsReasoningEffort(preferredModel);
-    const reasoningEffort = reasoningSupported ? configuredReasoning : 'medium';
-    console.log(`[BlueMonster] Using model: ${preferredModel}${reasoningSupported ? ` (Reasoning: ${reasoningEffort})` : ''}`);
+	    const preferredModel = getPreferredModelId() || 'gpt-4.1';
+	    const configuredReasoning = getReasoningEffort();
+	    const reasoningSupported = supportsReasoningEffort(preferredModel);
+	    const reasoningEffort = reasoningSupported ? configuredReasoning : 'medium';
+	    task.modelId = preferredModel;
+	    task.modelName = preferredModel;
+	    task.reasoningEffort = reasoningSupported ? reasoningEffort : undefined;
+	    console.log(`[BlueMonster] Using model: ${preferredModel}${reasoningSupported ? ` (Reasoning: ${reasoningEffort})` : ''}`);
     this.appendThinking(`🤖 模型: ${preferredModel}${reasoningSupported && reasoningEffort !== 'medium' ? ` (${reasoningEffort})` : ''}`);
     this.appendWorking('啟動並行 Worker...');
     const session = await copilotSDK.createWorker(chatId, preferredModel, reasoningEffort);
@@ -2385,12 +2453,16 @@ class BlueMonsterSession {
       const multiplierValue = getModelMultiplierValue(preferredModel);
       task.requestCount += multiplierValue;
       copilotSDK.recordUsage(multiplierValue);
-      this.broadcast({ 
-        type: 'agentInfo', 
-        name: task.agentName, 
-        emoji: task.agentEmoji, 
-        requestCount: task.requestCount 
-      });
+	      this.broadcast({ 
+	        type: 'agentInfo', 
+	        name: task.agentName, 
+	        emoji: task.agentEmoji, 
+	        requestCount: task.requestCount,
+	        modelId: task.modelId,
+	        modelName: task.modelName,
+	        reasoningEffort: task.reasoningEffort,
+	        personaTitle: task.personaTitle
+	      });
       this.broadcastQueueStatus();
       
       // 使用 sendAndWait - 更簡潔的 API
@@ -2485,9 +2557,12 @@ class BlueMonsterSession {
       return { text, parts: [{ kind: 'text', text }] };
     }
 
-    this.setModelLabel(`Model: ${model.name}`);
-    this.appendThinking(`Using model: ${model.name}`);
-    const access = this.context.languageModelAccessInformation;
+	    this.setModelLabel(`Model: ${model.name}`);
+	    this.appendThinking(`Using model: ${model.name}`);
+	    // Persist per-task model metadata for agent cards / details.
+	    this.currentTask.modelId = model.id || model.name;
+	    this.currentTask.modelName = model.name || model.id;
+	    const access = this.context.languageModelAccessInformation;
     if (access?.canSendRequest && access.canSendRequest(model) === false) {
       const text = 'Copilot access not granted. Please run a chat request from the UI first.';
       return { text, parts: [{ kind: 'text', text }] };
@@ -2499,9 +2574,10 @@ class BlueMonsterSession {
     // 組建 System Prompt（根據模型類型自動選擇最佳化 prompt）
     const modelType = detectModelType(model.name);
     const dangerMode = getDangerModeEnabled();
-    const currentReasoning = supportsReasoningEffort(model.id || model.name)
-      ? getReasoningEffort()
-      : 'medium';
+	    const currentReasoning = supportsReasoningEffort(model.id || model.name)
+	      ? getReasoningEffort()
+	      : 'medium';
+	    this.currentTask.reasoningEffort = supportsReasoningEffort(model.id || model.name) ? currentReasoning : undefined;
     
     let systemPrompt = buildPrompt(modelType, { 
       dangerMode,
@@ -3008,6 +3084,15 @@ class BlueMonsterSession {
         // 合併歷史記錄和當前活動的任務
         const histories = await this.getChatHistoriesWithActiveTasks(query);
         this.broadcast({ type: 'chatHistories', histories });
+        break;
+      }
+      case 'getTaskDetails': {
+        const id = typeof message?.id === 'string' ? message.id : '';
+        if (!id) break;
+        const details = await this.getTaskDetails(id);
+        if (details) {
+          this.broadcast({ type: 'taskDetails', details });
+        }
         break;
       }
       case 'loadHistory':
@@ -3556,19 +3641,25 @@ class BlueMonsterSession {
       const dateStr = dateObj.toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }) + 
         ' ' + dateObj.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
       
-      activeTasks.push({
-        id: task.chatId,
-        taskId: task.displayTaskId || '#LIVE', // 特殊標記：活動中的任務
-        agentName: task.agentName,
-        agentEmoji: task.agentEmoji,
-        title,
-        date: dateStr,
-        messageCount: task.messages.length,
-        preview: '',
-        isActive: true,
-        isBusy: task.busy,
-        isWaiting: task.pendingConfirmations.size > 0 || task.pendingChoices.size > 0
-      });
+	      activeTasks.push({
+	        id: task.chatId,
+	        taskId: task.displayTaskId || '#LIVE', // 特殊標記：活動中的任務
+	        agentName: task.agentName,
+	        agentEmoji: task.agentEmoji,
+	        modelId: task.modelId || '',
+	        modelName: task.modelName || '',
+	        reasoningEffort: task.reasoningEffort || '',
+	        personaTitle: task.personaTitle || '',
+	        mode: task.mode,
+	        taskFolder: task.taskFolder || '',
+	        title,
+	        date: dateStr,
+	        messageCount: task.messages.length,
+	        preview: '',
+	        isActive: true,
+	        isBusy: task.busy,
+	        isWaiting: task.pendingConfirmations.size > 0 || task.pendingChoices.size > 0
+	      });
     }
     
     // 過濾掉已在活動任務中的歷史記錄
@@ -3577,19 +3668,23 @@ class BlueMonsterSession {
     
     if (!trimmedQuery) {
       // 活動任務排在最前面
-      const historyItems = filteredHistory.map((entry) => ({
-        id: entry.id,
-        taskId: entry.taskId || '#????',
-        agentName: entry.agentName || '',
-        agentEmoji: entry.agentEmoji || '👾',
-        title: entry.title,
-        date: entry.date,
-        messageCount: entry.messageCount,
-        preview: entry.preview || '',
-        isActive: false,
-        isBusy: false,
-        isWaiting: false
-      }));
+	      const historyItems = filteredHistory.map((entry) => ({
+	        id: entry.id,
+	        taskId: entry.taskId || '#????',
+	        agentName: entry.agentName || '',
+	        agentEmoji: entry.agentEmoji || '👾',
+	        modelId: entry.modelId || '',
+	        modelName: entry.modelName || '',
+	        reasoningEffort: entry.reasoningEffort || '',
+	        personaTitle: entry.personaTitle || '',
+	        title: entry.title,
+	        date: entry.date,
+	        messageCount: entry.messageCount,
+	        preview: entry.preview || '',
+	        isActive: false,
+	        isBusy: false,
+	        isWaiting: false
+	      }));
       return [...activeTasks, ...historyItems];
     }
 
@@ -3616,22 +3711,88 @@ class BlueMonsterSession {
         return b.score - a.score || timeB - timeA;
       });
 
-    const historyItems = results.map(({ entry, matchCount }) => ({
-      id: entry.id,
-      taskId: entry.taskId || '',
-      agentName: entry.agentName || '',
-      agentEmoji: entry.agentEmoji || '👾',
-      title: entry.title,
-      date: entry.date,
-      messageCount: entry.messageCount,
-      preview: entry.preview || '',
-      isActive: false,
+	    const historyItems = results.map(({ entry, matchCount }) => ({
+	      id: entry.id,
+	      taskId: entry.taskId || '',
+	      agentName: entry.agentName || '',
+	      agentEmoji: entry.agentEmoji || '👾',
+	      modelId: entry.modelId || '',
+	      modelName: entry.modelName || '',
+	      reasoningEffort: entry.reasoningEffort || '',
+	      personaTitle: entry.personaTitle || '',
+	      title: entry.title,
+	      date: entry.date,
+	      messageCount: entry.messageCount,
+	      preview: entry.preview || '',
+	      isActive: false,
       isBusy: false,
       isWaiting: false,
       matchCount
     }));
     
     return [...matchedActiveTasks, ...historyItems];
+  }
+
+  private async getTaskDetails(id: string): Promise<any | undefined> {
+    const task = this.tasks.get(id);
+    if (task) {
+      const firstUserMsg = task.messages.find((m) => m.role === 'user' && m.text);
+      const title = task.displayTitle || firstUserMsg?.text?.substring(0, 50) || 'New Task';
+      const dateObj = new Date(task.createdAt);
+      const dateStr =
+        dateObj.toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }) +
+        ' ' +
+        dateObj.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+      return {
+        id: task.chatId,
+        taskId: task.displayTaskId || '#LIVE',
+        title,
+        date: dateStr,
+        agentName: task.agentName,
+        agentEmoji: task.agentEmoji,
+        modelId: task.modelId || '',
+        modelName: task.modelName || '',
+        reasoningEffort: task.reasoningEffort || '',
+        personaTitle: task.personaTitle || '',
+        hasPersona: Boolean(task.hasPersona),
+        hasInstructions: Boolean(task.hasInstructions),
+        mode: task.mode,
+        taskFolder: task.taskFolder || '',
+        messageCount: task.messages.length,
+        requestCount: task.requestCount,
+        isActive: true,
+        isBusy: task.busy,
+        isWaiting: task.pendingConfirmations.size > 0 || task.pendingChoices.size > 0,
+      };
+    }
+
+    const history = await this.ensureHistoryIndex(
+      this.context.globalState.get<ChatHistoryEntry[]>('chatHistories') || []
+    );
+    const entry = history.find((h) => h.id === id);
+    if (!entry) return undefined;
+
+    return {
+      id: entry.id,
+      taskId: entry.taskId || '',
+      title: entry.title,
+      date: entry.date,
+      agentName: entry.agentName || '',
+      agentEmoji: entry.agentEmoji || '👾',
+      modelId: entry.modelId || '',
+      modelName: entry.modelName || '',
+      reasoningEffort: entry.reasoningEffort || '',
+      personaTitle: entry.personaTitle || '',
+      hasPersona: Boolean(entry.personaTitle),
+      hasInstructions: false,
+      mode: '',
+      taskFolder: '',
+      messageCount: entry.messageCount,
+      requestCount: 0,
+      isActive: false,
+      isBusy: false,
+      isWaiting: false,
+    };
   }
 
   // 保存指定任務到歷史記錄
@@ -3674,16 +3835,20 @@ class BlueMonsterSession {
     const dateStr = dateObj.toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }) + 
       ' ' + dateObj.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
     
-    const entry: ChatHistoryEntry = {
-      id: task.chatId,
-      taskId,
-      agentName,
-      agentEmoji,
-      title,
-      date: dateStr,
-      messageCount: clonedMessages.length,
-      messages: clonedMessages,
-      createdAt,
+	    const entry: ChatHistoryEntry = {
+	      id: task.chatId,
+	      taskId,
+	      agentName,
+	      agentEmoji,
+	      modelId: task.modelId,
+	      modelName: task.modelName,
+	      reasoningEffort: task.reasoningEffort,
+	      personaTitle: task.personaTitle,
+	      title,
+	      date: dateStr,
+	      messageCount: clonedMessages.length,
+	      messages: clonedMessages,
+	      createdAt,
       updatedAt: now,
       preview,
       searchText,

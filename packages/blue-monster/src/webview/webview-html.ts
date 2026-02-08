@@ -61,6 +61,16 @@ export const WEBVIEW_HTML_TEMPLATE = `<!DOCTYPE html>
       <button class="btn-secondary" id="modelCancel">Cancel</button>
     </div>
   </div>
+
+  <div class="panel" id="agentDetailPanel" hidden>
+    <div class="panel-title" id="agentDetailTitle">👾 Agent</div>
+    <div class="panel-meta" id="agentDetailMeta"></div>
+    <div class="agent-detail-body" id="agentDetailBody"></div>
+    <div class="panel-actions">
+      <button class="btn-secondary" id="agentDetailClose">Close</button>
+      <button class="btn-primary" id="agentDetailSwitch">Switch</button>
+    </div>
+  </div>
   
   <div class="history-panel" id="historyPanel" hidden>
     <div class="history-panel-header">

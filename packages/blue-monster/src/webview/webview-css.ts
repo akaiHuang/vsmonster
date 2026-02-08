@@ -1368,7 +1368,52 @@ body {
   opacity: 0.8;
 }
 .history-item-meta {
-  display: none;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  line-height: 1.4;
+  color: var(--text-2);
+  background: rgba(148, 163, 184, 0.10);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pill-model {
+  color: var(--monster-light);
+  background: rgba(139, 92, 246, 0.12);
+  border-color: rgba(139, 92, 246, 0.18);
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+}
+.pill-persona {
+  color: var(--cyan);
+  background: rgba(6, 182, 212, 0.10);
+  border-color: rgba(6, 182, 212, 0.16);
+}
+.history-item-info {
+  margin-left: 6px;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.history-item-info:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
 }
 .history-item-time {
   font-size: 11px;
@@ -1696,4 +1741,44 @@ body {
   background: var(--hover);
   border-color: var(--monster);
   color: var(--text);
+}
+
+/* Agent details modal */
+.agent-detail-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 45vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+.agent-kv {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.agent-kv .k {
+  width: 78px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-4);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.agent-kv .v {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-word;
+}
+.agent-kv code {
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  background: rgba(148, 163, 184, 0.10);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
 }`;
