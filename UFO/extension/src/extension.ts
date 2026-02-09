@@ -108,8 +108,7 @@ async function ensureCloudflaredQuickTunnel(localUrlRaw: string, output?: vscode
 
     const proc = spawn(
       "cloudflared",
-      ["tunnel", "--url", localUrl, "--no-autoupdate"],
-      { stdio: ["ignore", "pipe", "pipe"] }
+      ["tunnel", "--url", localUrl, "--no-autoupdate"]
     );
     cloudflaredTunnel.proc = proc;
 
@@ -169,13 +168,32 @@ interface UfoSession {
   userId: string;
   channel: string;
   history: UfoChatEntry[];
+  todoItems?: Array<{ question: string; answer?: string }>;
+  todoIndex?: number;
   taskTitle?: string;
   taskId?: string;
   taskDir?: string;
   mode?: "chat" | "work_advice" | "awaiting_confirmation" | "awaiting_approval";
-  pendingDelegation?: { originalText: string; askedAt: string; taskId?: string; taskDir?: string; readmePath?: string };
+  pendingDelegation?: {
+    originalText: string;
+    askedAt: string;
+    taskId?: string;
+    taskDir?: string;
+    readmePath?: string;
+    // Multi-agent: multiple task bundles created from one request.
+    tasks?: Array<{ taskId: string; taskDir: string; readmePath: string; title: string }>;
+    multiAgent?: boolean;
+  };
   pendingBmConfirmations?: Array<{ id: string; command: string; category: string; timestamp: number; age: number }>;
-  bmRun?: { taskId?: string; taskDir?: string; startedAt: string };
+  bmRun?: {
+    taskId?: string;
+    taskDir?: string;
+    startedAt: string;
+    // Multi-agent group metadata (best-effort)
+    runId?: string;
+    tasks?: Array<{ taskId: string; taskDir: string; title: string }>;
+    remaining?: number;
+  };
 }
 
 let promptStudioState: PromptStudioState | null = null;
@@ -406,7 +424,8 @@ class UfoDashboardProvider implements vscode.WebviewViewProvider {
       summary: string;
       interview: { goal: string; output: string; acceptance: string; constraints: string; transcript: string };
     }) => Promise<{ taskId: string; taskDir: string; title: string }>,
-    private readonly onRunTaskInBlueMonster: (payload: { taskId: string; taskDir: string; title: string }) => Promise<{ text: string; previewUrl?: string; pendingConfirmations?: any[] }>
+    private readonly onRunTaskInBlueMonster: (payload: { taskId: string; taskDir: string; title: string }) => Promise<{ text: string; previewUrl?: string; pendingConfirmations?: any[] }>,
+    private readonly output: vscode.OutputChannel
   ) {
     // Load persisted console history for the webview console tab.
     const existing = this.context.globalState.get<any[]>(this.consoleHistoryKey, []);
@@ -479,6 +498,14 @@ class UfoDashboardProvider implements vscode.WebviewViewProvider {
         const title = typeof message.title === "string" ? message.title : "";
         if (taskId && taskDir) {
           void this.runTaskInBlueMonster({ taskId, taskDir, title: title || taskId });
+        }
+      }
+      if (message.type === "task_split_multi_agent") {
+        const taskId = typeof message.taskId === "string" ? message.taskId : "";
+        const taskDir = typeof message.taskDir === "string" ? message.taskDir : "";
+        const title = typeof message.title === "string" ? message.title : "";
+        if (taskDir) {
+          void this.splitTaskIntoMultiAgent({ taskId: taskId || path.basename(taskDir), taskDir, title: title || taskId || path.basename(taskDir) });
         }
       }
       // Sync settings saved via Gateway API back to VS Code config
@@ -561,7 +588,11 @@ class UfoDashboardProvider implements vscode.WebviewViewProvider {
       transcript: [],
     };
     this.post({ type: "task_interview_reset" });
-    this.appendInterviewAssistant("我會先用 4 個問題把需求釐清，然後幫你建立 UFO 任務。第一題：你想完成什麼？一句話描述就好。");
+    this.appendInterviewAssistant(
+      "我會用 4 個問題把需求釐清，然後幫你建立 UFO 任務。\n" +
+      "你也可以直接一次回覆四項（目標/交付物/驗收/限制），我會自動填好。\n\n" +
+      "第一題：你想完成什麼？一句話描述就好。"
+    );
     this.post({ type: "task_interview_state", canCreate: false, createdTask: null });
   }
 
@@ -587,44 +618,116 @@ class UfoDashboardProvider implements vscode.WebviewViewProvider {
 
     this.appendInterviewUser(text);
 
+    const parseInterviewBlock = (
+      raw: string
+    ): Partial<{ goal: string; output: string; acceptance: string; constraints: string }> => {
+      const normalized = String(raw || "").replace(/\r/g, "");
+      const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const fieldKeys = {
+        goal: ["目標", "目的", "需求", "Goal", "goal"],
+        output: ["交付物", "交付", "產出", "Output", "output", "Deliverable", "deliverable"],
+        acceptance: ["驗收標準", "驗收", "完成標準", "Acceptance", "acceptance", "Done", "done"],
+        constraints: ["限制", "偏好", "注意事項", "Constraint", "constraint", "Constraints", "constraints"],
+      } as const;
+
+      const allKeys = Object.values(fieldKeys).flat().map(escapeRe).join("|");
+      const extract = (keys: readonly string[]): string => {
+        const ks = keys.map(escapeRe).join("|");
+        const re = new RegExp(
+          `(?:^|\\n)\\s*(?:[-*]\\s*)?(?:${ks})\\s*[:：]\\s*([\\s\\S]*?)(?=\\n\\s*(?:[-*]\\s*)?(?:${allKeys})\\s*[:：]|$)`,
+          "i"
+        );
+        const m = normalized.match(re);
+        return m && m[1] ? String(m[1]).trim() : "";
+      };
+
+      const out: Partial<{ goal: string; output: string; acceptance: string; constraints: string }> = {};
+      const goal = extract(fieldKeys.goal);
+      const output = extract(fieldKeys.output);
+      const acceptance = extract(fieldKeys.acceptance);
+      const constraints = extract(fieldKeys.constraints);
+      if (goal) out.goal = goal;
+      if (output) out.output = output;
+      if (acceptance) out.acceptance = acceptance;
+      if (constraints) out.constraints = constraints;
+      return out;
+    };
+
+    const a = this.interview.answers;
+    const wasComplete =
+      Boolean(String(a.goal || "").trim()) &&
+      Boolean(String(a.output || "").trim()) &&
+      Boolean(String(a.acceptance || "").trim()) &&
+      Boolean(String(a.constraints || "").trim());
+
+    const parsed = parseInterviewBlock(text);
+    const filledAny = Object.values(parsed).some((v) => typeof v === "string" && v.trim().length > 0);
+
+    if (parsed.goal) a.goal = parsed.goal;
+    if (parsed.output) a.output = parsed.output;
+    if (parsed.acceptance) a.acceptance = parsed.acceptance;
+    if (parsed.constraints) a.constraints = parsed.constraints;
+
+    // If no labels were used, treat the message as the answer to the current step.
     const step = this.interview.step;
-    if (step === 0) {
-      this.interview.answers.goal = text;
-      this.interview.step = 1;
-      this.appendInterviewAssistant("第二題：你希望交付物是什麼？例如：一個網頁、某個功能、修一個 bug、寫文件、做部署。");
-      return;
+    if (!filledAny) {
+      if (step === 0) a.goal = text;
+      else if (step === 1) a.output = text;
+      else if (step === 2) a.acceptance = text;
+      else if (step === 3) a.constraints = text;
+      else if (step >= 4 && a.constraints) {
+        // Allow extra notes after completion.
+        a.constraints = `${String(a.constraints).trim()}\n${text}`.trim();
+      }
     }
-    if (step === 1) {
-      this.interview.answers.output = text;
-      this.interview.step = 2;
-      this.appendInterviewAssistant("第三題：你的驗收標準是什麼？你怎麼判斷『完成了』？可以列 2-5 點。");
-      return;
-    }
-    if (step === 2) {
-      this.interview.answers.acceptance = text;
+
+    const isComplete =
+      Boolean(String(a.goal || "").trim()) &&
+      Boolean(String(a.output || "").trim()) &&
+      Boolean(String(a.acceptance || "").trim()) &&
+      Boolean(String(a.constraints || "").trim());
+
+    if (!isComplete) {
+      if (!String(a.goal || "").trim()) {
+        this.interview.step = 0;
+        this.appendInterviewAssistant("第一題：你想完成什麼？一句話描述就好。");
+        return;
+      }
+      if (!String(a.output || "").trim()) {
+        this.interview.step = 1;
+        this.appendInterviewAssistant("第二題：你希望交付物是什麼？例如：一個網頁、某個功能、修一個 bug、寫文件、做部署。");
+        return;
+      }
+      if (!String(a.acceptance || "").trim()) {
+        this.interview.step = 2;
+        this.appendInterviewAssistant("第三題：你的驗收標準是什麼？你怎麼判斷『完成了』？可以列 2-5 點。");
+        return;
+      }
       this.interview.step = 3;
       this.appendInterviewAssistant("第四題：有沒有任何限制/偏好？例如：不要動哪些資料夾、要用/不要用的技術、期限、額外注意事項。沒有就回『無』。");
       return;
     }
-    if (step >= 3) {
-      this.interview.answers.constraints = text;
-      this.interview.step = 4;
-      const a = this.interview.answers;
+
+    this.interview.step = 4;
+
+    if (!wasComplete) {
       const goal = a.goal || "";
       const output = a.output || "";
       const acceptance = a.acceptance || "";
       const constraints = a.constraints || "";
       this.appendInterviewAssistant(
         "收到。我已整理好訪談內容，可以建立任務。\n\n" +
-        `- 目標：${goal}\n` +
-        `- 交付：${output}\n` +
-        `- 驗收：${acceptance}\n` +
-        `- 限制：${constraints}\n\n` +
-        "按下「建立任務」後，我會在 UFO/tasks/pending 建立交接包；接著到 Tasks 分頁的任務卡片按 Send / BlueMonster 就能啟動或切換過去。"
+          `- 目標：${goal}\n` +
+          `- 交付：${output}\n` +
+          `- 驗收：${acceptance}\n` +
+          `- 限制：${constraints}\n\n` +
+          "按下「建立任務」後，我會在 UFO/tasks/pending 建立交接包；接著到 Tasks 分頁的任務卡片按 Send / BlueMonster 就能啟動或切換過去。"
       );
-      this.post({ type: "task_interview_state", canCreate: true, createdTask: null });
-      return;
+    } else if (filledAny || step >= 4) {
+      this.appendInterviewAssistant("已收到補充內容。如果 OK，請按「建立任務」。");
     }
+
+    this.post({ type: "task_interview_state", canCreate: true, createdTask: null });
   }
 
   private async finalizeInterviewTask(): Promise<void> {
@@ -663,6 +766,89 @@ class UfoDashboardProvider implements vscode.WebviewViewProvider {
     } finally {
       this.post({ type: "task_interview_busy", busy: false });
     }
+  }
+
+  private async splitTaskIntoMultiAgent(payload: { taskId: string; taskDir: string; title: string }): Promise<void> {
+    const taskId = String(payload.taskId || "").trim();
+    const taskDir = String(payload.taskDir || "").trim();
+    const title = String(payload.title || "").trim() || taskId;
+    if (!taskDir || !fs.existsSync(taskDir)) {
+      vscode.window.showWarningMessage("找不到任務資料夾，無法拆分。");
+      return;
+    }
+    const readmePath = path.join(taskDir, "README.md");
+    if (!fs.existsSync(readmePath)) {
+      vscode.window.showWarningMessage("找不到 README.md，無法拆分。");
+      return;
+    }
+
+    let sourceText = "";
+    try {
+      sourceText = fs.readFileSync(readmePath, "utf8");
+    } catch (err) {
+      vscode.window.showWarningMessage(`讀取 README.md 失敗：${String(err)}`);
+      return;
+    }
+
+    const cfg = vscode.workspace.getConfiguration("ufo");
+    const modelId = cfg.get<string>("models.spec", "gpt-5-mini");
+    this.log("info", `[UFO] Multi-agent split requested: ${taskId}`, "info");
+
+    let split: { groupTitle: string; tasks: MultiAgentSubtask[] } | null = null;
+    try {
+      split = await splitTextToMultiAgentSubtasks({
+        sourceText,
+        modelId: modelId || "gpt-5-mini",
+        output: this.output,
+        maxTasks: 6
+      });
+    } catch (err) {
+      this.log("error", `[UFO] Multi-agent split failed: ${String(err)}`, "error");
+      vscode.window.showWarningMessage(`模型拆分失敗：${String(err)}`);
+      return;
+    }
+
+    if (!split || !Array.isArray(split.tasks) || split.tasks.length < 2) {
+      vscode.window.showWarningMessage("模型無法把任務拆成多個子任務（至少需要 2 個）。");
+      return;
+    }
+
+    const groupSlug = slugify(split.groupTitle || title) || slugify(title) || "multi-agent";
+    const groupId = `ma-${Date.now().toString(36)}-${groupSlug}`.replace(/-+$/g, "").slice(0, 80);
+    const fakeSession: UfoSession = { key: "ui:local", userId: "local", channel: "ui", history: [] };
+    const created = split.tasks.map((subtask, i) =>
+      createPendingTaskBundleFromSubtask({
+        context: this.context,
+        session: fakeSession,
+        groupId,
+        index: i,
+        total: split.tasks.length,
+        requestText: sourceText,
+        subtask
+      })
+    );
+
+    // Leave a note in the original task folder for traceability.
+    try {
+      const note = [
+        "# Multi-agent split",
+        "",
+        `- From: ${taskId}`,
+        `- Group: ${groupId}`,
+        `- At: ${new Date().toISOString()}`,
+        "",
+        "## Created subtasks (pending)",
+        ...created.map((t, i) => `- (${i + 1}/${created.length}) ${t.title} [${t.taskId}]`),
+        ""
+      ].join("\n");
+      fs.writeFileSync(path.join(taskDir, `split-${groupId}.md`), note, "utf8");
+    } catch {}
+
+    try {
+      this.onCommand("ufo.refreshQueue");
+    } catch {}
+
+    vscode.window.showInformationMessage(`✅ 已拆成 ${created.length} 個子任務（pending）：${groupId}`);
   }
 
   private async runTaskInBlueMonster(payload: { taskId: string; taskDir: string; title: string }): Promise<void> {
@@ -952,11 +1138,20 @@ function listTaskItems(context: vscode.ExtensionContext): DashboardState["taskIt
 function buildDashboardState(
   context: vscode.ExtensionContext,
   connected: boolean,
-  connectionState: "connected" | "reconnecting" | "disconnected"
+  connectionState: "connected" | "reconnecting" | "disconnected",
+  channels?: { line: boolean; telegram: boolean; discord: boolean }
 ): DashboardState {
   const config = vscode.workspace.getConfiguration("ufo");
   const gatewayUrl = config.get<string>("gatewayUrl", "ws://localhost:3000");
-  const publicUrl = config.get<string>("publicUrl", "") || "";
+  const configuredPublicUrl = config.get<string>("publicUrl", "") || "";
+  const runtimePublicUrl =
+    cloudflaredTunnel.publicUrl && cloudflaredTunnel.proc && !cloudflaredTunnel.proc.killed
+      ? cloudflaredTunnel.publicUrl
+      : "";
+  const publicUrl =
+    configuredPublicUrl && !isPlaceholder(configuredPublicUrl)
+      ? configuredPublicUrl
+      : runtimePublicUrl;
   const envAutoSync = config.get<boolean>("env.autoSync", true);
   const chatModel = config.get<string>("models.chat", "gpt-5-mini");
   const specModel = config.get<string>("models.spec", "gpt-5-mini");
@@ -979,6 +1174,13 @@ function buildDashboardState(
 
   const gatewayHttpUrl = gatewayWsToHttp(gatewayUrl);
 
+  // Use gateway channels if provided (actual status from gateway), otherwise fall back to local config
+  const effectiveChannels = channels || {
+    line: lineConfigured,
+    telegram: telegramConfigured,
+    discord: discordConfigured
+  };
+
   return {
     connected,
     connectionState,
@@ -995,11 +1197,7 @@ function buildDashboardState(
       spec: specModel,
       opus: opusModel
     },
-    channels: {
-      line: lineConfigured,
-      telegram: telegramConfigured,
-      discord: discordConfigured
-    },
+    channels: effectiveChannels,
     lastUpdated: new Date().toLocaleTimeString()
   };
 }
@@ -1756,10 +1954,23 @@ function looksLikeWorkIntent(text: string): boolean {
   if (/```/.test(t)) return true;
   if (/(error|exception|stack trace|traceback|segfault)\b/i.test(t)) return true;
   if (/\b(src\/|packages\/|UFO\/|\.ts\b|\.js\b|\.json\b|pnpm\b|npm\b|yarn\b|docker\b|k8s\b|kubectl\b|git\b)/i.test(t)) return true;
-  // Common work keywords (zh/en)
-  if (/(我想做|我要做|想做|做一個|做個|做個頁面|做個網站|頁面|網站|前端|後端|伺服器|server|express|node|api|endpoint|hello\\s*world|hellow\\s*world)/i.test(t)) return true;
+  // Common work keywords (zh)
+  if (/(我想做|我要做|想做|做一個|做個|做個頁面|做個網站|頁面|網站|前端|後端|伺服器)/i.test(t)) return true;
   if (/(幫我(做|寫|建立|創建|新增|加上|加入|修改|修復|除錯|debug)|建立(一個|個)?|創建(一個|個)?|新增|更新|實作|開發|部署|設定|配置|改一下|修|修復|除錯|報錯|錯誤|壞了|跑不起來|如何做|怎麼做|寫爬蟲|抓資料|整理資料|產生報告|寫文章|寫文件|規格|PRD|技術方案)/i.test(t)) return true;
+  // English work keywords
+  if (/\b(build|create|make|develop|implement|write|code|fix|debug|deploy|setup|configure|install|add|update|refactor|optimize|test)\b/i.test(t)) return true;
+  if (/\b(help me|can you|please|i need|i want)\s+(build|create|make|write|fix|develop|implement|do|work on)/i.test(t)) return true;
+  if (/\b(server|express|node|api|endpoint|hello\s*world|website|web\s*app|application|database|frontend|backend|component|feature|function|script|automation)\b/i.test(t)) return true;
+  // Action requests
+  if (/\b(send (it )?to|delegate to|hand off to|let|have)\s+(bluemonster|bm|agent)/i.test(t)) return true;
   return false;
+}
+
+function looksLikeMultiAgentRequest(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  // Require explicit intent to avoid surprising fan-out.
+  return /(multi[\s-]?agent|多\s*agent|多\s*個\s*agent|多\s*位\s*agent|多\s*代理|並行\s*(開發|處理)|平行\s*(開發|處理)|拆\s*(成|分)\s*\d+\s*個\s*任務|分給\s*多\s*個\s*(agent|藍怪|bluemonster))/i.test(t);
 }
 
 function parseYesNo(text: string): boolean | null {
@@ -2026,6 +2237,167 @@ async function syncBlueMonsterFromGateway(gatewayHttpUrl: string, output: vscode
   }
 }
 
+type MultiAgentSubtask = {
+  title: string;
+  instruction: string;
+  acceptance?: string[];
+};
+
+function extractJsonObjectLoose(text: string): any | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  const raw = text.slice(start, end + 1);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeMultiAgentSubtasks(raw: any, maxTasks: number): { groupTitle: string; tasks: MultiAgentSubtask[] } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const groupTitle = typeof raw.groupTitle === "string" && raw.groupTitle.trim() ? raw.groupTitle.trim() : "multi-agent";
+  const arr = Array.isArray(raw.tasks) ? raw.tasks : (Array.isArray(raw.subtasks) ? raw.subtasks : []);
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+
+  const tasks: MultiAgentSubtask[] = [];
+  for (const item of arr) {
+    if (!item || typeof item !== "object") continue;
+    const title = typeof item.title === "string" ? item.title.trim() : "";
+    const instruction = typeof item.instruction === "string" ? item.instruction.trim() : (typeof item.summary === "string" ? item.summary.trim() : "");
+    if (!title || !instruction) continue;
+    const acceptance = Array.isArray(item.acceptance)
+      ? item.acceptance.map((v: any) => String(v || "").trim()).filter(Boolean).slice(0, 12)
+      : [];
+    tasks.push({ title, instruction, acceptance: acceptance.length > 0 ? acceptance : undefined });
+    if (tasks.length >= maxTasks) break;
+  }
+  if (tasks.length === 0) return null;
+  return { groupTitle, tasks };
+}
+
+function buildMultiAgentSplitPrompt(sourceText: string, maxTasks: number): string {
+  return [
+    "你是 UFO 的「多 Agent 任務拆解器」。",
+    "目標：把一段需求/規格拆成 2-" + String(maxTasks) + " 個可平行開發的子任務，讓不同 BlueMonster agent 可以各自獨立完成。",
+    "要求：",
+    "- 子任務之間盡量降低依賴；若有必要依賴，請把依賴內容寫進 instruction（用文字描述即可，不要額外欄位）",
+    "- 每個子任務要有清楚的交付物與驗收重點",
+    "- 只輸出 JSON，不要加任何多餘文字、不要用 code fence",
+    "",
+    "JSON 格式：",
+    "{",
+    "  \"groupTitle\": \"...\",",
+    "  \"tasks\": [",
+    "    {",
+    "      \"title\": \"...\",",
+    "      \"instruction\": \"...\",",
+    "      \"acceptance\": [\"...\", \"...\"]",
+    "    }",
+    "  ]",
+    "}",
+    "",
+    "需求/規格：",
+    sourceText.trim()
+  ].join("\n");
+}
+
+async function splitTextToMultiAgentSubtasks(options: {
+  sourceText: string;
+  modelId: string;
+  output: vscode.OutputChannel;
+  maxTasks?: number;
+}): Promise<{ groupTitle: string; tasks: MultiAgentSubtask[] } | null> {
+  const maxTasks = Math.max(2, Math.min(8, Number(options.maxTasks || 5)));
+  const prompt = buildMultiAgentSplitPrompt(options.sourceText, maxTasks);
+  const raw = await runSdkPrompt(`split:${Date.now().toString(36)}`, options.modelId, prompt, options.output);
+  const parsed = extractJsonObjectLoose(raw);
+  const normalized = normalizeMultiAgentSubtasks(parsed, maxTasks);
+  return normalized;
+}
+
+function createPendingTaskBundleFromSubtask(options: {
+  context: vscode.ExtensionContext;
+  session: UfoSession;
+  groupId: string;
+  index: number;
+  total: number;
+  requestText: string;
+  subtask: MultiAgentSubtask;
+}): { taskId: string; taskDir: string; readmePath: string; status: TaskStatus; title: string } {
+  const { context, session, groupId, index, total, requestText, subtask } = options;
+  const tasksRoot = getTasksRoot(context);
+  const createdAt = new Date().toISOString();
+
+  const part = String(index + 1).padStart(2, "0");
+  const slug = slugify(subtask.title) || `part-${part}`;
+  // Keep id reasonably short for filesystem + UI.
+  const taskId = `${groupId}-p${part}-${slug}`.slice(0, 160);
+
+  const pendingDir = path.join(tasksRoot, "pending", taskId);
+  ensureDirectory(pendingDir);
+
+  const sourceLines = [
+    `- Multi-agent：${groupId} (${index + 1}/${total})`,
+    `- Channel: ${session.channel}`,
+    `- User: ${session.userId}`,
+  ];
+
+  let readme = buildTaskSpecContent(subtask.title, subtask.instruction, createdAt, sourceLines);
+  readme += [
+    "",
+    "## 子任務說明",
+    subtask.instruction,
+    "",
+    subtask.acceptance && subtask.acceptance.length > 0
+      ? ["## 驗收重點", ...subtask.acceptance.map((a) => `- ${a}`)].join("\n")
+      : "",
+    "",
+    "## 原始需求（for context）",
+    requestText.trim(),
+    ""
+  ].filter(Boolean).join("\n");
+
+  const agents = [
+    "# AGENTS",
+    "",
+    "## 必讀文件",
+    "- README.md",
+    "- dev-spec-*.md",
+    "",
+    "## 開發注意事項",
+    "- 這是多 Agent 子任務，請只處理你這一份範圍（避免與其他子任務衝突）",
+    "- 若需要調整界面/架構，請先在 README.md 補充原因與影響",
+    "- 若遇到需要危險操作請發出 pending confirmation",
+  ].join("\n");
+
+  const devSpec = [
+    "# 開發規格書",
+    "",
+    "## 拆件清單",
+    "- ",
+    "",
+    "## 組裝說明",
+    "- ",
+    "",
+    "## 測試策略",
+    "- ",
+    "",
+    "## 備註",
+    subtask.acceptance && subtask.acceptance.length > 0
+      ? ["- 驗收重點：", ...subtask.acceptance.map((a) => `  - ${a}`)].join("\n")
+      : "- （無）",
+    ""
+  ].join("\n");
+
+  fs.writeFileSync(path.join(pendingDir, "README.md"), readme, "utf8");
+  fs.writeFileSync(path.join(pendingDir, "AGENTS.md"), agents, "utf8");
+  fs.writeFileSync(path.join(pendingDir, `dev-spec-${taskId}.md`), devSpec, "utf8");
+
+  return { taskId, taskDir: pendingDir, readmePath: path.join(pendingDir, "README.md"), status: "pending", title: subtask.title };
+}
+
 async function createUfoTaskBundleFromConversation(options: {
   context: vscode.ExtensionContext;
   output: vscode.OutputChannel;
@@ -2114,14 +2486,18 @@ async function executeUfoTaskWithBlueMonster(options: {
   session: UfoSession;
   taskDir: string;
   requestText: string;
+  sendPrefix?: string;
 }): Promise<void> {
-  const { context, refreshAllProviders, output, dashboardProvider, gatewayClient, meta, session, taskDir, requestText } = options;
+  const { context, refreshAllProviders, output, dashboardProvider, gatewayClient, meta, session, taskDir, requestText, sendPrefix } = options;
   let clearBmRun = true;
 
+  const prefix = typeof sendPrefix === "string" ? sendPrefix : "";
   const sendToChannel = (content: string) => {
-    const chunks = splitMessage(content, 800);
+    const maxLen = Math.max(200, 800 - (prefix ? prefix.length : 0));
+    const chunks = splitMessage(content, maxLen);
     for (const chunk of chunks) {
-      gatewayClient.send({ type: "copilot_response", channel: meta.channel, userId: meta.userId, chatId: meta.chatId, content: chunk });
+      const out = prefix ? `${prefix}${chunk}` : chunk;
+      gatewayClient.send({ type: "copilot_response", channel: meta.channel, userId: meta.userId, chatId: meta.chatId, content: out });
     }
   };
 
@@ -2237,62 +2613,25 @@ async function executeUfoTaskWithBlueMonster(options: {
 	      const overrideBaseRaw = config.get<string>("publicUrl", "") || "";
 		      const baseUrl = await resolvePublicBaseUrl(gatewayHttpUrl, overrideBaseRaw, output);
 
+      // Read BlueMonster agent name for completion message
+      const bmMeta = readBmMeta(taskDir);
+      const bmLabel = bmMeta.agentName ? `${bmMeta.agentEmoji || '🤖'} ${bmMeta.agentName}` : "BlueMonster";
+
       const previewPath = findPreviewHtmlFile(taskDir);
       if (previewPath) {
-        const buf = fs.readFileSync(previewPath);
-        const source = normalizeMediaSource(meta.channel);
-        const uploadRes = await postJson(`${gatewayHttpUrl}/api/media/upload`, {
-          buffer: buf.toString("base64"),
-          originalFilename: path.basename(previewPath),
-          mimeType: "text/html",
-          source
-        });
-        if (uploadRes?.success && uploadRes?.media) {
-          const publicUrlRaw = typeof uploadRes.media.publicUrl === "string" ? uploadRes.media.publicUrl : "";
-          const mediaId = uploadRes.media.id ? String(uploadRes.media.id) : "";
-          const fallbackPath = mediaId ? `/api/media/${mediaId}/view` : "";
-
-          let pathPart = "";
-          if (publicUrlRaw) {
-            if (publicUrlRaw.startsWith("/")) {
-              pathPart = publicUrlRaw;
-            } else if (/^https?:\/\//i.test(publicUrlRaw)) {
-              try {
-                pathPart = new URL(publicUrlRaw).pathname || "";
-              } catch {
-                pathPart = "";
-              }
-            }
-          }
-          if (!pathPart) {
-            pathPart = fallbackPath;
-          }
-
-	          const url = baseUrl
-	            ? `${baseUrl}${pathPart.startsWith("/") ? pathPart : `/${pathPart}`}`
-	            : (
-	              publicUrlRaw && /^https?:\/\//i.test(publicUrlRaw)
-	                ? publicUrlRaw
-	                : (
-	                  publicUrlRaw && publicUrlRaw.startsWith("/")
-	                    ? `${gatewayHttpUrl}${publicUrlRaw}`
-	                    : (fallbackPath ? `${gatewayHttpUrl}${fallbackPath}` : "")
-	                )
-	            );
-	          if (url) {
-	            const localMark = /localhost|127\\.0\\.0\\.1/i.test(url) ? "（本機）" : "";
-	            sendToChannel(`✅ 任務完成，預覽連結${localMark}：\n${url}`);
-	            try {
-	              await vscode.commands.executeCommand("blueMonster.addSystemNote", `🌐 Preview${localMark}: ${url}`);
-	            } catch {}
-	          } else {
-	            sendToChannel(`✅ 任務完成。\n成果資料夾：${taskDir}`);
-	          }
-	        } else {
-	          sendToChannel(`✅ 任務完成。\n成果資料夾：${taskDir}`);
-	        }
+        // Use the simpler /preview/:taskId endpoint
+        const taskId = path.basename(taskDir);
+        const previewPathPart = `/preview/${taskId}`;
+        const url = baseUrl
+          ? `${baseUrl}${previewPathPart}`
+          : `${gatewayHttpUrl}${previewPathPart}`;
+        const localMark = /localhost|127\.0\.0\.1/i.test(url) ? "（本機）" : "";
+        sendToChannel(`👾 ${bmLabel} 做好了！預覽連結${localMark}：\n${url}`);
+        try {
+          await vscode.commands.executeCommand("blueMonster.addSystemNote", `🌐 Preview${localMark}: ${url}`);
+        } catch {}
       } else {
-        sendToChannel(`✅ 任務完成。\n成果資料夾：${taskDir}`);
+        sendToChannel(`👾 ${bmLabel} 做好了！\n成果資料夾：${taskDir}`);
       }
     } catch (err) {
       output.appendLine(`[UFO] Auto-delivery failed: ${String(err)}`);
@@ -2606,6 +2945,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const tasksRoot = getTasksRoot(context);
   let gatewayConnected = false;
   let gatewayConnectionState: "connected" | "reconnecting" | "disconnected" = "disconnected";
+  let gatewayChannels: { line: boolean; telegram: boolean; discord: boolean } = { line: false, telegram: false, discord: false };
   const output = vscode.window.createOutputChannel("UFO");
   const recentMessageIds = new Set<string>();
   const recentMessageIdQueue: string[] = [];
@@ -2628,7 +2968,7 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   updateQueueViewsContext();
 
-  const buildState = () => buildDashboardState(context, gatewayConnected, gatewayConnectionState);
+  const buildState = () => buildDashboardState(context, gatewayConnected, gatewayConnectionState, gatewayChannels);
   let dashboardProvider!: UfoDashboardProvider;
   const createTaskFromInterview = async (payload: {
     title: string;
@@ -2792,46 +3132,29 @@ export function activate(context: vscode.ExtensionContext): void {
       return { text: text || "BlueMonster 需要確認後才能繼續。", pendingConfirmations };
     }
 
-    // Try auto-delivery via media upload (HTML preview).
+    // Generate preview URL using the simpler /preview endpoint
     let previewUrl: string | undefined;
-		    try {
-		      const overrideBaseRaw = ufoCfg.get<string>("publicUrl", "") || "";
-		      const baseUrl = await resolvePublicBaseUrl(gw, overrideBaseRaw, output);
-		      const previewPath = findPreviewHtmlFile(taskDir);
-		      if (previewPath) {
-		        const buf = fs.readFileSync(previewPath);
-		        const uploadRes = await postJson(`${gw}/api/media/upload`, {
-	          buffer: buf.toString("base64"),
-	          originalFilename: path.basename(previewPath),
-	          mimeType: "text/html",
-	          source: "telegram"
-	        });
-	        if (uploadRes?.success && uploadRes?.media) {
-	          const publicUrlRaw = typeof uploadRes.media.publicUrl === "string" ? uploadRes.media.publicUrl : "";
-	          const mediaId = uploadRes.media.id ? String(uploadRes.media.id) : "";
-	          const fallbackPath = mediaId ? `/api/media/${mediaId}/view` : "";
-	          let pathPart = "";
-	          if (publicUrlRaw) {
-	            if (publicUrlRaw.startsWith("/")) pathPart = publicUrlRaw;
-	            else if (/^https?:\/\//i.test(publicUrlRaw)) {
-	              try { pathPart = new URL(publicUrlRaw).pathname || ""; } catch {}
-	            }
-	          }
-		          if (!pathPart) pathPart = fallbackPath;
-		          previewUrl = baseUrl
-		            ? `${baseUrl}${pathPart.startsWith("/") ? pathPart : `/${pathPart}`}`
-		            : (publicUrlRaw && /^https?:\/\//i.test(publicUrlRaw) ? publicUrlRaw : (pathPart ? `${gw}${pathPart.startsWith("/") ? pathPart : `/${pathPart}`}` : undefined));
-		          if (previewUrl) {
-		            const localMark = /localhost|127\\.0\\.0\\.1/i.test(previewUrl) ? "（本機）" : "";
-		            try {
-		              await vscode.commands.executeCommand("blueMonster.addSystemNote", `🌐 Preview${localMark}: ${previewUrl}`);
-		            } catch {}
-		          }
-		        }
-		      }
-		    } catch (err) {
-		      output.appendLine(`[UFO] UI auto-delivery failed: ${String(err)}`);
-		    }
+    try {
+      const overrideBaseRaw = ufoCfg.get<string>("publicUrl", "") || "";
+      const baseUrl = await resolvePublicBaseUrl(gw, overrideBaseRaw, output);
+      const previewPath = findPreviewHtmlFile(taskDir);
+      if (previewPath) {
+        const taskId = path.basename(taskDir);
+        // Use the /preview/:taskId endpoint which auto-searches status folders
+        const previewPathPart = `/preview/${taskId}`;
+        previewUrl = baseUrl
+          ? `${baseUrl}${previewPathPart}`
+          : `${gw}${previewPathPart}`;
+        if (previewUrl) {
+          const localMark = /localhost|127\.0\.0\.1/i.test(previewUrl) ? "（本機）" : "";
+          try {
+            await vscode.commands.executeCommand("blueMonster.addSystemNote", `🌐 Preview${localMark}: ${previewUrl}`);
+          } catch {}
+        }
+      }
+    } catch (err) {
+      output.appendLine(`[UFO] Preview URL generation failed: ${String(err)}`);
+    }
 
     // Move to done.
     try {
@@ -2851,7 +3174,8 @@ export function activate(context: vscode.ExtensionContext): void {
     buildState,
     (command) => vscode.commands.executeCommand(command),
     createTaskFromInterview,
-    runTaskInBlueMonster
+    runTaskInBlueMonster,
+    output
   );
   const promptStudioPanel = new PromptStudioPanel(context);
 
@@ -2900,16 +3224,18 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  const sendToUser = (channel: string, userId: string, content: string, chatId?: string) => {
+  const sendToUser = (channel: string, userId: string, content: string, chatId?: string, replyToken?: string) => {
     // 在選項前加分隔線（偵測「方案」「選擇」「選項」等關鍵字）
     const formattedContent = content.replace(
       /(\n)(方案\s*[A-Z]|選項\s*[A-Z0-9]|[A-Z]\s*[—–-]\s*|[A-Z]\)\s*)/g,
       '\n\n──────────────\n$2'
     );
-    
+
     const chunks = splitMessage(formattedContent, 800);
-    for (const chunk of chunks) {
-      gatewayClient.send({ type: "copilot_response", channel, userId, chatId, content: chunk });
+    for (let i = 0; i < chunks.length; i++) {
+      // Only use replyToken for the first chunk (LINE reply API can only be used once)
+      const tokenForChunk = i === 0 ? replyToken : undefined;
+      gatewayClient.send({ type: "copilot_response", channel, userId, chatId, content: chunks[i], replyToken: tokenForChunk });
     }
   };
 
@@ -2921,6 +3247,7 @@ export function activate(context: vscode.ExtensionContext): void {
       chatId?: string;
       messageId?: string;
       timestamp?: string;
+      replyToken?: string; // LINE reply token for faster response
     }
   ) => {
     const normalizedText = text.trim();
@@ -2937,6 +3264,128 @@ export function activate(context: vscode.ExtensionContext): void {
     const config = vscode.workspace.getConfiguration("ufo");
     const chatModelId = config.get<string>("models.chat", "gpt-5-mini");
 
+    // Handle slash commands
+    if (normalizedText.startsWith('/')) {
+      const [cmd, ...args] = normalizedText.slice(1).split(/\s+/);
+      const cmdLower = cmd.toLowerCase();
+      const argText = args.join(' ').trim();
+
+      if (cmdLower === 'help' || cmdLower === '?' || cmdLower === 'h') {
+        const helpText = [
+          '📋 **UFO 指令列表**',
+          '',
+          '`/help` - 顯示此說明',
+          '`/task <描述>` - 建立任務並交給 BlueMonster',
+          '`/model [名稱]` - 查看或切換聊天模型',
+          '`/url` - 顯示 Gateway 公開網址',
+          '`/status` - 顯示連線狀態',
+          '',
+          '💡 **提示**：直接描述你想做的事也可以觸發任務建立（例如：「幫我做一個登入頁面」）'
+        ].join('\n');
+        sendToUser(meta.channel, meta.userId, helpText, meta.chatId, meta.replyToken);
+        return;
+      }
+
+      if (cmdLower === 'url' || cmdLower === 'link') {
+        const gwUrl = config.get<string>("gatewayUrl", "ws://localhost:3000");
+        const publicUrl = config.get<string>("publicUrl", "");
+        const httpUrl = gwUrl.replace(/^ws/, 'http').replace(/\/+$/, '');
+        const lines = [
+          '🔗 **Gateway URLs**',
+          `- Local: ${httpUrl}`,
+        ];
+        if (publicUrl && !isPlaceholder(publicUrl)) {
+          lines.push(`- Public: ${publicUrl}`);
+        }
+        sendToUser(meta.channel, meta.userId, lines.join('\n'), meta.chatId, meta.replyToken);
+        return;
+      }
+
+      if (cmdLower === 'status') {
+        const gwUrl = config.get<string>("gatewayUrl", "ws://localhost:3000");
+        const connected = gatewayConnected ? '✅ 已連線' : '❌ 未連線';
+        let bmStatus = 'Unknown';
+        try {
+          const st = await vscode.commands.executeCommand("blueMonster.getStatus") as any;
+          const name = st?.agentName || 'BlueMonster';
+          const busy = st?.busy ? '忙碌中' : '閒置';
+          const model = st?.modelId || 'unknown';
+          bmStatus = `${name} (${model}) - ${busy}`;
+        } catch { bmStatus = '無法取得'; }
+        const lines = [
+          '📊 **UFO 狀態**',
+          `- Gateway: ${connected}`,
+          `- URL: ${gwUrl}`,
+          `- BlueMonster: ${bmStatus}`,
+          `- Chat Model: ${chatModelId}`
+        ];
+        sendToUser(meta.channel, meta.userId, lines.join('\n'), meta.chatId, meta.replyToken);
+        return;
+      }
+
+      if (cmdLower === 'model') {
+        if (!argText) {
+          const currentModel = chatModelId;
+          const availableModels = ['gpt-5-mini', 'gpt-4o', 'claude-sonnet', 'claude-opus', 'gemini-pro'];
+          const lines = [
+            '🤖 **模型設定**',
+            `- 目前: ${currentModel}`,
+            '',
+            '可用模型:',
+            ...availableModels.map(m => `- \`/model ${m}\``)
+          ];
+          sendToUser(meta.channel, meta.userId, lines.join('\n'), meta.chatId, meta.replyToken);
+          return;
+        }
+        // Set the model
+        try {
+          await config.update("models.chat", argText, vscode.ConfigurationTarget.Workspace);
+          sendToUser(meta.channel, meta.userId, `✅ 聊天模型已切換為: ${argText}`, meta.chatId, meta.replyToken);
+        } catch (err) {
+          sendToUser(meta.channel, meta.userId, `❌ 無法切換模型: ${String(err)}`, meta.chatId, meta.replyToken);
+        }
+        return;
+      }
+
+      if (cmdLower === 'task' || cmdLower === 'do' || cmdLower === 'work') {
+        if (!argText) {
+          sendToUser(meta.channel, meta.userId, '請提供任務描述，例如：`/task 做一個登入頁面`', meta.chatId, meta.replyToken);
+          return;
+        }
+        // Force work intent - create task directly
+        const created = await createUfoTaskBundleFromConversation({
+          context,
+          output,
+          refreshAllProviders,
+          session,
+          requestText: argText,
+          startImmediately: false
+        });
+        session.pendingDelegation = {
+          originalText: argText,
+          askedAt: new Date().toISOString(),
+          taskId: created.taskId,
+          taskDir: created.taskDir,
+          readmePath: created.readmePath
+        };
+        try {
+          await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(created.readmePath));
+        } catch {}
+        sendToUser(
+          meta.channel,
+          meta.userId,
+          `✅ 已建立 UFO 任務：${created.taskId}\n- 路徑：${created.taskDir}\n\n要交給 BlueMonster 開始執行嗎？回覆 \`交給\`（或 \`1\`）；如果先不用，回覆 \`先不用\`（或 \`2\`）。`,
+          meta.chatId,
+          meta.replyToken
+        );
+        return;
+      }
+
+      // Unknown command - show help hint
+      sendToUser(meta.channel, meta.userId, `❓ 未知指令: /${cmd}\n輸入 /help 查看可用指令`, meta.chatId, meta.replyToken);
+      return;
+    }
+
     // If we are waiting for a BlueMonster confirmation response, handle it here.
     const conf = parseBmConfirmationAction(normalizedText);
     if (conf) {
@@ -2947,24 +3396,76 @@ export function activate(context: vscode.ExtensionContext): void {
           conf.action
         );
         const msg = typeof res === "string" ? res : `Confirmation ${conf.id} -> ${conf.action}`;
-        sendToUser(meta.channel, meta.userId, msg);
+        sendToUser(meta.channel, meta.userId, msg, meta.chatId, meta.replyToken);
       } catch (err) {
-        sendToUser(meta.channel, meta.userId, `❌ 無法回覆確認：${String(err)}`);
+        sendToUser(meta.channel, meta.userId, `❌ 無法回覆確認：${String(err)}`, meta.chatId, meta.replyToken);
       }
       return;
+    }
+
+    // Handle "好"/"1" response to create task from conversation (when LLM suggested it)
+    const quickYes = parseYesNo(normalizedText);
+    if (quickYes === true && !session.pendingDelegation && !session.bmRun) {
+      // User said yes - create task from recent conversation
+      const recentHistory = session.history?.slice(-6) || [];
+      const lastUserMsg = recentHistory.filter(h => h.role === 'user').pop();
+      const requestText = lastUserMsg?.content || normalizedText;
+
+      if (requestText && requestText !== normalizedText) {
+        const created = await createUfoTaskBundleFromConversation({
+          context,
+          output,
+          refreshAllProviders,
+          session,
+          requestText,
+          startImmediately: false
+        });
+
+        session.pendingDelegation = {
+          originalText: requestText,
+          askedAt: new Date().toISOString(),
+          taskId: created.taskId,
+          taskDir: created.taskDir,
+          readmePath: created.readmePath
+        };
+
+        try {
+          await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(created.readmePath));
+        } catch {}
+
+        sendToUser(
+          meta.channel,
+          meta.userId,
+          `✅ 已建立任務：${created.taskId}\n\n要交給 BlueMonster 執行嗎？回覆「1」開始執行，「2」先不用。`,
+          meta.chatId,
+          meta.replyToken
+        );
+        return;
+      }
     }
 
     // If we previously asked whether to delegate a work request, interpret 1/2 here.
     if (session.pendingDelegation) {
       const pending = session.pendingDelegation;
       if (looksLikeProgressQuery(normalizedText)) {
+        const pendingTasks = Array.isArray(pending.tasks) ? pending.tasks : [];
+        const isMulti = pending.multiAgent === true || pendingTasks.length > 0;
         const tid = pending.taskId || "（unknown）";
         const tdir = pending.taskDir || "（unknown）";
+        const multiLines = isMulti
+          ? (() => {
+              const top = pendingTasks.slice(0, 6);
+              const list = top.map((t, i) => `- (${i + 1}/${pendingTasks.length}) ${t.title} [${t.taskId}]`).join("\n");
+              const more = pendingTasks.length > 6 ? `\n- ... +${pendingTasks.length - 6} 個子任務` : "";
+              return `目前狀態：已建立 ${pendingTasks.length} 個子任務（pending），尚未交接 BlueMonster 執行。\n${list}${more}`;
+            })()
+          : `目前狀態：已建立任務（pending），尚未交接 BlueMonster 執行。\n- 任務：${tid}\n- 路徑：${tdir}`;
         sendToUser(
           meta.channel,
           meta.userId,
-          `目前狀態：已建立任務（pending），尚未交接 BlueMonster 執行。\n- 任務：${tid}\n- 路徑：${tdir}\n\n要我開始執行嗎？回覆 \`交給\`（或 \`1\`）；如果先不用，回覆 \`先不用\`（或 \`2\`）。`,
-          meta.chatId
+          `${multiLines}\n\n要我開始執行嗎？回覆 \`交給\`（或 \`1\`）；如果先不用，回覆 \`先不用\`（或 \`2\`）。`,
+          meta.chatId,
+          meta.replyToken
         );
         return;
       }
@@ -2973,15 +3474,116 @@ export function activate(context: vscode.ExtensionContext): void {
         sendToUser(
           meta.channel,
           meta.userId,
-          "請回覆 `交給`（或 `1`，建立 UFO 任務並交接 BlueMonster 執行）或 `先不用`（或 `2`）。"
+          "請回覆 `交給`（或 `1`，交接 BlueMonster 執行）或 `先不用`（或 `2`）。",
+          meta.chatId,
+          meta.replyToken
         );
         return;
       }
       const original = pending.originalText;
       const pendingTaskId = pending.taskId;
       const pendingTaskDir = pending.taskDir;
+      const pendingTasks = Array.isArray(pending.tasks) ? pending.tasks : [];
+      const isMulti = pending.multiAgent === true || pendingTasks.length > 0;
       session.pendingDelegation = undefined;
       if (yn) {
+        if (isMulti) {
+          const runId = `mr-${Date.now().toString(36)}`;
+          const startedAt = new Date().toISOString();
+          session.bmRun = {
+            startedAt,
+            runId,
+            tasks: pendingTasks.map((t) => ({ taskId: t.taskId, taskDir: t.taskDir, title: t.title })),
+            remaining: pendingTasks.length
+          };
+
+          const list = pendingTasks
+            .slice(0, 8)
+            .map((t, i) => `- (${i + 1}/${pendingTasks.length}) ${t.title} [${t.taskId}]`)
+            .join("\n");
+          const more = pendingTasks.length > 8 ? `\n- ... +${pendingTasks.length - 8} 個子任務` : "";
+
+          sendToUser(
+            meta.channel,
+            meta.userId,
+            `🚀 已開始以多 Agent 方式執行 ${pendingTasks.length} 個子任務（會陸續回報結果）：\n${list}${more}`,
+            meta.chatId,
+            meta.replyToken
+          );
+
+          // Best-effort: open the first task spec for visibility.
+          try {
+            const first = pendingTasks[0];
+            if (first?.readmePath && fs.existsSync(first.readmePath)) {
+              await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(first.readmePath));
+            }
+          } catch {}
+
+          // NOTE: BlueMonster external API is not task-isolated yet; run subtasks sequentially to avoid cross-talk.
+          const concurrency = 1;
+          const queue = pendingTasks.slice();
+          const worker = async () => {
+            while (queue.length > 0) {
+              const next = queue.shift();
+              if (!next) return;
+              let taskDir = next.taskDir;
+              // Ensure task is in-progress before running.
+              try {
+                const parent = path.basename(path.dirname(taskDir));
+                if (parent === "pending") {
+                  taskDir = await moveTask(tasksRoot, taskDir, "pending", "in-progress", output);
+                  refreshAllProviders();
+                } else if (parent === "approved") {
+                  taskDir = await moveTask(tasksRoot, taskDir, "approved", "in-progress", output);
+                  refreshAllProviders();
+                }
+              } catch (err) {
+                output.appendLine(`[UFO] Failed to move multi-agent task to in-progress: ${String(err)}`);
+              }
+
+              const childSession: UfoSession = {
+                ...session,
+                taskId: next.taskId,
+                taskTitle: next.title,
+                taskDir,
+                bmRun: { taskId: next.taskId, taskDir, startedAt }
+              };
+
+              try {
+                await executeUfoTaskWithBlueMonster({
+                  context,
+                  refreshAllProviders,
+                  output,
+                  dashboardProvider,
+                  gatewayClient,
+                  meta,
+                  session: childSession,
+                  taskDir,
+                  requestText: original,
+                  sendPrefix: `【${next.title}】 `
+                });
+              } catch (err) {
+                output.appendLine(`[UFO] Multi-agent execution failed for ${next.taskId}: ${String(err)}`);
+              } finally {
+                // Consider task complete when it has been moved out of in-progress.
+                const completed = !fs.existsSync(taskDir);
+                if (session.bmRun && session.bmRun.runId === runId && typeof session.bmRun.remaining === "number") {
+                  if (completed) {
+                    session.bmRun.remaining = Math.max(0, session.bmRun.remaining - 1);
+                    if (session.bmRun.remaining === 0) {
+                      session.bmRun = undefined;
+                      sendToUser(meta.channel, meta.userId, "✅ 多 Agent 子任務已全部完成。", meta.chatId, meta.replyToken);
+                    }
+                  }
+                }
+              }
+            }
+          };
+
+          void Promise.all(Array.from({ length: Math.min(concurrency, pendingTasks.length) }, () => worker()));
+          return;
+        }
+
         let taskDir = pendingTaskDir || session.taskDir;
         let taskId = pendingTaskId || session.taskId;
 
@@ -3015,7 +3617,9 @@ export function activate(context: vscode.ExtensionContext): void {
         sendToUser(
           meta.channel,
           meta.userId,
-          `🚀 已開始執行任務：${taskId || path.basename(taskDir)}\n- 路徑：${taskDir}`
+          `🚀 已開始執行任務：${taskId || path.basename(taskDir)}\n- 路徑：${taskDir}`,
+          meta.chatId,
+          meta.replyToken
         );
 
         // Open the task spec for visibility in VS Code.
@@ -3040,7 +3644,9 @@ export function activate(context: vscode.ExtensionContext): void {
         sendToUser(
           meta.channel,
           meta.userId,
-          `好，先不交接 BlueMonster 執行。任務已建立在 pending${pendingTaskId ? `：${pendingTaskId}` : ""}。\n需要我開始執行再回覆「交給」。`
+          `好，先不交接 BlueMonster 執行。任務已建立在 pending${pendingTaskId ? `：${pendingTaskId}` : ""}。\n需要我開始執行再回覆「交給」。`,
+          meta.chatId,
+          meta.replyToken
         );
       }
       return;
@@ -3072,17 +3678,18 @@ export function activate(context: vscode.ExtensionContext): void {
               "",
               `這段時間你可以先做別的事或聊聊天；要我每隔一段時間主動回報進度也可以。`
             ].filter(Boolean).join("\n");
-            sendToUser(meta.channel, meta.userId, msg, meta.chatId);
+            sendToUser(meta.channel, meta.userId, msg, meta.chatId, meta.replyToken);
           } else {
             sendToUser(
               meta.channel,
               meta.userId,
               `看起來 ${name} 目前是 Idle。我正在整理交付結果或已回覆在上面；如果你沒收到結果，我可以再貼一次。`,
-              meta.chatId
+              meta.chatId,
+              meta.replyToken
             );
           }
         } catch (err) {
-          sendToUser(meta.channel, meta.userId, `我正在執行任務中，但目前無法取得 BlueMonster 狀態：${String(err)}`, meta.chatId);
+          sendToUser(meta.channel, meta.userId, `我正在執行任務中，但目前無法取得 BlueMonster 狀態：${String(err)}`, meta.chatId, meta.replyToken);
         }
         return;
       }
@@ -3092,7 +3699,8 @@ export function activate(context: vscode.ExtensionContext): void {
         meta.channel,
         meta.userId,
         "BlueMonster 正在執行任務中。你可以問我「目前進度？」我會回報；或先跟我聊聊天也可以。",
-        meta.chatId
+        meta.chatId,
+        meta.replyToken
       );
       return;
     }
@@ -3100,100 +3708,28 @@ export function activate(context: vscode.ExtensionContext): void {
     recordHistory(session, "user", normalizedText);
     appendUserProfile(context, normalizedText);
 
-    const workIntent = looksLikeWorkIntent(normalizedText);
-
-    // Deterministic work flow: create a UFO task immediately and ask whether to hand off execution.
-    // This avoids hallucinated "I created files" replies from the chat model.
-    if (workIntent) {
-      // If this looks like a follow-up request and we have a prior task, reuse it instead of creating a new one.
-      if (looksLikeTaskFollowup(normalizedText) && session.taskDir && fs.existsSync(session.taskDir)) {
-        const taskDir = session.taskDir;
-        const taskId = session.taskId || path.basename(taskDir);
-        const readmePath = path.join(taskDir, "README.md");
-        try {
-          const stamp = new Date().toISOString();
-          const followupPath = path.join(taskDir, `followup-${stamp.replace(/[:.]/g, "-")}.md`);
-          fs.writeFileSync(
-            followupPath,
-            [
-              "# Follow-up",
-              "",
-              `- 時間：${stamp}`,
-              "",
-              "## 使用者追加需求",
-              normalizedText,
-              ""
-            ].join("\n"),
-            "utf8"
-          );
-        } catch (err) {
-          output.appendLine(`[UFO] Failed to write follow-up note: ${String(err)}`);
-        }
-
-        session.pendingDelegation = {
-          originalText: normalizedText,
-          askedAt: new Date().toISOString(),
-          taskId,
-          taskDir,
-          readmePath
-        };
-
-        refreshAllProviders();
-        try {
-          if (fs.existsSync(readmePath)) {
-            await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(readmePath));
-          }
-        } catch {}
-
-        sendToUser(
-          meta.channel,
-          meta.userId,
-          `🧩 我會沿用上一個任務繼續處理（避免建錯任務）。\n✅ 任務：${taskId}\n- 路徑：${taskDir}\n\n要交給 BlueMonster 繼續執行嗎？回覆 \`交給\`（或 \`1\`）；如果先不用，回覆 \`先不用\`（或 \`2\`）。`,
-          meta.chatId
-        );
-        return;
-      }
-
-      const created = await createUfoTaskBundleFromConversation({
-        context,
-        output,
-        refreshAllProviders,
-        session,
-        requestText: normalizedText,
-        startImmediately: false
-      });
-
-      session.pendingDelegation = {
-        originalText: normalizedText,
-        askedAt: new Date().toISOString(),
-        taskId: created.taskId,
-        taskDir: created.taskDir,
-        readmePath: created.readmePath
-      };
-
-      // Open the task spec so it's easy to review/edit before execution.
-      try {
-        await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(created.readmePath));
-      } catch {}
-
-      sendToUser(
-        meta.channel,
-        meta.userId,
-        `✅ 已建立 UFO 任務：${created.taskId}\n- 路徑：${created.taskDir}\n\n要交給 BlueMonster 開始執行嗎？回覆 \`交給\`（或 \`1\`）；如果先不用，回覆 \`先不用\`（或 \`2\`）。`,
-        meta.chatId
-      );
-      return;
-    }
-
+    // Let LLM naturally handle conversation - no keyword detection
     const systemPrompt = [
-      // CHAT mode should not proactively create tasks. WORK advice can mention delegation but must ask before executing.
-      `<ufo_mode>${workIntent ? "work_advice" : "chat"}</ufo_mode>`,
-      workIntent
-        ? "你正在協助使用者解決工作/專案問題。先提供可行建議與下一步；若需要實際跑指令、改檔、查資料或產出可交付內容，請在最後詢問是否要把需求整理成「UFO 任務」（寫入 UFO/tasks/… 規格）並交接給 BlueMonster 在本機 VS Code 專案中執行，並要求使用者回覆 1/2。不要在未取得同意前就宣告已建立任務或已動手執行。"
-        : "你正在與使用者自然聊天。不要主動引導建立任務，不要一直問對方要做什麼任務；用一般對話方式回覆即可。若對方明確提出工作問題，再切換成提供建議。",
-      // Only include heavier instructions in work advice mode.
-      workIntent ? loadCopilotInstructions(context) : "",
+      `你是 UFO，一個聰明的 AI 助理，連接到使用者的 VS Code 開發環境。
+
+**你的能力：**
+- 自然對話、回答問題、提供建議、腦力激盪
+- 當使用者需要實際執行某件事時，可以建立任務交給 BlueMonster（VS Code 內的 AI Agent）執行
+
+**對話原則：**
+- 自然、簡潔、有幫助
+- 如果使用者只是聊天或問問題，就正常回答
+- 如果使用者想要你「做」某件事（寫程式、建網站、修 bug、產出檔案等），告訴他們：「要我建立任務交給 BlueMonster 執行嗎？回覆『好』或『1』我就開始。」
+- 不要在使用者沒有明確同意前建立任務
+- 使用者也可以用 /task <描述> 直接建立任務
+
+**可用指令（告知使用者）：**
+- /task <描述> - 建立任務
+- /model - 查看/切換模型
+- /status - 查看狀態
+- /help - 說明`,
       loadPersonaContext(context),
+      loadCopilotInstructions(context),
       buildChatSystemPrompt()
     ]
       .map((value) => value.trim())
@@ -3232,15 +3768,23 @@ export function activate(context: vscode.ExtensionContext): void {
       typingInterval = setInterval(tick, 4000);
     }
 
+    // Track if replyToken has been used (LINE replyToken can only be used once)
+    let replyTokenUsed = false;
+    const getReplyToken = () => {
+      if (replyTokenUsed || !meta.replyToken) return undefined;
+      replyTokenUsed = true;
+      return meta.replyToken;
+    };
+
     // 發送初始思考訊息（保留舊體驗，可透過設定切換）
     let phaseIndex = 0;
     if (!useTypingIndicator) {
-      sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} ${thinkingPhases[phaseIndex]} 👾`, meta.chatId);
+      sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} ${thinkingPhases[phaseIndex]} 👾`, meta.chatId, getReplyToken());
       dashboardProvider.log('thinking', thinkingPhases[phaseIndex], 'thinking');
     }
     let hasTimedOut = false;
 
-    // 每 10 秒發送下一階段訊息
+    // 每 10 秒發送下一階段訊息（不使用 replyToken，因為可能已被使用）
     const thinkingInterval = setInterval(() => {
       phaseIndex = (phaseIndex + 1) % thinkingPhases.length;
       if (!useTypingIndicator) {
@@ -3248,7 +3792,7 @@ export function activate(context: vscode.ExtensionContext): void {
         dashboardProvider.log('thinking', thinkingPhases[phaseIndex], 'thinking');
       }
     }, 10000);
-    
+
     // 在 58 秒時發送最後警告（LINE Reply Token 60 秒後失效）
     const timeoutWarning = setTimeout(() => {
       hasTimedOut = true;
@@ -3257,10 +3801,10 @@ export function activate(context: vscode.ExtensionContext): void {
         sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} 我可能還需要思考久一點，你等等問我進度 👾`, meta.chatId);
       }
     }, 58000);
-    
+
     try {
       const response = await runSdkPrompt(sessionKey, chatModelId, fullPrompt, output);
-      
+
       // 清理計時器
       clearInterval(thinkingInterval);
       clearTimeout(timeoutWarning);
@@ -3268,14 +3812,16 @@ export function activate(context: vscode.ExtensionContext): void {
         clearInterval(typingInterval);
         typingInterval = null;
       }
-      
+
       if (!hasTimedOut) {
         recordHistory(session, "assistant", response);
-        sendToUser(meta.channel, meta.userId, response, meta.chatId);
+        // Use replyToken if available (e.g., if useTypingIndicator was on and we haven't used it yet)
+        sendToUser(meta.channel, meta.userId, response, meta.chatId, getReplyToken());
         dashboardProvider.log('response', `Reply: ${response.substring(0, 120)}`, 'response');
       } else {
         output.appendLine(`[UFO] ⚠️ Reply token likely expired, response may require push message`);
         recordHistory(session, "assistant", response);
+        // Don't use replyToken - it's likely expired after 58 seconds
         sendToUser(meta.channel, meta.userId, response, meta.chatId);
         dashboardProvider.log('response', `Reply (late): ${response.substring(0, 120)}`, 'response');
       }
@@ -3287,16 +3833,36 @@ export function activate(context: vscode.ExtensionContext): void {
         typingInterval = null;
       }
       const errorMsg = `❌ 發生錯誤: ${String(error)}`;
-      sendToUser(meta.channel, meta.userId, errorMsg, meta.chatId);
+      // Use replyToken if available
+      sendToUser(meta.channel, meta.userId, errorMsg, meta.chatId, getReplyToken());
       dashboardProvider.log('error', String(error), 'error');
     }
   };
 
-  gatewayClient.on("connected", () => {
+  gatewayClient.on("connected", async () => {
     gatewayConnected = true;
     gatewayConnectionState = "connected";
     output.appendLine(`[UFO] Gateway connected: ${gatewayUrl}`);
     dashboardProvider.log('info', `Gateway connected: ${gatewayUrl}`, 'info');
+
+    // Fetch enabled channels from Gateway API
+    try {
+      const httpUrl = gatewayUrl.replace(/^ws/, 'http').replace(/\/+$/, '');
+      const res = await fetch(`${httpUrl}/api/channels`);
+      if (res.ok) {
+        const data = await res.json() as { channels?: string[] };
+        const channels: string[] = data.channels || [];
+        gatewayChannels = {
+          line: channels.includes('line'),
+          telegram: channels.includes('telegram'),
+          discord: channels.includes('discord'),
+        };
+        output.appendLine(`[UFO] Gateway channels: ${channels.join(', ') || 'none'}`);
+      }
+    } catch (err) {
+      output.appendLine(`[UFO] Failed to fetch channels: ${err}`);
+    }
+
     dashboardProvider.update();
   });
 
@@ -3352,7 +3918,7 @@ export function activate(context: vscode.ExtensionContext): void {
           };
           fs.writeFileSync(path.join(approvedDir, "handoff.json"), JSON.stringify(handoff, null, 2));
           refreshAllProviders();
-          sendToUser(message.channel || "line", message.userId, "✅ 已確認，任務交接給 BlueMonster 進行開發。");
+          sendToUser(message.channel || "line", message.userId, "✅ 已確認，任務交接給 BlueMonster 進行開發。", message.chatId, message.replyToken);
         } catch (error) {
           output.appendLine(`Failed to move task ${taskId} to approved: ${String(error)}`);
         }
@@ -3373,9 +3939,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	          const extra = url ? ` ${url}` : "";
 	          return `- [${type}] ${name}${extra}`;
 	        });
+	        const hasImage = media.some((m: any) => m?.type === "image");
 	        const header = text && text.trim()
 	          ? text.trim()
-	          : "幫我處理這些附件（圖片/文件）。";
+	          : hasImage
+	            ? "使用者傳了一張圖片。請確認收到並簡單回應，詢問需要怎麼處理。不要交給 BlueMonster，自己回覆即可。"
+	            : "使用者傳了附件。請確認收到並詢問需要怎麼處理。";
 	        text = `${header}\n\n附件：\n${lines.join("\n")}`;
 	      }
 	      if (text && text.trim()) {
@@ -3386,7 +3955,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	          userId: message.userId,
 	          chatId: typeof message.chatId === "string" ? message.chatId : undefined,
 	          messageId: message.messageId,
-	          timestamp: message.timestamp
+	          timestamp: message.timestamp,
+	          replyToken: typeof message.replyToken === "string" ? message.replyToken : undefined
 	        });
 	      }
 	      return;
@@ -3463,7 +4033,10 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       }
     }),
-    vscode.window.registerWebviewViewProvider("ufoDashboard", dashboardProvider),
+    // Keep the Control Center webview alive when hidden (prevents disconnect-like UX when switching views).
+    vscode.window.registerWebviewViewProvider("ufoDashboard", dashboardProvider, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
     // 註冊四個獨立的任務視窗
     vscode.window.registerTreeDataProvider("ufoTasksPending", pendingProvider),
     vscode.window.registerTreeDataProvider("ufoTasksApproved", approvedProvider),
@@ -3473,7 +4046,15 @@ export function activate(context: vscode.ExtensionContext): void {
       createTaskSpec(context, { refresh: refreshAllProviders } as any)
     ),
     vscode.commands.registerCommand("ufo.openTools", () => openTools(context)),
-    vscode.commands.registerCommand("ufo.refreshQueue", () => refreshAllProviders()),
+    vscode.commands.registerCommand("ufo.refreshQueue", async () => {
+      refreshAllProviders();
+      // Also force reconnect to Gateway
+      try {
+        await gatewayClient.forceReconnect();
+      } catch (err) {
+        output.appendLine(`[UFO] Force reconnect failed: ${err}`);
+      }
+    }),
     vscode.commands.registerCommand("ufo.openTasksRoot", () =>
       vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(getTasksRoot(context)))
     ),
@@ -3482,6 +4063,66 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand("ufo.syncEnv", () => {
       syncEnvFromSettings(context, output);
+      dashboardProvider.update();
+    }),
+    vscode.commands.registerCommand("ufo.ensurePublicUrl", async () => {
+      const cfg = vscode.workspace.getConfiguration("ufo");
+      const currentRaw = cfg.get<string>("publicUrl", "") || "";
+      const current = stripTrailingSlashes(currentRaw);
+      const hasConfigured = Boolean(current && !isPlaceholder(current) && !isLocalhostUrl(current));
+      const isTrycloudflare = /trycloudflare\\.com/i.test(current);
+      const runtimeActive =
+        Boolean(
+          current &&
+          cloudflaredTunnel.publicUrl &&
+          stripTrailingSlashes(cloudflaredTunnel.publicUrl) === current &&
+          cloudflaredTunnel.proc &&
+          !cloudflaredTunnel.proc.killed
+        );
+      if (hasConfigured && !isTrycloudflare) {
+        // Stable public base already configured by user.
+        dashboardProvider.update();
+        return;
+      }
+      if (hasConfigured && isTrycloudflare && runtimeActive) {
+        // Ephemeral public base is configured and the tunnel is still running in this session.
+        dashboardProvider.update();
+        return;
+      }
+
+      const gwUrlRaw = cfg.get<string>("gatewayUrl", "ws://localhost:3000");
+      const gwHttp = gatewayWsToHttp(gwUrlRaw || "ws://localhost:3000");
+      const base = stripTrailingSlashes(gwHttp);
+
+      try {
+        if (!isLocalhostUrl(base)) {
+          if (!hasConfigured || isTrycloudflare) {
+            await cfg.update("publicUrl", base, vscode.ConfigurationTarget.Workspace);
+          }
+          dashboardProvider.update();
+          return;
+        }
+
+        const publicUrl = await ensureCloudflaredQuickTunnel(base, output);
+        if (publicUrl) {
+          await cfg.update("publicUrl", stripTrailingSlashes(publicUrl), vscode.ConfigurationTarget.Workspace);
+        }
+        dashboardProvider.update();
+      } catch (err) {
+        output.appendLine(`[UFO] Failed to ensure public URL: ${String(err)}`);
+        vscode.window.showWarningMessage(`cloudflared tunnel failed: ${String(err)}`);
+      }
+    }),
+    vscode.commands.registerCommand("ufo.stopPublicUrl", async () => {
+      stopCloudflaredQuickTunnel();
+      const cfg = vscode.workspace.getConfiguration("ufo");
+      const current = cfg.get<string>("publicUrl", "") || "";
+      // Only clear the setting if it's the ephemeral trycloudflare URL we created.
+      if (current && /trycloudflare\\.com/i.test(current)) {
+        try {
+          await cfg.update("publicUrl", "", vscode.ConfigurationTarget.Workspace);
+        } catch {}
+      }
       dashboardProvider.update();
     }),
     vscode.commands.registerCommand("ufo.openPromptStudio", () => promptStudioPanel.show()),

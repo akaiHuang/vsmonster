@@ -36,9 +36,10 @@ export class WebhookTransport extends EventEmitter {
     };
     this.app = this.config.app;
     this.router = Router();
-    
-    // 基礎 middleware
-    this.router.use(express.json());
+
+    // 注意：不要在 router 級別使用 express.json()
+    // LINE webhook 需要 raw body 來驗證簽名
+    // JSON 解析會在各個路由處理器中按需處理
     this.router.use(express.urlencoded({ extended: true }));
   }
 
@@ -118,6 +119,7 @@ export class WebhookTransport extends EventEmitter {
       channel: 'telegram',
       path,
       method: 'POST',
+      middleware: [express.json()], // Telegram 需要 JSON 解析
       handler,
     });
   }
@@ -133,6 +135,7 @@ export class WebhookTransport extends EventEmitter {
       channel: 'discord',
       path,
       method: 'POST',
+      middleware: [express.json()], // Discord 需要 JSON 解析
       handler,
     });
   }

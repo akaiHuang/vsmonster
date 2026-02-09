@@ -61,7 +61,9 @@ export class HolographyServer extends EventEmitter {
     this.app.use(cors({
       origin: origins.length === 1 && origins[0] === '*' ? '*' : origins,
     }));
-    this.app.use(express.json());
+    // 注意：不要在這裡使用全局 express.json()
+    // LINE webhook 需要 raw body 來驗證簽名
+    // JSON 解析會在各個路由中按需處理
   }
 
   /**
@@ -97,7 +99,7 @@ export class HolographyServer extends EventEmitter {
       res.json({ code, expiresIn: remainingTime });
     });
 
-    this.app.post('/api/send', async (req: Request, res: Response) => {
+    this.app.post('/api/send', express.json(), async (req: Request, res: Response) => {
       try {
         const { channel, userId, message } = req.body;
         const outgoing = typeof message === 'string' ? { text: message } : message;
@@ -121,15 +123,20 @@ export class HolographyServer extends EventEmitter {
         webhookPath,
         [lineChannel.getMiddleware()],
         async (req: Request, res: Response) => {
-          const events = req.body.events || [];
-          
+          const events = req.body?.events || [];
+          console.log(`[LINE Webhook] Received ${events.length} events`);
+
           for (const event of events) {
+            console.log(`[LINE Webhook] Event type: ${event.type}`);
             const message = lineChannel.parseMessage(event);
             if (message) {
+              console.log(`[LINE Webhook] Parsed message: ${message.text?.substring(0, 50) || '(no text)'}`);
               await this.handleIncomingMessage(message);
+            } else {
+              console.log(`[LINE Webhook] Failed to parse event`);
             }
           }
-          
+
           res.status(200).end();
         }
       );

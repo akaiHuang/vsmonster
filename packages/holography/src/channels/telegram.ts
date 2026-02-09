@@ -182,23 +182,41 @@ export class TelegramChannel extends HologramChannel {
 
     // 文字訊息
     if (message.text) {
+      const url = `https://api.telegram.org/bot${this.config.botToken}/sendMessage`;
+      const payload = JSON.stringify({
+        chat_id: chatId,
+        text: message.text,
+        parse_mode: 'Markdown',
+        reply_to_message_id: message.replyToMessageId ? Number(message.replyToMessageId) : undefined,
+      });
+      const sendViaNativeFetch = async (): Promise<void> => {
+        const res = await customFetch(url, { method: 'POST', body: payload });
+        let data: any = null;
+        try { data = await res.json(); } catch {}
+        if (!res.ok || !data?.ok) {
+          const desc = (data && typeof data.description === 'string') ? data.description : (res.statusText || 'unknown error');
+          throw new Error(`Telegram API sendMessage failed: ${desc}`);
+        }
+      };
+
       if (this.useCurlFallback) {
-        // 使用 curl 發送
-        const payload = JSON.stringify({
-          chat_id: chatId,
-          text: message.text,
-          parse_mode: 'Markdown',
-          reply_to_message_id: message.replyToMessageId ? Number(message.replyToMessageId) : undefined,
-        });
-        await customFetch(
-          `https://api.telegram.org/bot${this.config.botToken}/sendMessage`,
-          { method: 'POST', body: payload }
-        );
+        await sendViaNativeFetch();
       } else {
-        await this.bot.api.sendMessage(chatId, message.text, {
-          parse_mode: 'Markdown',
-          reply_to_message_id: message.replyToMessageId ? Number(message.replyToMessageId) : undefined,
-        });
+        try {
+          await this.bot.api.sendMessage(chatId, message.text, {
+            parse_mode: 'Markdown',
+            reply_to_message_id: message.replyToMessageId ? Number(message.replyToMessageId) : undefined,
+          });
+        } catch (err) {
+          const errStr = String(err || '');
+          const isNetworkLike = /Network request|fetch failed|ENOTFOUND|ECONNRESET|EAI_AGAIN|ETIMEDOUT/i.test(errStr);
+          if (!isNetworkLike) throw err;
+          this.log('warn', `grammy sendMessage failed (${errStr}), retrying with native fetch...`);
+          await sendViaNativeFetch();
+          // If native fetch works, prefer it for subsequent calls in this process.
+          this.useCurlFallback = true;
+          this.log('warn', 'Telegram channel switched to native fetch fallback mode for sendMessage');
+        }
       }
     }
 
@@ -249,7 +267,19 @@ export class TelegramChannel extends HologramChannel {
       );
       return;
     }
-    await this.bot.api.sendChatAction(chatId, 'typing');
+    try {
+      await this.bot.api.sendChatAction(chatId, 'typing');
+    } catch (err) {
+      const errStr = String(err || '');
+      const isNetworkLike = /Network request|fetch failed|ENOTFOUND|ECONNRESET|EAI_AGAIN|ETIMEDOUT/i.test(errStr);
+      if (!isNetworkLike) throw err;
+      this.log('warn', `grammy sendChatAction failed (${errStr}), retrying with native fetch...`);
+      await customFetch(
+        `https://api.telegram.org/bot${this.config.botToken}/sendChatAction?chat_id=${encodeURIComponent(chatId)}&action=typing`
+      );
+      this.useCurlFallback = true;
+      this.log('warn', 'Telegram channel switched to native fetch fallback mode for sendChatAction');
+    }
   }
 
   /**

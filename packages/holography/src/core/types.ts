@@ -80,6 +80,147 @@ export interface StickerInfo {
   setName?: string;
 }
 
+// ============================================
+// LINE Postback & Flex Message 型別
+// ============================================
+
+export interface PostbackData {
+  data: string;
+  params?: {
+    date?: string;
+    time?: string;
+    datetime?: string;
+  };
+}
+
+export type LineEventType = 'message' | 'postback' | 'follow' | 'unfollow' | 'join' | 'leave';
+
+export interface LineFlexBubble {
+  type: 'bubble';
+  size?: 'nano' | 'micro' | 'kilo' | 'mega' | 'giga';
+  direction?: 'ltr' | 'rtl';
+  header?: LineFlexBox;
+  hero?: LineFlexImage | LineFlexBox;
+  body?: LineFlexBox;
+  footer?: LineFlexBox;
+  styles?: any;
+}
+
+export interface LineFlexCarousel {
+  type: 'carousel';
+  contents: LineFlexBubble[];
+}
+
+export type LineFlexContainer = LineFlexBubble | LineFlexCarousel;
+
+export interface LineFlexBox {
+  type: 'box';
+  layout: 'horizontal' | 'vertical' | 'baseline';
+  contents: LineFlexComponent[];
+  flex?: number;
+  spacing?: string;
+  margin?: string;
+  paddingAll?: string;
+  paddingTop?: string;
+  paddingBottom?: string;
+  paddingStart?: string;
+  paddingEnd?: string;
+  backgroundColor?: string;
+  borderColor?: string;
+  borderWidth?: string;
+  cornerRadius?: string;
+  width?: string;
+  height?: string;
+  justifyContent?: 'flex-start' | 'center' | 'flex-end' | 'space-between' | 'space-around' | 'space-evenly';
+  alignItems?: 'flex-start' | 'center' | 'flex-end';
+  action?: LineFlexAction;
+}
+
+export interface LineFlexButton {
+  type: 'button';
+  action: LineFlexAction;
+  flex?: number;
+  margin?: string;
+  height?: 'sm' | 'md';
+  style?: 'link' | 'primary' | 'secondary';
+  color?: string;
+  gravity?: 'top' | 'bottom' | 'center';
+}
+
+export interface LineFlexImage {
+  type: 'image';
+  url: string;
+  flex?: number;
+  margin?: string;
+  size?: string;
+  aspectRatio?: string;
+  aspectMode?: 'cover' | 'fit';
+  backgroundColor?: string;
+  action?: LineFlexAction;
+}
+
+export interface LineFlexText {
+  type: 'text';
+  text: string;
+  flex?: number;
+  margin?: string;
+  size?: string;
+  align?: 'start' | 'end' | 'center';
+  gravity?: 'top' | 'bottom' | 'center';
+  wrap?: boolean;
+  weight?: 'regular' | 'bold';
+  color?: string;
+  action?: LineFlexAction;
+}
+
+export interface LineFlexSeparator {
+  type: 'separator';
+  margin?: string;
+  color?: string;
+}
+
+export interface LineFlexSpacer {
+  type: 'spacer';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl';
+}
+
+export interface LineFlexIcon {
+  type: 'icon';
+  url: string;
+  margin?: string;
+  size?: string;
+  aspectRatio?: string;
+}
+
+export type LineFlexComponent = LineFlexBox | LineFlexButton | LineFlexImage | LineFlexText | LineFlexSeparator | LineFlexSpacer | LineFlexIcon;
+
+export interface LineFlexPostbackAction {
+  type: 'postback';
+  label: string;
+  data: string;
+  displayText?: string;
+}
+
+export interface LineFlexMessageAction {
+  type: 'message';
+  label: string;
+  text: string;
+}
+
+export interface LineFlexUriAction {
+  type: 'uri';
+  label: string;
+  uri: string;
+}
+
+export type LineFlexAction = LineFlexPostbackAction | LineFlexMessageAction | LineFlexUriAction;
+
+export interface LineFlexMessage {
+  type: 'flex';
+  altText: string;
+  contents: LineFlexContainer;
+}
+
 export interface IncomingMessage {
   channel: ChannelType;
   userId: string;
@@ -95,6 +236,9 @@ export interface IncomingMessage {
   senderName?: string;
   senderUsername?: string;
   raw?: any;
+  // LINE Postback support
+  eventType?: LineEventType;
+  postback?: PostbackData;
 }
 
 export interface OutgoingMessage {
@@ -114,6 +258,8 @@ export interface OutgoingMessage {
     fileName?: string;
     caption?: string;
   };
+  // LINE Flex Message support
+  flex?: LineFlexMessage;
 }
 
 // ============================================

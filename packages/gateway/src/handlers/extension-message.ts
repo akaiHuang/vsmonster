@@ -8,11 +8,25 @@ import {
   HolographyServer,
   ChannelType,
   TelegramChannel,
+  OutgoingMessage,
 } from '@vsmonster/holography';
 import { TaskManager } from '../task/manager';
 import { MCPController } from '../mcp/controller';
 import { TunnelService } from '../tunnel/service';
 import { logger } from '../utils/logger';
+import { withRetry } from '../utils/retry';
+
+/**
+ * Send message with retry logic for rate limiting (429 errors)
+ */
+async function sendWithRetry(
+  holography: HolographyServer,
+  channel: ChannelType,
+  userId: string,
+  message: OutgoingMessage
+): Promise<void> {
+  await withRetry(() => holography.sendMessage(channel, userId, message));
+}
 
 export interface ExtensionHandlerDependencies {
   holography: HolographyServer;
@@ -67,10 +81,12 @@ export async function handleExtensionMessage(
           break;
         }
         try {
-          await holography.sendMessage(
+          // Use replyToken if provided (LINE) for faster response with less rate limiting
+          await sendWithRetry(
+            holography,
             message.channel as ChannelType,
             message.chatId || message.userId,
-            { text, chatId: message.chatId }
+            { text, chatId: message.chatId, replyToken: message.replyToken }
           );
         } catch (err) {
           logger.warn(`Failed to send copilot response to ${message.channel}: ${err}`);
@@ -111,7 +127,8 @@ export async function handleExtensionMessage(
             const deliveryMessage = `${statusText}\n📎 查看結果: ${deliveryUrl}`;
 
             try {
-              await holography.sendMessage(
+              await sendWithRetry(
+                holography,
                 task.channel as ChannelType,
                 task.userId,
                 { text: deliveryMessage }
@@ -127,7 +144,8 @@ export async function handleExtensionMessage(
             taskManager.getTask(message.taskId)!
           );
           try {
-            await holography.sendMessage(
+            await sendWithRetry(
+              holography,
               task.channel as ChannelType,
               task.userId,
               { text: statusText }
@@ -143,7 +161,8 @@ export async function handleExtensionMessage(
     case 'send_message': {
       if (message.channel && message.userId && (message.text || message.content)) {
         try {
-          await holography.sendMessage(
+          await sendWithRetry(
+            holography,
             message.channel as ChannelType,
             message.chatId || message.userId,
             { text: message.text || message.content, chatId: message.chatId }

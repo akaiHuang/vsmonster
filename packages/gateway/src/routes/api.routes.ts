@@ -263,4 +263,72 @@ export function registerApiRoutes(app: Express, deps: ApiRouteDependencies): voi
       hasActiveConnections: wst.hasActiveConnections(),
     });
   });
+
+  // ── Preview files from tasks folder ─────────────────────────
+  // Serves HTML/CSS/JS files directly from UFO tasks folders
+  // URL: /preview/{taskId}/index.html
+  // Note: projectRoot is packages/gateway, so we need to go up two levels
+  const tasksRoot = path.resolve(projectRoot, '../../UFO/tasks');
+
+  app.get('/preview/:status/:taskId/*', (req, res) => {
+    const { status, taskId } = req.params;
+    // Get the wildcard part of the URL (everything after /preview/:status/:taskId/)
+    const wildcardPath = req.path.replace(`/preview/${status}/${taskId}/`, '') || 'index.html';
+    const filePath = wildcardPath || 'index.html';
+
+    // Security: only allow specific statuses
+    if (!['pending', 'approved', 'in-progress', 'done'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    // Security: prevent path traversal
+    if (filePath.includes('..') || filePath.includes('~')) {
+      return res.status(400).json({ error: 'Invalid path' });
+    }
+
+    const fullPath = path.resolve(tasksRoot, status, taskId, filePath);
+
+    // Ensure the path is within the tasks folder (security check)
+    if (!fullPath.startsWith(tasksRoot)) {
+      return res.status(400).json({ error: 'Path traversal detected' });
+    }
+
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ error: 'File not found', path: fullPath });
+    }
+
+    // Determine content type
+    const ext = path.extname(filePath).toLowerCase();
+    const contentTypes: Record<string, string> = {
+      '.html': 'text/html; charset=utf-8',
+      '.css': 'text/css; charset=utf-8',
+      '.js': 'application/javascript; charset=utf-8',
+      '.json': 'application/json; charset=utf-8',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.svg': 'image/svg+xml',
+      '.ico': 'image/x-icon',
+    };
+
+    res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
+    res.sendFile(fullPath);
+  });
+
+  // Shorthand: /preview/:taskId searches all status folders
+  app.get('/preview/:taskId', (req, res) => {
+    const { taskId } = req.params;
+    const statuses = ['in-progress', 'done', 'approved', 'pending'];
+
+    for (const status of statuses) {
+      const indexPath = path.join(tasksRoot, status, taskId, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.redirect(`/preview/${status}/${taskId}/index.html`);
+        return;
+      }
+    }
+
+    res.status(404).json({ error: 'Task not found', taskId });
+  });
 }

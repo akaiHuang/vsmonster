@@ -458,6 +458,17 @@
     });
     actions.appendChild(openBm);
 
+    const splitBtn = document.createElement('button');
+    splitBtn.className = 'btn';
+    splitBtn.textContent = 'Split';
+    splitBtn.disabled = !taskDir || statusInfo.id === 'in-progress' || statusInfo.id === 'done';
+    splitBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      vscode.postMessage({ type: 'task_split_multi_agent', taskId, taskDir, title });
+    });
+    actions.appendChild(splitBtn);
+
     const sendBm = document.createElement('button');
     sendBm.className = 'btn primary';
     sendBm.textContent = 'Send';

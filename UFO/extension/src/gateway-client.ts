@@ -101,6 +101,31 @@ export class GatewayClient extends EventEmitter {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
+  /**
+   * Force disconnect and immediately reconnect.
+   * Used when user manually triggers a refresh/reconnect.
+   */
+  async forceReconnect(): Promise<void> {
+    // Reset state
+    this.stopPingInterval();
+    this.stopHealthCheck();
+    this.reconnectAttempts = 0;
+    this.isReconnecting = false;
+    this.shouldReconnect = true;
+
+    // Close existing connection
+    if (this.ws) {
+      try {
+        this.ws.removeAllListeners();
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
+
+    // Reconnect immediately
+    await this.connect();
+  }
+
   send(message: object): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));

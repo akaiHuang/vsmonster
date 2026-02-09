@@ -22,7 +22,9 @@ import { MCPController } from './mcp/controller';
 import { SoulManager } from './soul/manager';
 import { logger } from './utils/logger';
 import { throttle } from './utils/debounce';
+import { withRetry } from './utils/retry';
 import { Express } from 'express';
+import * as net from 'net';
 import mediaRouter from './routes/media.routes';
 import { initializeMediaUrl } from './services/media.service';
 import { getMediaDatabase } from './db/media-database';
@@ -218,11 +220,11 @@ export class HolographyGateway {
       if (now - last >= this.offlineGreetingCooldownMs) {
         this.offlineGreetingLastSent.set(key, now);
         try {
-          await this.holography.sendMessage(
+          await withRetry(() => this.holography.sendMessage(
             channel as ChannelType,
             message.chatId || userId,
             { text: this.soulManager.getGreeting(), chatId: message.chatId }
-          );
+          ));
         } catch (err) {
           logger.warn(`Failed to send offline greeting: ${err}`);
         }
@@ -249,6 +251,7 @@ export class HolographyGateway {
       media,
       messageId: message.messageId,
       timestamp: message.timestamp.toISOString(),
+      replyToken: message.replyToken, // LINE reply token for faster response
     });
   }
 
@@ -256,6 +259,17 @@ export class HolographyGateway {
 
   async start(): Promise<void> {
     const port = this.config.port || 3000;
+
+    // Node 20+ feature: network family auto-selection can break on some networks
+    // (e.g. IPv6 route issues) and cause undici/grammy fetch to fail for Telegram.
+    // Disable it to force stable IPv4 fallback.
+    try {
+      const setDefaultAutoSelectFamily = (net as any).setDefaultAutoSelectFamily;
+      if (typeof setDefaultAutoSelectFamily === 'function') {
+        setDefaultAutoSelectFamily(false);
+        logger.info('Network family auto-selection disabled (prefer stable IPv4 fallback)');
+      }
+    } catch {}
 
     await this.holography.start();
 

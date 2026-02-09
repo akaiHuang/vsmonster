@@ -17,9 +17,24 @@ import * as crypto from 'crypto';
  */
 export function setupMiddleware(app: Express): void {
   // ── Body parsing ──────────────────────────────────────────
+  // 注意：LINE webhook 需要 raw body 來驗證簽名，
+  // 所以 JSON 解析必須跳過 /webhook/line 路徑
 
-  app.use(express.json({ limit: '1mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    // 跳過 LINE webhook - LINE SDK 需要 raw body 進行簽名驗證
+    if (req.path.startsWith('/webhook/line')) {
+      return next();
+    }
+    express.json({ limit: '50mb' })(req, res, next);
+  });
+
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    // 跳過 LINE webhook
+    if (req.path.startsWith('/webhook/line')) {
+      return next();
+    }
+    express.urlencoded({ extended: true, limit: '50mb' })(req, res, next);
+  });
 
   // ── Security headers via helmet ───────────────────────────
 
@@ -55,7 +70,11 @@ export function setupMiddleware(app: Express): void {
 
   // ── Cache control ─────────────────────────────────────────
 
-  app.use('/api', (_req: Request, res: Response, next: NextFunction) => {
+  app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+    // Allow caching for media view/download (preview links)
+    if (/^\/api\/media\/[^/]+\/(view|download|thumbnail)/.test(req.path)) {
+      return next();
+    }
     res.setHeader('Cache-Control', 'no-store');
     next();
   });
@@ -76,7 +95,11 @@ export function setupMiddleware(app: Express): void {
   });
 
   // Reject null bytes in request body (JSON payloads)
+  // 跳過 LINE webhook（body 由 LINE SDK 處理）
   app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith('/webhook/line')) {
+      return next();
+    }
     if (req.body && typeof req.body === 'object') {
       const bodyStr = JSON.stringify(req.body);
       if (bodyStr.includes('\\u0000') || bodyStr.includes('\0')) {

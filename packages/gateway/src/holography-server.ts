@@ -9,7 +9,9 @@ import {
   HolographyServer,
   HolographyServerConfig,
   ChannelType,
-  IncomingMessage
+  IncomingMessage,
+  LineFlexContainer,
+  LineChannel
 } from '@vsmonster/holography';
 import { loadConfig } from './config/loader';
 import { TaskManager } from './task/manager';
@@ -20,19 +22,32 @@ import { MCPController } from './mcp/controller';
 import { SoulManager } from './soul/manager';
 import { logger } from './utils/logger';
 import express, { Express, Router } from 'express';
+import * as net from 'net';
 import mediaRouter from './routes/media.routes';
 import { initializeMediaUrl } from './services/media.service';
+import {
+  createCheckResultBubble,
+  createStillProcessingBubble,
+  parsePostbackData
+} from './line/flex-templates';
+
+// LINE 長任務配置
+const LINE_TASK_TIMEOUT = 45000;  // 45秒超時 (留15秒余量給 replyToken)
+const LOADING_DURATION = 60;       // Loading 動畫60秒
 
 export class HolographyGateway {
   private holography: HolographyServer;
   private config: ReturnType<typeof loadConfig>;
-  
+
   private taskManager: TaskManager;
   private commandProcessor: CommandProcessor;
   private tunnelService: TunnelService;
   private copilotBridge: CopilotBridge;
   private mcpController: MCPController;
   private soulManager: SoulManager;
+
+  // LINE 長任務：taskId -> timeout timer
+  private lineTaskTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
   constructor() {
     this.config = loadConfig();
@@ -145,6 +160,48 @@ export class HolographyGateway {
       }
     });
 
+    // LLM 結果提交 API（用於測試或外部 LLM 服務）
+    app.post('/api/tasks/:id/result', express.json(), async (req, res) => {
+      const taskId = req.params.id;
+      const { content, model, tokensUsed } = req.body;
+
+      if (!content) {
+        res.status(400).json({ error: 'content is required' });
+        return;
+      }
+
+      const task = this.taskManager.getTask(taskId);
+      if (!task) {
+        res.status(404).json({ error: 'Task not found' });
+        return;
+      }
+
+      // 模擬 llm_completed 消息處理
+      this.taskManager.setLLMResult(taskId, content, { model, tokensUsed });
+
+      // 清除超時計時器
+      const timer = this.lineTaskTimers.get(taskId);
+      if (timer) {
+        clearTimeout(timer);
+        this.lineTaskTimers.delete(taskId);
+      }
+
+      // 檢查是否已經超時處理過
+      const lineMetadata = this.taskManager.getLineMetadata(taskId);
+      if (lineMetadata?.timeoutHandled) {
+        // 已經發送了「查看答案」按鈕，等待用戶點擊
+        res.json({ success: true, message: 'Result stored, waiting for user postback' });
+      } else if (task.channel === 'line') {
+        // 還沒超時，直接發送結果
+        const replyToken = lineMetadata?.originalReplyToken;
+        await this.handleLineTaskCompleted(taskId, task.userId, replyToken);
+        res.json({ success: true, message: 'Result sent to user' });
+      } else {
+        // 非 LINE 頻道，只存儲結果
+        res.json({ success: true, message: 'Result stored' });
+      }
+    });
+
     // MCP 控制 API
     app.get('/api/mcp/servers', (req, res) => {
       res.json(this.mcpController.listServers());
@@ -224,7 +281,13 @@ export class HolographyGateway {
    * 處理已驗證的訊息
    */
   private async handleVerifiedMessage(message: IncomingMessage): Promise<void> {
-    const { channel, userId, text, media } = message;
+    const { channel, userId, text, media, eventType, postback } = message;
+
+    // 處理 LINE Postback 事件
+    if (channel === 'line' && eventType === 'postback' && postback) {
+      await this.handleLinePostback(message);
+      return;
+    }
 
     logger.info(`📨 [${channel}] ${userId}: ${text?.substring(0, 100) || '(media)'}`);
 
@@ -232,6 +295,12 @@ export class HolographyGateway {
     if (text?.startsWith('/')) {
       const result = await this.commandProcessor.processMessage(message);
       if (result) return; // 指令已處理，不再轉發
+    }
+
+    // LINE 頻道：使用 Loading API + 超時處理
+    if (channel === 'line' && text) {
+      await this.handleLineLongTask(message);
+      return;
     }
 
     // 非指令訊息 → 轉發給 VS Code Extension（使用扁平 JSON）
@@ -244,6 +313,200 @@ export class HolographyGateway {
       messageId: message.messageId,
       timestamp: message.timestamp.toISOString(),
     });
+  }
+
+  /**
+   * 處理 LINE 長時間任務
+   * 使用 Loading API + 超時按鈕機制
+   */
+  private async handleLineLongTask(message: IncomingMessage): Promise<void> {
+    const { userId, text, replyToken, chatId } = message;
+    const targetId = chatId || userId;
+
+    // 1. 創建任務
+    const task = this.taskManager.createTask({
+      channel: 'line',
+      userId,
+      instruction: text || '',
+      media: message.media,
+    });
+
+    // 2. 存儲 LINE 元數據
+    this.taskManager.setLineMetadata(task.id, {
+      originalReplyToken: replyToken,
+      loadingStartedAt: new Date(),
+      timeoutHandled: false,
+    });
+
+    // 3. 顯示 Loading 動畫
+    const lineChannel = this.holography.getChannelManager().getChannel('line') as LineChannel | undefined;
+    if (lineChannel) {
+      await lineChannel.showLoadingAnimation(targetId, LOADING_DURATION);
+    }
+
+    // 4. 設置超時處理
+    const timeoutTimer = setTimeout(async () => {
+      await this.handleLineTaskTimeout(task.id, targetId, replyToken);
+    }, LINE_TASK_TIMEOUT);
+
+    this.lineTaskTimers.set(task.id, timeoutTimer);
+
+    // 5. 轉發給 VS Code Extension
+    this.holography.broadcastRawToExtensions({
+      type: 'ufo_message',
+      channel: 'line',
+      userId,
+      text,
+      media: message.media,
+      messageId: message.messageId,
+      timestamp: message.timestamp.toISOString(),
+      taskId: task.id, // 包含 taskId 以便 Extension 回傳結果
+    });
+
+    logger.info(`LINE long task created: ${task.id} for user ${userId}`);
+  }
+
+  /**
+   * 處理 LINE 任務超時
+   * 發送「查看答案」按鈕，讓用戶稍後獲取結果
+   */
+  private async handleLineTaskTimeout(taskId: string, userId: string, replyToken?: string): Promise<void> {
+    // 清除計時器
+    this.lineTaskTimers.delete(taskId);
+
+    // 檢查是否已經有結果了
+    if (this.taskManager.hasLLMResult(taskId)) {
+      // 任務已完成，直接回覆結果
+      await this.handleLineTaskCompleted(taskId, userId, replyToken);
+      return;
+    }
+
+    // 標記已處理超時
+    this.taskManager.setLineMetadata(taskId, { timeoutHandled: true });
+
+    // 發送「查看答案」按鈕
+    const lineChannel = this.holography.getChannelManager().getChannel('line') as LineChannel | undefined;
+    if (lineChannel) {
+      const bubble = createCheckResultBubble(
+        '問題需要更多時間思考，請稍後點擊按鈕查看答案',
+        taskId,
+        '📬 查看答案'
+      );
+
+      try {
+        if (replyToken) {
+          await lineChannel.sendFlexMessage(userId, '正在思考中...', bubble, replyToken);
+        } else {
+          await lineChannel.sendFlexMessage(userId, '正在思考中...', bubble);
+        }
+        logger.info(`LINE timeout button sent for task ${taskId}`);
+      } catch (error) {
+        logger.error(`Failed to send timeout button for task ${taskId}:`, error);
+        // replyToken 可能已過期，使用 push
+        try {
+          await lineChannel.sendFlexMessage(userId, '正在思考中...', bubble);
+        } catch (pushError) {
+          logger.error(`Failed to push timeout button for task ${taskId}:`, pushError);
+        }
+      }
+    }
+  }
+
+  /**
+   * 處理 LINE 任務完成（在超時之前）
+   */
+  private async handleLineTaskCompleted(taskId: string, userId: string, replyToken?: string): Promise<void> {
+    const llmResult = this.taskManager.getLLMResult(taskId);
+    if (!llmResult) {
+      logger.warn(`No LLM result found for task ${taskId}`);
+      return;
+    }
+
+    const lineChannel = this.holography.getChannelManager().getChannel('line') as LineChannel | undefined;
+    if (!lineChannel) return;
+
+    try {
+      if (replyToken) {
+        await lineChannel.sendTextMessage(userId, llmResult.content, replyToken);
+      } else {
+        await lineChannel.sendTextMessage(userId, llmResult.content);
+      }
+      logger.info(`LINE result sent for task ${taskId}`);
+    } catch (error) {
+      logger.error(`Failed to send result for task ${taskId}:`, error);
+      // replyToken 可能已過期，使用 push
+      try {
+        await lineChannel.sendTextMessage(userId, llmResult.content);
+      } catch (pushError) {
+        logger.error(`Failed to push result for task ${taskId}:`, pushError);
+      }
+    }
+
+    // 標記任務完成
+    this.taskManager.updateTask(taskId, 'completed', 100);
+  }
+
+  /**
+   * 處理 LINE Postback 事件
+   * 主要處理「查看答案」按鈕點擊
+   */
+  private async handleLinePostback(message: IncomingMessage): Promise<void> {
+    const { userId, replyToken, postback } = message;
+
+    if (!postback?.data) {
+      logger.warn('Postback event without data');
+      return;
+    }
+
+    const params = parsePostbackData(postback.data);
+    const action = params.action;
+    const taskId = params.taskId;
+
+    logger.info(`LINE Postback: action=${action}, taskId=${taskId}`);
+
+    if (action === 'check_result' && taskId) {
+      const lineChannel = this.holography.getChannelManager().getChannel('line') as LineChannel | undefined;
+      if (!lineChannel) return;
+
+      // 檢查任務是否有結果
+      if (this.taskManager.hasLLMResult(taskId)) {
+        // 有結果，直接回覆
+        const llmResult = this.taskManager.getLLMResult(taskId);
+        if (llmResult) {
+          try {
+            await lineChannel.sendTextMessage(userId, llmResult.content, replyToken);
+            logger.info(`LINE result sent via postback for task ${taskId}`);
+          } catch (error) {
+            logger.error(`Failed to send result via postback:`, error);
+          }
+        }
+      } else {
+        // 還沒有結果，顯示「還在努力中」
+        const bubble = createStillProcessingBubble(
+          taskId,
+          '任務還在處理中，請稍後再點擊按鈕查看'
+        );
+
+        try {
+          await lineChannel.sendFlexMessage(userId, '還在處理中...', bubble, replyToken);
+        } catch (error) {
+          logger.error(`Failed to send still processing message:`, error);
+        }
+      }
+    } else if (action === 'check_progress' && taskId) {
+      // 查看進度
+      const task = this.taskManager.getTask(taskId);
+      const lineChannel = this.holography.getChannelManager().getChannel('line') as LineChannel | undefined;
+
+      if (lineChannel && task) {
+        const statusText = this.taskManager.formatTaskStatus(task);
+        try {
+          await lineChannel.sendTextMessage(userId, statusText, replyToken);
+        } catch (error) {
+          logger.error(`Failed to send progress:`, error);
+        }
+      }
+    }
   }
 
   /**
@@ -321,6 +584,44 @@ export class HolographyGateway {
         break;
       }
 
+      case 'llm_completed': {
+        // LLM 任務完成，處理 LINE 長任務結果
+        const { taskId, content, model, tokensUsed } = message;
+        if (!taskId || !content) {
+          logger.warn('llm_completed missing taskId or content');
+          break;
+        }
+
+        // 存儲 LLM 結果
+        this.taskManager.setLLMResult(taskId, content, { model, tokensUsed });
+
+        // 獲取任務信息
+        const task = this.taskManager.getTask(taskId);
+        if (!task) {
+          logger.warn(`Task not found for llm_completed: ${taskId}`);
+          break;
+        }
+
+        // 清除超時計時器
+        const timer = this.lineTaskTimers.get(taskId);
+        if (timer) {
+          clearTimeout(timer);
+          this.lineTaskTimers.delete(taskId);
+        }
+
+        // 檢查是否已經超時處理過
+        const lineMetadata = this.taskManager.getLineMetadata(taskId);
+        if (lineMetadata?.timeoutHandled) {
+          // 已經發送了「查看答案」按鈕，用戶會通過 postback 獲取結果
+          logger.info(`Task ${taskId} completed after timeout, result stored for postback`);
+        } else {
+          // 還沒超時，可以用原始 replyToken 回覆
+          const replyToken = lineMetadata?.originalReplyToken;
+          await this.handleLineTaskCompleted(taskId, task.userId, replyToken);
+        }
+        break;
+      }
+
       default:
         logger.debug(`Unknown extension message type: ${message.type}`);
     }
@@ -331,6 +632,16 @@ export class HolographyGateway {
    */
   async start(): Promise<void> {
     const port = this.config.port || 3000;
+
+    // See server.ts: disable Node's network family auto-selection to avoid
+    // undici/grammy fetch failures on networks with broken IPv6 routes.
+    try {
+      const setDefaultAutoSelectFamily = (net as any).setDefaultAutoSelectFamily;
+      if (typeof setDefaultAutoSelectFamily === 'function') {
+        setDefaultAutoSelectFamily(false);
+        logger.info('Network family auto-selection disabled (prefer stable IPv4 fallback)');
+      }
+    } catch {}
 
     // 啟動 Holography 伺服器
     await this.holography.start();

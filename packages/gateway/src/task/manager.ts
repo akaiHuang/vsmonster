@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Task, SubTask, TaskStatus, TaskPriority, TaskDelivery } from '../types';
+import { Task, SubTask, TaskStatus, TaskPriority, TaskDelivery, LLMResult, LineMetadata } from '../types';
 import { MediaItem } from '@vsmonster/holography';
 import { getTaskDatabase, TaskDatabase } from '../db/task-database';
 import { logger } from '../utils/logger';
@@ -337,5 +337,86 @@ export class TaskManager {
         logger.error(`Event listener error for ${event}:`, error);
       }
     });
+  }
+
+  // ============================================
+  // LINE 長任務支持方法
+  // ============================================
+
+  /**
+   * 設定 LLM 結果
+   */
+  setLLMResult(taskId: string, content: string, metadata?: { model?: string; tokensUsed?: number }): void {
+    if (!isValidTaskId(taskId)) return;
+    const task = this.db.findOne(taskId);
+    if (!task) {
+      logger.warn(`Task not found for LLM result: ${taskId}`);
+      return;
+    }
+
+    const llmResult: LLMResult = {
+      content,
+      model: metadata?.model,
+      tokensUsed: metadata?.tokensUsed,
+      generatedAt: new Date(),
+    };
+
+    this.db.updateOne(taskId, { llmResult, updatedAt: new Date() });
+    this.invalidateCaches(taskId);
+    logger.info(`LLM result set for task ${taskId}`);
+    this.emit('task:llm_result', { taskId, llmResult });
+  }
+
+  /**
+   * 獲取 LLM 結果
+   */
+  getLLMResult(taskId: string): LLMResult | undefined {
+    if (!isValidTaskId(taskId)) return undefined;
+    const task = this.db.findOne(taskId);
+    return task?.llmResult;
+  }
+
+  /**
+   * 檢查是否有 LLM 結果
+   */
+  hasLLMResult(taskId: string): boolean {
+    if (!isValidTaskId(taskId)) return false;
+    const task = this.db.findOne(taskId);
+    return !!task?.llmResult;
+  }
+
+  /**
+   * 設定 LINE 元數據
+   */
+  setLineMetadata(taskId: string, metadata: Partial<LineMetadata>): void {
+    if (!isValidTaskId(taskId)) return;
+    const task = this.db.findOne(taskId);
+    if (!task) return;
+
+    const existingMetadata = task.lineMetadata || {};
+    const merged: LineMetadata = { ...existingMetadata, ...metadata };
+
+    this.db.updateOne(taskId, { lineMetadata: merged, updatedAt: new Date() });
+    this.invalidateCaches(taskId);
+  }
+
+  /**
+   * 獲取 LINE 元數據
+   */
+  getLineMetadata(taskId: string): LineMetadata | undefined {
+    if (!isValidTaskId(taskId)) return undefined;
+    const task = this.db.findOne(taskId);
+    return task?.lineMetadata;
+  }
+
+  /**
+   * 清除超時計時器
+   */
+  clearLineTimeoutTimer(taskId: string): void {
+    const task = this.db.findOne(taskId);
+    if (task?.lineMetadata?.timeoutTimer) {
+      clearTimeout(task.lineMetadata.timeoutTimer);
+      this.setLineMetadata(taskId, { timeoutTimer: undefined });
+    }
   }
 }

@@ -18,6 +18,26 @@ export interface TaskDelivery {
   reviewComment?: string;
 }
 
+/**
+ * LLM 結果存儲
+ */
+export interface LLMResult {
+  content: string;
+  model?: string;
+  tokensUsed?: number;
+  generatedAt: Date;
+}
+
+/**
+ * LINE 特定元數據
+ */
+export interface LineMetadata {
+  originalReplyToken?: string;
+  loadingStartedAt?: Date;
+  timeoutHandled?: boolean;
+  timeoutTimer?: ReturnType<typeof setTimeout>;
+}
+
 export interface Task {
   id: string;
   channel: string;
@@ -34,6 +54,9 @@ export interface Task {
   result?: any;
   error?: string;
   delivery?: TaskDelivery;
+  // LINE 長任務支持
+  llmResult?: LLMResult;
+  lineMetadata?: LineMetadata;
 }
 
 export interface SubTask {

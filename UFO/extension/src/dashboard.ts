@@ -786,6 +786,8 @@ export function getDashboardHtml(
           <button class="action-btn" data-command="ufo.openTasksRoot">Folder</button>
           <button class="action-btn" data-command="ufo.openSettings">Config</button>
           <button class="action-btn" data-command="ufo.syncEnv">Sync</button>
+          <button class="action-btn" data-command="ufo.ensurePublicUrl">Public URL</button>
+          <button class="action-btn" data-command="ufo.stopPublicUrl">Stop URL</button>
         </div>
       </div>
     </div>
