@@ -2569,17 +2569,18 @@ async function executeUfoTaskWithBlueMonster(options: {
 
       const previewPath = findPreviewHtmlFile(taskDir);
       if (previewPath) {
-        // Use the simpler /preview/:taskId endpoint
         const taskId = path.basename(taskDir);
-        const previewPathPart = `/preview/${taskId}`;
-        const url = baseUrl
-          ? `${baseUrl}${previewPathPart}`
-          : `${gatewayHttpUrl}${previewPathPart}`;
-        const localMark = /localhost|127\.0\.0\.1/i.test(url) ? "（本機）" : "";
-        sendToChannel(`👾 ${bmLabel} 做好了！預覽連結${localMark}：\n${url}`);
-        try {
-          await vscode.commands.executeCommand("blueMonster.addSystemNote", `🌐 Preview${localMark}: ${url}`);
-        } catch {}
+        const localMark = /localhost|127\.0\.0\.1/i.test(baseUrl) ? "（本機）" : "";
+        // Ask Gateway to generate a token-protected /share link (so end-users can't access the folder without the URL token).
+        gatewayClient.send({
+          type: "task_preview_ready",
+          channel: meta.channel,
+          userId: meta.userId,
+          chatId: meta.chatId,
+          taskId,
+          baseUrl,
+          intro: `👾 ${bmLabel} 做好了！預覽連結${localMark}：`
+        });
       } else {
         sendToChannel(`👾 ${bmLabel} 做好了！\n成果資料夾：${taskDir}`);
       }
@@ -3082,23 +3083,15 @@ export function activate(context: vscode.ExtensionContext): void {
       return { text: text || "BlueMonster 需要確認後才能繼續。", pendingConfirmations };
     }
 
-    // Generate preview URL using the simpler /preview endpoint
+    // Generate preview reference for the UI (local file path).
     let previewUrl: string | undefined;
     try {
-      const overrideBaseRaw = ufoCfg.get<string>("publicUrl", "") || "";
-      const baseUrl = await resolvePublicBaseUrl(gw, overrideBaseRaw, output);
       const previewPath = findPreviewHtmlFile(taskDir);
       if (previewPath) {
-        const taskId = path.basename(taskDir);
-        // Use the /preview/:taskId endpoint which auto-searches status folders
-        const previewPathPart = `/preview/${taskId}`;
-        previewUrl = baseUrl
-          ? `${baseUrl}${previewPathPart}`
-          : `${gw}${previewPathPart}`;
+        previewUrl = vscode.Uri.file(previewPath).toString();
         if (previewUrl) {
-          const localMark = /localhost|127\.0\.0\.1/i.test(previewUrl) ? "（本機）" : "";
           try {
-            await vscode.commands.executeCommand("blueMonster.addSystemNote", `🌐 Preview${localMark}: ${previewUrl}`);
+            await vscode.commands.executeCommand("blueMonster.addSystemNote", `🌐 Preview (local file): ${previewUrl}`);
           } catch {}
         }
       }

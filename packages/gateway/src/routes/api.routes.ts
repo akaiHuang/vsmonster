@@ -6,11 +6,12 @@
 
 import { Express } from 'express';
 import { HolographyServer, ChannelType } from '@vsmonster/holography';
-import { TaskManager } from '../task/manager';
+import { TaskManager, isValidTaskId } from '../task/manager';
 import { MCPController } from '../mcp/controller';
 import { TunnelService } from '../tunnel/service';
 import { getMediaDatabase } from '../db/media-database';
 import { loadAISettings, saveAISettings, AVAILABLE_MODELS, TASK_TYPES } from '../services/ai-settings.service';
+import { verifyTaskPreviewToken } from '../services/share-token.service';
 import { logger } from '../utils/logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -198,10 +199,13 @@ export function registerApiRoutes(app: Express, deps: ApiRouteDependencies): voi
 
   // ── Persona (me.md) ────────────────────────────────────────
 
-  const projectRoot = process.cwd();
+  // Resolve paths relative to the gateway package root so this works regardless of process.cwd().
+  // src/routes -> packages/gateway; dist/routes -> packages/gateway
+  const gatewayRoot = path.resolve(__dirname, '../..');
+  const repoRoot = path.resolve(gatewayRoot, '../..');
   const personaPaths: Record<string, string> = {
-    ufo: path.join(projectRoot, 'UFO/me.md'),
-    bluemonster: path.join(projectRoot, 'packages/blue-monster/me.md'),
+    ufo: path.join(repoRoot, 'UFO/me.md'),
+    bluemonster: path.join(repoRoot, 'packages/blue-monster/me.md'),
   };
 
   app.get('/api/persona/:agent', (req, res) => {
@@ -264,71 +268,123 @@ export function registerApiRoutes(app: Express, deps: ApiRouteDependencies): voi
     });
   });
 
-  // ── Preview files from tasks folder ─────────────────────────
-  // Serves HTML/CSS/JS files directly from UFO tasks folders
-  // URL: /preview/{taskId}/index.html
-  // Note: projectRoot is packages/gateway, so we need to go up two levels
-  const tasksRoot = path.resolve(projectRoot, '../../UFO/tasks');
+  // ── Secure task preview (/share) ────────────────────────────
+  // Serves HTML/CSS/JS assets from UFO tasks folders, protected by a signed token.
+  //
+  // URL: /share/{taskId}/{token}/index.html
+  const tasksRoot = path.join(repoRoot, 'UFO', 'tasks');
+  const allowedStatuses = ['pending', 'approved', 'in-progress', 'done'] as const;
+  const allowedExts = new Set([
+    '.html', '.htm',
+    '.css',
+    '.js', '.mjs',
+    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico',
+    '.woff', '.woff2', '.ttf', '.otf',
+    '.txt',
+    '.map',
+  ]);
+  const blockedBasenames = new Set([
+    'readme.md',
+    'agents.md',
+    'handoff.json',
+    'gateway-task.json',
+    '.env',
+    '.env.local',
+  ]);
 
-  app.get('/preview/:status/:taskId/*', (req, res) => {
-    const { status, taskId } = req.params;
-    // Get the wildcard part of the URL (everything after /preview/:status/:taskId/)
-    const wildcardPath = req.path.replace(`/preview/${status}/${taskId}/`, '') || 'index.html';
-    const filePath = wildcardPath || 'index.html';
+  const contentTypes: Record<string, string> = {
+    '.html': 'text/html; charset=utf-8',
+    '.htm': 'text/html; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.js': 'application/javascript; charset=utf-8',
+    '.mjs': 'application/javascript; charset=utf-8',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.webp': 'image/webp',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.otf': 'font/otf',
+    '.txt': 'text/plain; charset=utf-8',
+    '.map': 'application/json; charset=utf-8',
+  };
 
-    // Security: only allow specific statuses
-    if (!['pending', 'approved', 'in-progress', 'done'].includes(status)) {
-      return res.status(400).json({ error: 'Invalid status' });
+  function findTaskStatus(taskId: string): string | null {
+    for (const status of allowedStatuses) {
+      const dir = path.join(tasksRoot, status, taskId);
+      if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+        return status;
+      }
+    }
+    return null;
+  }
+
+  function isSafeRelativePath(rel: string): boolean {
+    if (!rel) return false;
+    if (rel.includes('..') || rel.includes('~') || rel.includes('\\') || rel.includes('\0')) return false;
+    const parts = rel.split('/').filter(Boolean);
+    if (parts.some(p => p.startsWith('.'))) return false;
+    return true;
+  }
+
+  app.get('/share/:taskId/:token', (req, res) => {
+    const { taskId, token } = req.params;
+    if (!isValidTaskId(taskId)) {
+      return res.status(400).json({ error: 'Invalid taskId' });
+    }
+    if (!verifyTaskPreviewToken(taskId, token)) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    res.redirect(`/share/${encodeURIComponent(taskId)}/${encodeURIComponent(token)}/index.html`);
+  });
+
+  app.get('/share/:taskId/:token/*', (req, res) => {
+    const { taskId, token } = req.params;
+    if (!isValidTaskId(taskId)) {
+      return res.status(400).json({ error: 'Invalid taskId' });
+    }
+    if (!verifyTaskPreviewToken(taskId, token)) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
     }
 
-    // Security: prevent path traversal
-    if (filePath.includes('..') || filePath.includes('~')) {
+    const prefix = `/share/${taskId}/${token}/`;
+    let relPath = req.path.startsWith(prefix) ? req.path.slice(prefix.length) : '';
+    if (!relPath) relPath = 'index.html';
+
+    if (!isSafeRelativePath(relPath)) {
       return res.status(400).json({ error: 'Invalid path' });
     }
 
-    const fullPath = path.resolve(tasksRoot, status, taskId, filePath);
+    const baseName = path.basename(relPath).toLowerCase();
+    if (blockedBasenames.has(baseName)) {
+      return res.status(403).json({ error: 'Blocked file' });
+    }
 
-    // Ensure the path is within the tasks folder (security check)
-    if (!fullPath.startsWith(tasksRoot)) {
+    const ext = path.extname(relPath).toLowerCase();
+    if (ext && !allowedExts.has(ext)) {
+      return res.status(403).json({ error: 'File type not allowed' });
+    }
+
+    const status = findTaskStatus(taskId);
+    if (!status) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const rootDir = path.resolve(tasksRoot, status, taskId);
+    const fullPath = path.resolve(rootDir, relPath);
+    if (!fullPath.startsWith(rootDir)) {
       return res.status(400).json({ error: 'Path traversal detected' });
     }
-
     if (!fs.existsSync(fullPath)) {
-      return res.status(404).json({ error: 'File not found', path: fullPath });
+      return res.status(404).json({ error: 'File not found' });
     }
-
-    // Determine content type
-    const ext = path.extname(filePath).toLowerCase();
-    const contentTypes: Record<string, string> = {
-      '.html': 'text/html; charset=utf-8',
-      '.css': 'text/css; charset=utf-8',
-      '.js': 'application/javascript; charset=utf-8',
-      '.json': 'application/json; charset=utf-8',
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.gif': 'image/gif',
-      '.svg': 'image/svg+xml',
-      '.ico': 'image/x-icon',
-    };
 
     res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'no-store');
     res.sendFile(fullPath);
-  });
-
-  // Shorthand: /preview/:taskId searches all status folders
-  app.get('/preview/:taskId', (req, res) => {
-    const { taskId } = req.params;
-    const statuses = ['in-progress', 'done', 'approved', 'pending'];
-
-    for (const status of statuses) {
-      const indexPath = path.join(tasksRoot, status, taskId, 'index.html');
-      if (fs.existsSync(indexPath)) {
-        res.redirect(`/preview/${status}/${taskId}/index.html`);
-        return;
-      }
-    }
-
-    res.status(404).json({ error: 'Task not found', taskId });
   });
 }

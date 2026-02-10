@@ -47,6 +47,9 @@ packages/gateway/media-storage/
 packages/gateway/configs/*-whitelist.json
 packages/gateway/configs/verified-users.json
 
+# Local share secret (legacy path; keep out of git)
+data/
+
 # Local AI settings (user specific)
 configs/ai-settings.json
 

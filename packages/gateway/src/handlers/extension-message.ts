@@ -17,6 +17,9 @@ import { TunnelService } from '../tunnel/service';
 import { logger } from '../utils/logger';
 import { withRetry } from '../utils/retry';
 import { createResultReadyBubble } from '../line/flex-templates';
+import { issueTaskPreviewToken } from '../services/share-token.service';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Send message with retry logic for rate limiting (429 errors)
@@ -59,7 +62,7 @@ export interface ExtensionHandlerDependencies {
   taskManager: TaskManager;
   mcpController: MCPController;
   tunnelService: TunnelService;
-  config: { port?: number };
+  config: { port?: number; publicUrl?: string };
   // server.ts maintains this map; we clear timers when a result arrives.
   lineTaskTimers?: Map<string, ReturnType<typeof setTimeout>>;
 }
@@ -189,6 +192,47 @@ export async function handleExtensionMessage(
       break;
     }
 
+    case 'task_preview_ready': {
+      const channel = message.channel as ChannelType | undefined;
+      const userId = typeof message.userId === 'string' ? message.userId : '';
+      const chatId = typeof message.chatId === 'string' ? message.chatId : undefined;
+      const taskId = typeof message.taskId === 'string' ? message.taskId.trim() : '';
+      const baseUrlRaw = typeof message.baseUrl === 'string' ? message.baseUrl : '';
+
+      if (!channel || !userId || !taskId) break;
+
+      const enabledChannels = holography.getChannelManager().getEnabledChannels();
+      const canNotify = enabledChannels.includes(channel);
+      if (!canNotify) break;
+
+      const baseUrl = String(baseUrlRaw || config.publicUrl || tunnelService.getStatus().url || `http://localhost:${config.port || 3000}`)
+        .replace(/\/+$/g, '');
+
+      const ttlSeconds = typeof message.ttlSeconds === 'number' && Number.isFinite(message.ttlSeconds)
+        ? Math.max(60, Math.floor(message.ttlSeconds))
+        : undefined;
+
+      const token = issueTaskPreviewToken(taskId, ttlSeconds);
+      const url = `${baseUrl}/share/${encodeURIComponent(taskId)}/${encodeURIComponent(token)}`;
+
+      const intro = typeof message.intro === 'string' && message.intro.trim()
+        ? message.intro.trim()
+        : '🌐 預覽連結（需要 token 才能查看）：';
+      const text = `${intro}\n${url}`;
+
+      try {
+        await sendWithRetry(
+          holography,
+          channel,
+          chatId || userId,
+          { text, chatId }
+        );
+      } catch (err) {
+        logger.warn(`Failed to send task preview link: ${String(err)}`);
+      }
+      break;
+    }
+
     case 'task_update':
       taskManager.updateTask(message.taskId, message.status, message.progress);
       break;
@@ -211,14 +255,31 @@ export async function handleExtensionMessage(
           }
 
           if (canNotify) {
-            const baseUrl = tunnelService.getStatus().url
-              || `http://localhost:${config.port || 3000}`;
-            const deliveryUrl = `${baseUrl}/task/${message.taskId}`;
+            const baseUrl = String(config.publicUrl || tunnelService.getStatus().url || `http://localhost:${config.port || 3000}`)
+              .replace(/\/+$/g, '');
+
+            // If this task has a previewable index.html, send a signed /share link.
+            // Resolve relative to the gateway package root so it works regardless of process.cwd().
+            // src/handlers -> packages/gateway; dist/handlers -> packages/gateway
+            const gatewayRoot = path.resolve(__dirname, '../..');
+            const repoRoot = path.resolve(gatewayRoot, '../..');
+            const tasksRoot = path.join(repoRoot, 'UFO', 'tasks');
+            const statuses = ['in-progress', 'done', 'approved', 'pending'];
+            const hasIndex = statuses.some((s) => fs.existsSync(path.join(tasksRoot, s, message.taskId, 'index.html')));
+
+            const deliveryUrl = hasIndex
+              ? (() => {
+                  const token = issueTaskPreviewToken(message.taskId);
+                  return `${baseUrl}/share/${encodeURIComponent(message.taskId)}/${encodeURIComponent(token)}`;
+                })()
+              : `${baseUrl}/api/tasks/${encodeURIComponent(message.taskId)}`;
 
             const statusText = taskManager.formatTaskStatus(
               taskManager.getTask(message.taskId)!
             );
-            const deliveryMessage = `${statusText}\n📎 查看結果: ${deliveryUrl}`;
+            const deliveryMessage = hasIndex
+              ? `${statusText}\n🌐 預覽連結（需要 token 才能查看）: ${deliveryUrl}`
+              : `${statusText}\n📎 任務資訊: ${deliveryUrl}`;
 
             try {
               await sendWithRetry(
