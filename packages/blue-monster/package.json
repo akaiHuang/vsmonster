@@ -287,10 +287,20 @@
     "configuration": {
       "title": "BlueMonster",
       "properties": {
+        "blueMonster.gemini.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Google Gemini API Key (get from https://aistudio.google.com/apikey)"
+        },
         "blueMonster.reasoningEffort": {
           "type": "string",
           "default": "medium",
-          "enum": ["low", "medium", "high", "extra-high"],
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "extra-high"
+          ],
           "enumDescriptions": [
             "Low - 更快回應，較少推理",
             "Medium - 平衡速度與推理深度（預設）",
@@ -299,20 +309,20 @@
           ],
           "description": "GPT 模型的 Reasoning Effort 等級"
         },
-      "blueMonster.model": {
-        "type": "string",
-        "default": "",
-        "description": "Preferred Copilot model id (optional override)"
-      },
-      "blueMonster.primaryAgentName": {
-        "type": "string",
-        "default": "Jack",
-        "description": "Default agent display name for the first task/session."
-      },
-      "blueMonster.terminalConfirmation": {
-        "type": "string",
-        "default": "chat",
-        "enum": [
+        "blueMonster.model": {
+          "type": "string",
+          "default": "gemini-3-pro-preview",
+          "description": "Preferred model id (Gemini API). Example: gemini-2.5-pro, gemini-3-pro-preview"
+        },
+        "blueMonster.primaryAgentName": {
+          "type": "string",
+          "default": "Jack",
+          "description": "Default agent display name for the first task/session."
+        },
+        "blueMonster.terminalConfirmation": {
+          "type": "string",
+          "default": "chat",
+          "enum": [
             "chat",
             "modal",
             "off"
@@ -463,6 +473,6 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "@github/copilot-sdk": "^0.1.20"
+    "@google/generative-ai": "^0.24.1"
   }
 }

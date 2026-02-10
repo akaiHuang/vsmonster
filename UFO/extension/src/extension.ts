@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
-import { CopilotClient, CopilotSession } from "@github/copilot-sdk";
+import { geminiClient } from "./gemini-client";
 import { GatewayClient } from "./gateway-client";
 import { getDashboardHtml, type DashboardState } from "./dashboard";
 import {
@@ -790,18 +790,18 @@ class UfoDashboardProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const cfg = vscode.workspace.getConfiguration("ufo");
-    const modelId = cfg.get<string>("models.spec", "gpt-5-mini");
-    this.log("info", `[UFO] Multi-agent split requested: ${taskId}`, "info");
+	    const cfg = vscode.workspace.getConfiguration("ufo");
+	    const modelId = cfg.get<string>("models.spec", "gemini-3-pro-preview");
+	    this.log("info", `[UFO] Multi-agent split requested: ${taskId}`, "info");
 
     let split: { groupTitle: string; tasks: MultiAgentSubtask[] } | null = null;
     try {
-      split = await splitTextToMultiAgentSubtasks({
-        sourceText,
-        modelId: modelId || "gpt-5-mini",
-        output: this.output,
-        maxTasks: 6
-      });
+	      split = await splitTextToMultiAgentSubtasks({
+	        sourceText,
+	        modelId: modelId || "gemini-3-pro-preview",
+	        output: this.output,
+	        maxTasks: 6
+	      });
     } catch (err) {
       this.log("error", `[UFO] Multi-agent split failed: ${String(err)}`, "error");
       vscode.window.showWarningMessage(`模型拆分失敗：${String(err)}`);
@@ -1153,9 +1153,9 @@ function buildDashboardState(
       ? configuredPublicUrl
       : runtimePublicUrl;
   const envAutoSync = config.get<boolean>("env.autoSync", true);
-  const chatModel = config.get<string>("models.chat", "gpt-5-mini");
-  const specModel = config.get<string>("models.spec", "gpt-5-mini");
-  const opusModel = config.get<string>("models.opus", "opus-4.5");
+  const chatModel = config.get<string>("models.chat", "gemini-3-pro-preview");
+  const specModel = config.get<string>("models.spec", "gemini-3-pro-preview");
+  const opusModel = config.get<string>("models.opus", "gemini-3-pro-preview");
 
   const lineAccessToken = config.get<string>("line.channelAccessToken", "");
   const lineSecret = config.get<string>("line.channelSecret", "");
@@ -1402,171 +1402,7 @@ function syncEnvFromSettings(
   output.appendLine(`Synced UFO settings to .env (updated: ${updatedKeys.join(", ")})`);
 }
 
-class UfoCopilotSdkManager {
-  private client: CopilotClient | null = null;
-  private sessions = new Map<string, { session: CopilotSession; model: string }>();
-  private initPromise: Promise<void> | null = null;
-  private output: vscode.OutputChannel | null = null;
-  private dashboardLog: ((tag: string, message: string, tagClass: string) => void) | null = null;
-
-  setOutput(output: vscode.OutputChannel): void {
-    this.output = output;
-  }
-
-  setDashboardLog(fn: (tag: string, message: string, tagClass: string) => void): void {
-    this.dashboardLog = fn;
-  }
-
-  private log(message: string): void {
-    if (this.output) {
-      this.output.appendLine(`[UFO] ${message}`);
-    }
-    console.log(`[UFO] ${message}`);
-  }
-
-  async initialize(): Promise<void> {
-    if (this.client) {
-      return;
-    }
-    if (this.initPromise) {
-      return this.initPromise;
-    }
-    this.initPromise = (async () => {
-      this.log("🚀 Initializing Copilot SDK...");
-      this.client = new CopilotClient({
-        autoStart: true,
-        autoRestart: true,
-        useLoggedInUser: true,
-        logLevel: "warning"
-      });
-      await this.client.start();
-      this.log("✅ Copilot SDK client started");
-    })();
-    return this.initPromise;
-  }
-
-  async getSession(sessionKey: string, model: string): Promise<CopilotSession> {
-    await this.initialize();
-    if (!this.client) {
-      throw new Error("Copilot SDK client not initialized");
-    }
-    const existing = this.sessions.get(sessionKey);
-    if (existing && existing.model === model) {
-      return existing.session;
-    }
-    if (existing) {
-      try {
-        await existing.session.destroy();
-      } catch {}
-      this.sessions.delete(sessionKey);
-    }
-    // 移除 sessionKey 中的非法字元（冒號等），確保 sessionId 合法
-    const sanitizedKey = sessionKey.replace(/[^a-zA-Z0-9_-]/g, '_');
-    this.log(`🔵 Creating session for ${sanitizedKey}, model: ${model}`);
-    const session = await this.client.createSession({
-      sessionId: `ufo-${sanitizedKey}-${Date.now()}`,
-      model,
-      streaming: true,
-      infiniteSessions: { enabled: true }
-    });
-    
-    // 監聽 SDK 事件來顯示 AI 狀態
-    session.on((event: any) => {
-      this.handleSdkEvent(event, sessionKey);
-    });
-    
-    this.sessions.set(sessionKey, { session, model });
-    return session;
-  }
-
-  private handleSdkEvent(event: any, sessionKey: string): void {
-    if (!event) return;
-    const type = event.type;
-    switch (type) {
-      case 'assistant.turn_start':
-        this.log(`🧠 [${sessionKey}] Thinking...`);
-        this.dashboardLog?.('thinking', `[${sessionKey}] Thinking...`, 'thinking');
-        break;
-      case 'assistant.intent':
-        if (event.intent) {
-          this.log(`📋 [${sessionKey}] Intent: ${event.intent}`);
-          this.dashboardLog?.('intent', `[${sessionKey}] ${event.intent}`, 'intent');
-        }
-        break;
-      case 'assistant.reasoning_delta':
-        if (event.delta) {
-          const snippet = event.delta.substring(0, 80).replace(/\n/g, ' ');
-          this.log(`💭 [${sessionKey}] ${snippet}...`);
-          this.dashboardLog?.('thinking', `[${sessionKey}] ${snippet}`, 'thinking');
-        }
-        break;
-      case 'assistant.message_delta':
-        break;
-      case 'assistant.message':
-        this.log(`✅ [${sessionKey}] Response generated`);
-        this.dashboardLog?.('response', `[${sessionKey}] Response generated`, 'response');
-        break;
-      case 'assistant.turn_end':
-      case 'session.idle':
-        this.log(`🔵 [${sessionKey}] Idle`);
-        this.dashboardLog?.('info', `[${sessionKey}] Idle`, 'info');
-        break;
-      case 'tool.execution_start':
-        if (event.tool) {
-          this.log(`🔧 [${sessionKey}] Tool: ${event.tool}`);
-          this.dashboardLog?.('tool', `[${sessionKey}] ${event.tool}`, 'tool');
-        }
-        break;
-      case 'tool.execution_end':
-        this.log(`🔧 [${sessionKey}] Tool completed`);
-        this.dashboardLog?.('tool', `[${sessionKey}] Tool completed`, 'tool');
-        break;
-      default:
-        break;
-    }
-  }
-
-  async sendPrompt(sessionKey: string, model: string, prompt: string, timeoutMs = 300000): Promise<string> {
-    this.log(`📤 [${sessionKey}] Sending prompt (${prompt.length} chars)...`);
-    this.dashboardLog?.('info', `[${sessionKey}] Sending prompt (${prompt.length} chars)`, 'info');
-    const session = await this.getSession(sessionKey, model);
-    try {
-      const response = await session.sendAndWait({ prompt }, timeoutMs);
-      const content = response?.data?.content?.trim() ?? "";
-      this.log(`📥 [${sessionKey}] Received response (${content.length} chars)`);
-      this.dashboardLog?.('response', `[${sessionKey}] Response (${content.length} chars)`, 'response');
-      return content;
-    } catch (error) {
-      this.log(`❌ [${sessionKey}] Error: ${String(error)}`);
-      this.dashboardLog?.('error', `[${sessionKey}] ${String(error)}`, 'error');
-      const existing = this.sessions.get(sessionKey);
-      if (existing) {
-        try {
-          await existing.session.destroy();
-        } catch {}
-        this.sessions.delete(sessionKey);
-      }
-      throw error;
-    }
-  }
-
-  async shutdown(): Promise<void> {
-    for (const { session } of this.sessions.values()) {
-      try {
-        await session.destroy();
-      } catch {}
-    }
-    this.sessions.clear();
-    if (this.client) {
-      try {
-        await this.client.stop();
-      } catch {}
-    }
-    this.client = null;
-  }
-}
-
-const copilotSdk = new UfoCopilotSdkManager();
+// Gemini client is imported from ./gemini-client
 
 function findExecutableInPath(name: string): string | null {
   const envPath = process.env.PATH || "";
@@ -1626,32 +1462,146 @@ function loadCopilotInstructions(context: vscode.ExtensionContext): string {
   return `<copilot_instructions>\n${content}\n</copilot_instructions>`;
 }
 
+function looksLikeGeminiModelId(modelId: string): boolean {
+  const raw = String(modelId || "").trim().toLowerCase();
+  const stripped = raw.startsWith("models/") ? raw.slice("models/".length) : raw;
+  return (
+    stripped.startsWith("gemini") ||
+    stripped.startsWith("gemma") ||
+    stripped.startsWith("nano-") ||
+    stripped.startsWith("deep-research")
+  );
+}
+
+async function runCopilotPrompt(
+  modelId: string,
+  prompt: string,
+  output: vscode.OutputChannel,
+  timeoutMs = 300000
+): Promise<string> {
+  if (!vscode.lm?.selectChatModels) {
+    throw new Error("Language Model API is not available in this VS Code version.");
+  }
+
+  const requested = String(modelId || "").trim();
+  let models: vscode.LanguageModelChat[] = [];
+
+  // Prefer exact ID lookup when possible.
+  if (requested) {
+    try {
+      models = await vscode.lm.selectChatModels({ vendor: "copilot", id: requested });
+    } catch (err) {
+      output.appendLine(`[UFO] ⚠️ Copilot selectChatModels(id=...) failed: ${String(err)}`);
+    }
+  }
+
+  if (models.length === 0) {
+    models = await vscode.lm.selectChatModels({ vendor: "copilot" });
+
+    if (requested && models.length > 0) {
+      const lower = requested.toLowerCase();
+      const exact = models.find((m) => m.id.toLowerCase() === lower);
+      const fuzzy = exact || models.find((m) => m.id.toLowerCase().includes(lower) || m.name.toLowerCase().includes(lower));
+      if (fuzzy) {
+        models = [fuzzy];
+      }
+    }
+  }
+
+  const model = models[0];
+  if (!model) {
+    throw new Error("No Copilot models available. Check Copilot login and plan.");
+  }
+
+  output.appendLine(`[UFO] 📤 Sending to Copilot (model: ${model.name} / ${model.id})...`);
+
+  const tokenSource = new vscode.CancellationTokenSource();
+  const timer = setTimeout(() => {
+    try { tokenSource.cancel(); } catch {}
+  }, timeoutMs);
+
+  try {
+    const messages: vscode.LanguageModelChatMessage[] = [
+      vscode.LanguageModelChatMessage.User(prompt)
+    ];
+
+    const chatResponse = await model.sendRequest(messages, {}, tokenSource.token);
+    let text = "";
+    for await (const part of chatResponse.stream) {
+      if (part instanceof vscode.LanguageModelTextPart) {
+        text += part.value;
+      }
+    }
+    return text.trim();
+  } finally {
+    clearTimeout(timer);
+    tokenSource.dispose();
+  }
+}
+
 async function runSdkPrompt(
   sessionKey: string,
   modelId: string,
   prompt: string,
   output: vscode.OutputChannel
 ): Promise<string> {
-  // 確保 SDK manager 有 output channel
-  copilotSdk.setOutput(output);
-  
-  output.appendLine(`[UFO] 📤 Sending to Copilot SDK (model: ${modelId})...`);
+  const requestedModelId = String(modelId || "").trim();
+
+  // Route based on model id:
+  // - gemini/gemma/... -> Gemini API
+  // - otherwise -> VS Code Copilot LM API
+  if (!looksLikeGeminiModelId(requestedModelId)) {
+    try {
+      const response = await runCopilotPrompt(requestedModelId, prompt, output);
+      if (!response) {
+        output.appendLine("[UFO] ⚠️ Copilot returned empty response.");
+      } else {
+        output.appendLine(`[UFO] 📥 Response received (${response.length} chars)`);
+      }
+      return response;
+    } catch (error) {
+      const message = `Copilot request failed: ${String(error)}`;
+      output.appendLine(`[UFO] ❌ ${message}`);
+      console.error("[UFO] Copilot request failed:", error);
+      if (error instanceof Error && error.stack) {
+        output.appendLine(error.stack);
+      }
+      return "❌ Copilot 無法回應，請確認已登入 GitHub Copilot，或改用 Gemini 模型（例如 gemini-2.5-pro）。";
+    }
+  }
+
+  // 確保 Gemini client 有 output channel
+  geminiClient.setOutput(output);
+
+  output.appendLine(`[UFO] 📤 Sending to Gemini (model: ${requestedModelId})...`);
   try {
-    const response = await copilotSdk.sendPrompt(sessionKey, modelId, prompt);
+    const response = await geminiClient.sendPrompt(sessionKey, requestedModelId, prompt);
     if (!response) {
-      output.appendLine("[UFO] ⚠️ Copilot SDK returned empty response.");
+      output.appendLine("[UFO] ⚠️ Gemini returned empty response.");
     } else {
       output.appendLine(`[UFO] 📥 Response received (${response.length} chars)`);
     }
     return response;
   } catch (error) {
-    const message = `Copilot SDK failed: ${String(error)}`;
+    const errStr = String(error);
+    const message = `Gemini API failed: ${errStr}`;
     output.appendLine(`[UFO] ❌ ${message}`);
-    console.error("[UFO] Copilot SDK failed:", error);
+    console.error("[UFO] Gemini API failed:", error);
     if (error instanceof Error && error.stack) {
       output.appendLine(error.stack);
     }
-    return "❌ Copilot SDK 無法回應，請確認 Copilot CLI 已登入並可用。";
+
+    if (/api key not configured/i.test(errStr) || /api_key_invalid/i.test(errStr)) {
+      return "❌ Gemini API Key 尚未設定或無效，請設定 ufo.gemini.apiKey 或 GOOGLE_GEMINI_API_KEY（或讓 UFO 讀取 workspace 的 .env）。";
+    }
+    if (/\b404\b/.test(errStr) || /is not found for api version/i.test(errStr)) {
+      return `❌ Gemini 模型不可用：${requestedModelId}\n請改用有效的 Gemini model id（例如 gemini-2.5-pro / gemini-3-pro-preview）。`;
+    }
+    if (/\b429\b/.test(errStr) || /resource_exhausted/i.test(errStr)) {
+      return "❌ Gemini 達到速率限制，請稍後再試。";
+    }
+
+    return "❌ Gemini API 呼叫失敗（請打開 UFO Output 觀看詳細錯誤）。";
   }
 }
 
@@ -2983,7 +2933,7 @@ export function activate(context: vscode.ExtensionContext): void {
     try { dashboardProvider?.log("info", `📝 Interview -> create task: ${taskId}`, "info"); } catch {}
 
     // Generate a dev spec draft via Copilot SDK (best effort).
-    const specModel = vscode.workspace.getConfiguration("ufo").get<string>("models.spec", "gpt-5-mini");
+    const specModel = vscode.workspace.getConfiguration("ufo").get<string>("models.spec", "gemini-3-pro-preview");
     let devSpec = "";
     try {
       const specPrompt = [
@@ -3179,8 +3129,8 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   const promptStudioPanel = new PromptStudioPanel(context);
 
-  // 將 dashboard log 連接到 Copilot SDK
-  copilotSdk.setDashboardLog((tag, message, tagClass) => {
+  // 將 dashboard log 連接到 Gemini client
+  geminiClient.setDashboardLog((tag: string, message: string, tagClass: string) => {
     dashboardProvider.log(tag, message, tagClass);
   });
 
@@ -3260,9 +3210,9 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    const session = getSession(meta);
-    const config = vscode.workspace.getConfiguration("ufo");
-    const chatModelId = config.get<string>("models.chat", "gpt-5-mini");
+	    const session = getSession(meta);
+	    const config = vscode.workspace.getConfiguration("ufo");
+	    const chatModelId = config.get<string>("models.chat", "gemini-3-pro-preview");
 
     // Handle slash commands
     if (normalizedText.startsWith('/')) {
@@ -3323,13 +3273,13 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      if (cmdLower === 'model') {
-        if (!argText) {
-          const currentModel = chatModelId;
-          const availableModels = ['gpt-5-mini', 'gpt-4o', 'claude-sonnet', 'claude-opus', 'gemini-pro'];
-          const lines = [
-            '🤖 **模型設定**',
-            `- 目前: ${currentModel}`,
+	      if (cmdLower === 'model') {
+	        if (!argText) {
+	          const currentModel = chatModelId;
+	          const availableModels = ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gpt-5-mini', 'gpt-4o', 'claude-sonnet', 'claude-opus'];
+	          const lines = [
+	            '🤖 **模型設定**',
+	            `- 目前: ${currentModel}`,
             '',
             '可用模型:',
             ...availableModels.map(m => `- \`/model ${m}\``)
@@ -4194,6 +4144,6 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-  void copilotSdk.shutdown();
+  void geminiClient.shutdown();
   stopCloudflaredQuickTunnel();
 }

@@ -88,7 +88,7 @@ TypeScript monorepo (pnpm workspaces) · VS Code Extension API + Copilot SDK · 
 
 ## Built With
 
-`typescript` `vscode` `gemini-3-pro` `copilot-sdk` `express` `websocket` `nextjs` `line-bot-sdk` `telegram` `discord` `tailwindcss` `zustand` `pnpm`
+`typescript` `vscode` `gemini-3-pro-preview` `copilot-sdk` `express` `websocket` `nextjs` `line-bot-sdk` `telegram` `discord` `tailwindcss` `zustand` `pnpm`
 
 ## Try It
 

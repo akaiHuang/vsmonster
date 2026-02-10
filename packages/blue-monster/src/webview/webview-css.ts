@@ -966,6 +966,17 @@ body {
   border: 1px solid var(--border);
   border-radius: 12px;
 }
+.panel.overlay {
+  position: absolute;
+  top: 56px; /* below header */
+  left: 12px;
+  right: 12px;
+  margin: 0;
+  z-index: 220; /* above history panel (z=100) */
+  max-height: calc(100vh - 72px);
+  overflow: auto;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
 .panel-title {
   font-size: 13px;
   font-weight: 600;
@@ -997,6 +1008,9 @@ body {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
 }
 .panel-actions button {
   padding: 6px 14px;
@@ -1403,6 +1417,10 @@ body {
 .history-item-info {
   margin-left: 6px;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   width: 24px;
   height: 24px;
   border-radius: 8px;
@@ -1410,10 +1428,15 @@ body {
   background: rgba(255, 255, 255, 0.02);
   color: var(--text-3);
   cursor: pointer;
+  line-height: 1;
 }
 .history-item-info:hover {
   background: rgba(255, 255, 255, 0.05);
   color: var(--text);
+}
+.history-item-info:focus-visible {
+  outline: 2px solid rgba(139, 92, 246, 0.65);
+  outline-offset: 2px;
 }
 .history-item-time {
   font-size: 11px;

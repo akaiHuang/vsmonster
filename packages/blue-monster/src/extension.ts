@@ -49,8 +49,8 @@ const SDK_MODELS = [
   { id: 'claude-opus-4.5', label: 'Claude Opus 4.5', multiplier: '3x' },
   // Gemini 系列
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', multiplier: '1x' },
-  { id: 'gemini-3-flash', label: 'Gemini 3 Flash', multiplier: '0.33x' },
-  { id: 'gemini-3-pro', label: 'Gemini 3 Pro', multiplier: '1x' },
+  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (Preview)', multiplier: '0.33x' },
+  { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro (Preview)', multiplier: '1x' },
   // GPT 系列（部分支援 Reasoning Effort）
   { id: 'gpt-4.1', label: 'GPT-4.1', multiplier: '0x' },
   { id: 'gpt-4o', label: 'GPT-4o', multiplier: '0x' },
@@ -104,8 +104,8 @@ async function readLimited(filePath: string, maxChars: number): Promise<string |
   }
 }
 
-// ========== Copilot SDK - 真正的並行多工系統 ==========
-import { CopilotClient, CopilotSession } from '@github/copilot-sdk';
+// ========== Gemini SDK - 真正的並行多工系統 ==========
+import { geminiSDK, GeminiSession } from './gemini-client';
 
 function getMaxConcurrentTasks(): number {
   return vscode.workspace.getConfiguration(CONFIG_SECTION).get<number>('maxConcurrentTasks', 3);
@@ -115,202 +115,8 @@ function getRequestBudget(): number {
   return vscode.workspace.getConfiguration(CONFIG_SECTION).get<number>('requestBudget', 0);
 }
 
-// CopilotSDKManager - 管理真正的並行 Workers (每個 Task 獨立 Session)
-class CopilotSDKManager {
-  private client: CopilotClient | null = null;
-  private sessions: Map<string, CopilotSession> = new Map(); // chatId -> session
-  private sessionModels: Map<string, string> = new Map(); // chatId -> model (追蹤每個 session 使用的模型)
-  private busySessions: Set<string> = new Set(); // 正在執行請求的 session
-  private totalUsedBudget = 0;
-  private budgetExceeded = false;
-  private listeners: Array<() => void> = [];
-  private initPromise: Promise<void> | null = null;
-
-  // 初始化 Copilot Client
-  async initialize(): Promise<void> {
-    if (this.client) return;
-    if (this.initPromise) return this.initPromise;
-    
-    this.initPromise = (async () => {
-      try {
-        this.client = new CopilotClient({
-          autoStart: true,
-          autoRestart: true,
-          useLoggedInUser: true,
-          logLevel: 'warning'  // CLI accepts: none, error, warning, info, debug, all, default
-        });
-        await this.client.start();
-        console.log('[CopilotSDK] Client started - TRUE PARALLEL WORKERS enabled! 🏭');
-      } catch (err) {
-        console.error('[CopilotSDK] Failed to start client:', err);
-        this.client = null;
-        throw err;
-      }
-    })();
-    
-    return this.initPromise;
-  }
-
-  // 為任務創建獨立的 session (真正的並行 Worker)
-  async createWorker(chatId: string, model: string = 'gpt-4.1', reasoningEffort: string = 'medium'): Promise<CopilotSession> {
-    await this.initialize();
-    if (!this.client) {
-      throw new Error('Copilot SDK client not initialized');
-    }
-    
-    // 檢查預算
-    const budget = getRequestBudget();
-    if (budget > 0 && this.totalUsedBudget >= budget) {
-      this.budgetExceeded = true;
-      this.notifyListeners();
-      throw new Error(`預算已用盡 (${this.totalUsedBudget.toFixed(2)}/${budget})`);
-    }
-    
-    // 檢查是否已有 session，且模型是否改變
-    const existing = this.sessions.get(chatId);
-    const existingModel = this.sessionModels.get(chatId);
-    const modelKey = `${model}:${reasoningEffort}`;
-    
-    if (existing && existingModel === modelKey) {
-      // 模型相同，重用 session
-      return existing;
-    }
-    
-    if (existing && existingModel !== modelKey) {
-      // 模型改變，銷毀舊 session
-      console.log(`[CopilotSDK] 🔄 Model changed from ${existingModel} to ${modelKey}, recreating session...`);
-      try {
-        await existing.destroy();
-      } catch (e) { console.error('[CopilotSDK] Error destroying old session:', e); }
-      this.sessions.delete(chatId);
-      this.sessionModels.delete(chatId);
-    }
-    
-    // 創建新的獨立 session - 這是真正的並行 Worker！
-    // 嘗試將 reasoning_effort 傳遞給 createSession
-    // 注意：SDK 型別可能尚未更新，使用 as any 繞過檢查
-    const sessionOpts: any = {
-      sessionId: `${chatId}-${Date.now()}`, // 加入時間戳確保唯一
-      model: model,
-      streaming: true,
-      infiniteSessions: { enabled: true }
-    };
-    
-    if (reasoningEffort && reasoningEffort !== 'medium') {
-      // 修正: 移除 reasoningEffort (camelCase) 以避免 API 錯誤
-      // 根據實測 CAPIError: 400 invalid_request_body，可能是多餘的參數導致
-      sessionOpts.reasoning_effort = reasoningEffort;
-    }
-
-    const session = await this.client.createSession(sessionOpts);
-    
-    this.sessions.set(chatId, session);
-    this.sessionModels.set(chatId, modelKey);
-    this.notifyListeners();
-    console.log(`[CopilotSDK] 🔵 Worker CREATED for ${chatId}, model: ${model}, reasoning: ${reasoningEffort}`);
-    return session;
-  }
-
-  // 取得已存在的 session
-  getWorker(chatId: string): CopilotSession | undefined {
-    return this.sessions.get(chatId);
-  }
-
-  // 標記 session 開始執行
-  markBusy(chatId: string): void {
-    this.busySessions.add(chatId);
-    this.notifyListeners();
-  }
-
-  // 標記 session 執行完成
-  markIdle(chatId: string): void {
-    this.busySessions.delete(chatId);
-    this.notifyListeners();
-  }
-
-  // 銷毀任務的 session
-  async destroyWorker(chatId: string): Promise<void> {
-    const session = this.sessions.get(chatId);
-    if (session) {
-      try {
-        await session.destroy();
-      } catch (e) { console.error(`[CopilotSDK] Error destroying worker ${chatId}:`, e); }
-      this.sessions.delete(chatId);
-      this.sessionModels.delete(chatId);
-      this.busySessions.delete(chatId);
-      this.notifyListeners();
-      console.log(`[CopilotSDK] 🔴 Worker DESTROYED for ${chatId}`);
-    }
-  }
-
-  // 記錄 request 消耗
-  recordUsage(amount: number): void {
-    this.totalUsedBudget += amount;
-    const budget = getRequestBudget();
-    if (budget > 0 && this.totalUsedBudget >= budget) {
-      this.budgetExceeded = true;
-    }
-    this.notifyListeners();
-  }
-
-  // 重置預算
-  resetBudget(): void {
-    this.totalUsedBudget = 0;
-    this.budgetExceeded = false;
-    this.notifyListeners();
-  }
-
-  // 取得狀態
-  getStatus(): {
-    running: number;
-    total: number;
-    maxConcurrent: number;
-    usedBudget: number;
-    budget: number;
-    budgetExceeded: boolean;
-  } {
-    return {
-      running: this.busySessions.size,
-      total: this.sessions.size,
-      maxConcurrent: getMaxConcurrentTasks(),
-      usedBudget: this.totalUsedBudget,
-      budget: getRequestBudget(),
-      budgetExceeded: this.budgetExceeded
-    };
-  }
-
-  // 添加狀態監聽器
-  addListener(listener: () => void): () => void {
-    this.listeners.push(listener);
-    return () => {
-      const index = this.listeners.indexOf(listener);
-      if (index >= 0) this.listeners.splice(index, 1);
-    };
-  }
-
-  private notifyListeners(): void {
-    this.listeners.forEach(l => l());
-  }
-
-  // 關閉所有
-  async shutdown(): Promise<void> {
-    for (const [chatId, session] of this.sessions) {
-      try { await session.destroy(); } catch (e) { console.error(`[CopilotSDK] Error destroying session ${chatId} during shutdown:`, e); }
-    }
-    this.sessions.clear();
-    this.sessionModels.clear();
-    this.busySessions.clear();
-    if (this.client) {
-      try { await this.client.stop(); } catch (e) { console.error('[CopilotSDK] Error stopping client during shutdown:', e); }
-      this.client = null;
-    }
-    this.initPromise = null;
-    console.log('[CopilotSDK] 🛑 All workers shutdown');
-  }
-}
-
-// 全域 SDK Manager 實例 - 真正的並行工廠！
-const copilotSDK = new CopilotSDKManager();
+// GeminiSDKManager is imported from ./gemini-client
+// geminiSDK is the singleton instance for managing concurrent AI sessions
 
 // ========== TaskSession：每個任務的獨立狀態 ==========
 interface TaskState {
@@ -2072,7 +1878,7 @@ class BlueMonsterSession {
     tasksTotal: number;
     tasksRunning: number;
   } {
-    const sdk = copilotSDK.getStatus();
+    const sdk = geminiSDK.getStatus();
     return {
       busy: this.busy,
       mode: this.currentMode,
@@ -2378,6 +2184,13 @@ class BlueMonsterSession {
   ): Promise<ChatResult> {
     const chatId = this.currentChatId;
     const task = this.currentTask;
+    const preferredModel = getPreferredModelId() || '';
+    const preferredType = preferredModel ? detectModelType(preferredModel) : undefined;
+
+    // If the selected model is not a Gemini model, skip Gemini API and go straight to Copilot LM.
+    if (preferredModel && preferredType !== 'gemini') {
+      return await this._runLmCore(prompt, images, memoryContext);
+    }
     
     // ===== 真正的並行執行 - 使用 Copilot SDK =====
     try {
@@ -2401,7 +2214,7 @@ class BlueMonsterSession {
   ): Promise<ChatResult> {
     // 取得或創建獨立的 Worker Session
     this.appendThinking('🏭 啟動並行 Worker...');
-	    const preferredModel = getPreferredModelId() || 'gpt-4.1';
+		    const preferredModel = getPreferredModelId() || 'gemini-3-pro-preview';
 	    const configuredReasoning = getReasoningEffort();
 	    const reasoningSupported = supportsReasoningEffort(preferredModel);
 	    const reasoningEffort = reasoningSupported ? configuredReasoning : 'medium';
@@ -2411,11 +2224,11 @@ class BlueMonsterSession {
 	    console.log(`[BlueMonster] Using model: ${preferredModel}${reasoningSupported ? ` (Reasoning: ${reasoningEffort})` : ''}`);
     this.appendThinking(`🤖 模型: ${preferredModel}${reasoningSupported && reasoningEffort !== 'medium' ? ` (${reasoningEffort})` : ''}`);
     this.appendWorking('啟動並行 Worker...');
-    const session = await copilotSDK.createWorker(chatId, preferredModel, reasoningEffort);
+    const session = await geminiSDK.createWorker(chatId, preferredModel, reasoningEffort);
     const unsubscribe = session.on((event: any) => this.handleSdkActivityEvent(event, chatId));
     
     // 標記為忙碌
-    copilotSDK.markBusy(chatId);
+    geminiSDK.markBusy(chatId);
     this.broadcastQueueStatus();
     this.appendThinking(`🔵 Worker ${chatId.slice(0, 8)} 開始執行`);
     
@@ -2452,7 +2265,7 @@ class BlueMonsterSession {
       // 記錄 request 消耗
       const multiplierValue = getModelMultiplierValue(preferredModel);
       task.requestCount += multiplierValue;
-      copilotSDK.recordUsage(multiplierValue);
+      geminiSDK.recordUsage(multiplierValue);
 	      this.broadcast({ 
 	        type: 'agentInfo', 
 	        name: task.agentName, 
@@ -2465,10 +2278,10 @@ class BlueMonsterSession {
 	      });
       this.broadcastQueueStatus();
       
-      // 使用 sendAndWait - 更簡潔的 API
-      // 這是真正的並行！多個 session 可以同時 sendAndWait
-      this.appendThinking('🚀 發送請求 (並行模式)...');
-      this.appendWorking('送出請求到 Copilot...');
+	      // 使用 sendAndWait - 更簡潔的 API
+	      // 這是真正的並行！多個 session 可以同時 sendAndWait
+	      this.appendThinking('🚀 發送請求 (並行模式)...');
+	      this.appendWorking('送出請求到 Gemini API...');
       
       try {
         const response = await session.sendAndWait(
@@ -2487,17 +2300,17 @@ class BlueMonsterSession {
         // 如果 session 內部錯誤 (例如 timeout 或 invalid body)，可能會導致 session 狀態卡住
         // 因此必須銷毀此 session，確保下次請求能建立新的 worker
         console.error(`[BlueMonster] Worker ${chatId} crashed, destroying session:`, err);
-        await copilotSDK.destroyWorker(chatId);
+        await geminiSDK.destroyWorker(chatId);
         throw err; // 拋出給外層 catch 處理 (fallback)
       } finally {
         try { unsubscribe(); } catch {}
-        copilotSDK.markIdle(chatId);
+        geminiSDK.markIdle(chatId);
         this.broadcastQueueStatus();
       }
     } catch (err) {
        // 外層會 catch 並 fallback to LM API
        // 確保這裡也標記為閒置 (雖然 finally 已經處理了 inner try，但為了保險起見)
-       copilotSDK.markIdle(chatId);
+       geminiSDK.markIdle(chatId);
        this.broadcastQueueStatus();
        throw err; 
     }
@@ -2505,7 +2318,7 @@ class BlueMonsterSession {
   
   // 廣播狀態給所有 webview
   private broadcastQueueStatus(): void {
-    const status = copilotSDK.getStatus();
+    const status = geminiSDK.getStatus();
     this.broadcast({
       type: 'queueStatus',
       ...status
@@ -2695,7 +2508,7 @@ class BlueMonsterSession {
       }));
 
     let mergedOptions = [...baseOptions, ...extras];
-    const current = getPreferredModelId() || (dynamicModels[0]?.id ?? 'gpt-4.1');
+    const current = getPreferredModelId() || (dynamicModels[0]?.id ?? 'gemini-3-pro-preview');
     if (current && !mergedOptions.some(o => o.id === current)) {
       mergedOptions.unshift({
         id: current,
@@ -2831,7 +2644,7 @@ class BlueMonsterSession {
     
     // 銷毀當前 chat 的 session，讓下次請求使用新模型
     const chatId = this.currentChatId;
-    await copilotSDK.destroyWorker(chatId);
+    await geminiSDK.destroyWorker(chatId);
     console.log(`[BlueMonster] Session destroyed, next request will use: ${value}`);
     
     let msg = `✅ 已切換模型為 **${value}**`;
@@ -4338,6 +4151,6 @@ export async function deactivate() {
     await session.forceSaveHistory();
   }
   // 關閉 Copilot SDK 所有 Workers
-  await copilotSDK.shutdown();
+  await geminiSDK.shutdown();
   disposeTerminal();
 }

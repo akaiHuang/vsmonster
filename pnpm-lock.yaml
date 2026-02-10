@@ -18,11 +18,36 @@ importers:
         specifier: ^1.2.0
         version: 1.6.1(@types/node@20.19.30)
 
+  UFO/extension:
+    dependencies:
+      '@google/generative-ai':
+        specifier: ^0.24.1
+        version: 0.24.1
+      ws:
+        specifier: 8.19.0
+        version: 8.19.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.x
+        version: 20.19.30
+      '@types/vscode':
+        specifier: ^1.90.0
+        version: 1.108.1
+      '@types/ws':
+        specifier: ^8.5.10
+        version: 8.18.1
+      esbuild:
+        specifier: ^0.20.0
+        version: 0.20.2
+      typescript:
+        specifier: ^5.x
+        version: 5.9.3
+
   packages/blue-monster:
     dependencies:
-      '@github/copilot-sdk':
-        specifier: ^0.1.20
-        version: 0.1.20
+      '@google/generative-ai':
+        specifier: ^0.24.1
+        version: 0.24.1
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -802,79 +827,9 @@ packages:
     engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
     dev: true
 
-  /@github/copilot-darwin-arm64@0.0.399:
-    resolution: {integrity: sha512-8TQWPO9PrjR5g/y13nUmKBpk8oCHPpBPgHgp7hozIGedsbNJrcuABeNEsbkxowTwTiKgXEz5A5DGo5iN2AY+Ww==}
-    cpu: [arm64]
-    os: [darwin]
-    hasBin: true
-    requiresBuild: true
-    dev: false
-    optional: true
-
-  /@github/copilot-darwin-x64@0.0.399:
-    resolution: {integrity: sha512-Ge1a6zGpjTbVOUQyvT18NbphmyPidPoVERq7DOTTo3XdKDm8n2jFh6UjQl7atL0hnUaWsKOTx9qrgTPdQmqMDA==}
-    cpu: [x64]
-    os: [darwin]
-    hasBin: true
-    requiresBuild: true
-    dev: false
-    optional: true
-
-  /@github/copilot-linux-arm64@0.0.399:
-    resolution: {integrity: sha512-41TCc1zxSd6qI56xzOyVR91mW8i7SXQ6IrRbsDBAF8i1dbyzIDO2YZ4c23fn8IRJ3C0aCQvfMoFf/BpzHQ6igw==}
-    cpu: [arm64]
-    os: [linux]
-    hasBin: true
-    requiresBuild: true
-    dev: false
-    optional: true
-
-  /@github/copilot-linux-x64@0.0.399:
-    resolution: {integrity: sha512-TNjJ/Kli74wdFycayvFW8mSmBc6ssURGxc+kiJkL+DYKloefBvViqz4I9Luwee7jrCdP1sgHwcelMrGbQ9fDHQ==}
-    cpu: [x64]
-    os: [linux]
-    hasBin: true
-    requiresBuild: true
-    dev: false
-    optional: true
-
-  /@github/copilot-sdk@0.1.20:
-    resolution: {integrity: sha512-wBFROeWRoItJ/275g0Kp1B3rTvn5ZkAlRdYk8x/Nl0bkYF9mwA7CbsEvJc3V8PIwJ7ftJxR2x8utgq8m/pdtng==}
+  /@google/generative-ai@0.24.1:
+    resolution: {integrity: sha512-MqO+MLfM6kjxcKoy0p1wRzG3b4ZZXtPI+z2IE26UogS2Cm/XHO+7gGRBh6gcJsOiIVoH93UwKvW4HdgiOZCy9Q==}
     engines: {node: '>=18.0.0'}
-    dependencies:
-      '@github/copilot': 0.0.399
-      vscode-jsonrpc: 8.2.1
-      zod: 4.3.6
-    dev: false
-
-  /@github/copilot-win32-arm64@0.0.399:
-    resolution: {integrity: sha512-VInXjz1gaQcP0PZ18FBT0wdCNJld1huhisxUcegRpYdGgKHfUxdwU1N/2LcoZZZ+iin1NPt3mNsBJiI5W24RCA==}
-    cpu: [arm64]
-    os: [win32]
-    hasBin: true
-    requiresBuild: true
-    dev: false
-    optional: true
-
-  /@github/copilot-win32-x64@0.0.399:
-    resolution: {integrity: sha512-ddIYUm+HPvwhTOcVFIZNoIH8a00Wp6PtE/Zq7slShSMMjzqWLuvY0s9NdNt6ijPqxtNgwuHWPfPVS4OvqfkwSA==}
-    cpu: [x64]
-    os: [win32]
-    hasBin: true
-    requiresBuild: true
-    dev: false
-    optional: true
-
-  /@github/copilot@0.0.399:
-    resolution: {integrity: sha512-ULRmqkH6L6mdokjMTfLaJQDidJXDUy0EYE8lHsIDxXD4dUoGjfsNRswZ4We+JxIJiXuTF9U9KqQM55QRj/4kQA==}
-    hasBin: true
-    optionalDependencies:
-      '@github/copilot-darwin-arm64': 0.0.399
-      '@github/copilot-darwin-x64': 0.0.399
-      '@github/copilot-linux-arm64': 0.0.399
-      '@github/copilot-linux-x64': 0.0.399
-      '@github/copilot-win32-arm64': 0.0.399
-      '@github/copilot-win32-x64': 0.0.399
     dev: false
 
   /@grammyjs/types@3.23.0:
@@ -4513,11 +4468,6 @@ packages:
       - terser
     dev: true
 
-  /vscode-jsonrpc@8.2.1:
-    resolution: {integrity: sha512-kdjOSJ2lLIn7r1rtrMbbNCHjyMPfRnowdKjBQ+mGq6NAW5QY2bEZC/khaC5OR8svbbjvLEaIXkOq45e2X9BIbQ==}
-    engines: {node: '>=14.0.0'}
-    dev: false
-
   /webidl-conversions@3.0.1:
     resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
     dev: false
@@ -4638,10 +4588,6 @@ packages:
     resolution: {integrity: sha512-4LCcse/U2MHZ63HAJVE+v71o7yOdIe4cZ70Wpf8D/IyjDKYQLV5GD46B+hSTjJsvV5PztjvHoU580EftxjDZFQ==}
     engines: {node: '>=12.20'}
     dev: true
-
-  /zod@4.3.6:
-    resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
-    dev: false
 
   /zustand@4.5.7(@types/react@18.3.27)(react@18.3.1):
     resolution: {integrity: sha512-CHOUy7mu3lbD6o6LJLfllpjkzhHXSBlX8B9+qPddUsIfeF5S/UZ5q0kmCsnRqT1UHFQZchNFDDzMbQsuesHWlw==}

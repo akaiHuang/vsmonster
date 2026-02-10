@@ -23,7 +23,9 @@
     "onCommand:ufo.refreshQueue",
     "onCommand:ufo.openTasksRoot",
     "onCommand:ufo.openSettings",
-    "onCommand:ufo.syncEnv"
+    "onCommand:ufo.syncEnv",
+    "onCommand:ufo.ensurePublicUrl",
+    "onCommand:ufo.stopPublicUrl"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -57,6 +59,16 @@
         "command": "ufo.syncEnv",
         "title": "UFO: Sync .env",
         "icon": "$(sync)"
+      },
+      {
+        "command": "ufo.ensurePublicUrl",
+        "title": "UFO: Public URL (cloudflared)",
+        "icon": "$(link)"
+      },
+      {
+        "command": "ufo.stopPublicUrl",
+        "title": "UFO: Stop Public URL",
+        "icon": "$(debug-disconnect)"
       },
       {
         "command": "ufo.openPromptStudio",
@@ -246,20 +258,25 @@
           "default": "",
           "description": "Public base URL for approvals (syncs to VSMONSTER_PUBLIC_URL)"
         },
+        "ufo.gemini.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Google Gemini API Key (get from https://aistudio.google.com/apikey)"
+        },
         "ufo.models.chat": {
           "type": "string",
-          "default": "gpt-5-mini",
-          "description": "Copilot model id for UFO chat"
+          "default": "gemini-3-pro-preview",
+          "description": "Gemini model id for UFO chat"
         },
         "ufo.models.spec": {
           "type": "string",
-          "default": "gpt-5-mini",
-          "description": "Copilot model id for initial spec generation"
+          "default": "gemini-3-pro-preview",
+          "description": "Gemini model id for initial spec generation"
         },
         "ufo.models.opus": {
           "type": "string",
-          "default": "opus-4.5",
-          "description": "Copilot model id for Opus refinement (optional)"
+          "default": "gemini-3-pro-preview",
+          "description": "Gemini model id for advanced refinement (optional)"
         }
       }
     }
@@ -271,13 +288,13 @@
   },
   "devDependencies": {
     "@types/node": "^20.x",
-    "@types/ws": "^8.5.10",
     "@types/vscode": "^1.90.0",
+    "@types/ws": "^8.5.10",
     "esbuild": "^0.20.0",
     "typescript": "^5.x"
   },
   "dependencies": {
-    "@github/copilot-sdk": "0.1.20",
+    "@google/generative-ai": "^0.24.1",
     "ws": "8.19.0"
   }
 }

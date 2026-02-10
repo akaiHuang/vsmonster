@@ -47,7 +47,7 @@ export const WEBVIEW_HTML_TEMPLATE = `<!DOCTYPE html>
     </div>
   </div>
   
-  <div class="panel" id="modelPanel" hidden>
+  <div class="panel overlay" id="modelPanel" hidden>
     <div class="panel-title">🤖 Select Model</div>
     <div class="panel-meta" id="modelHint"></div>
     <select id="modelSelect" style="width: 100%; margin-bottom: 8px; padding: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; outline: none;"></select>
@@ -62,13 +62,13 @@ export const WEBVIEW_HTML_TEMPLATE = `<!DOCTYPE html>
     </div>
   </div>
 
-  <div class="panel" id="agentDetailPanel" hidden>
+  <div class="panel overlay" id="agentDetailPanel" hidden>
     <div class="panel-title" id="agentDetailTitle">👾 Agent</div>
     <div class="panel-meta" id="agentDetailMeta"></div>
     <div class="agent-detail-body" id="agentDetailBody"></div>
     <div class="panel-actions">
-      <button class="btn-secondary" id="agentDetailClose">Close</button>
-      <button class="btn-primary" id="agentDetailSwitch">Switch</button>
+      <button class="btn-secondary" id="agentDetailClose" title="關閉詳細資訊">關閉</button>
+      <button class="btn-primary" id="agentDetailSwitch" title="切換到這個任務">切換</button>
     </div>
   </div>
   
