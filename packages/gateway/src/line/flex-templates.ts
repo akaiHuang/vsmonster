@@ -60,6 +60,61 @@ export function createCheckResultBubble(
 }
 
 /**
+ * 創建「結果已就緒」通知 Bubble（用於 push notify）
+ * 用戶點擊後會觸發 postback，產生新的 replyToken，系統再回覆答案。
+ */
+export function createResultReadyBubble(
+  taskId: string,
+  message: string = '我已經思考完成。點擊按鈕即可取得答案（會以回覆方式顯示）。',
+  buttonLabel: string = '📬 查看答案'
+): LineFlexBubble {
+  return {
+    type: 'bubble',
+    size: 'kilo',
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'text',
+          text: '✅ 已完成',
+          weight: 'bold',
+          size: 'md',
+          color: '#1DB446',
+        },
+        {
+          type: 'text',
+          text: message,
+          size: 'sm',
+          color: '#666666',
+          margin: 'md',
+          wrap: true,
+        },
+      ],
+      paddingAll: '20px',
+    },
+    footer: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'button',
+          action: {
+            type: 'postback',
+            label: buttonLabel,
+            data: `action=check_result&taskId=${taskId}`,
+            displayText: '查看答案',
+          },
+          style: 'primary',
+          color: '#1DB446',
+        },
+      ],
+      paddingAll: '12px',
+    },
+  };
+}
+
+/**
  * 創建進度顯示 Bubble
  */
 export function createProgressBubble(

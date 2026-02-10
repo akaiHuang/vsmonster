@@ -12,9 +12,10 @@ import {
   HolographyServerConfig,
   ChannelType,
   IncomingMessage,
+  LineChannel,
 } from '@vsmonster/holography';
 import { loadConfig } from './config/loader';
-import { TaskManager } from './task/manager';
+import { TaskManager, isValidTaskId } from './task/manager';
 import { CommandProcessor } from './commands/processor';
 import { TunnelService } from './tunnel/service';
 import { CopilotBridge } from './copilot/bridge';
@@ -35,6 +36,7 @@ import { registerApiRoutes } from './routes/api.routes';
 import { renderSendMessagePage, renderTestPage } from './pages';
 import { handleExtensionMessage } from './handlers/extension-message';
 import { ingestIncomingMedia } from './handlers/media-ingestion';
+import { createStillProcessingBubble, parsePostbackData } from './line/flex-templates';
 
 export class HolographyGateway {
   private holography: HolographyServer;
@@ -48,6 +50,12 @@ export class HolographyGateway {
   private soulManager: SoulManager;
   private offlineGreetingLastSent: Map<string, number> = new Map();
   private readonly offlineGreetingCooldownMs = 15000;
+
+  // LINE long-task support: replyToken expires ~60s. We reply a "still thinking"
+  // notice before expiry, then push a "result ready" notify when done.
+  private readonly lineTaskTimeoutMs = 55000;
+  private readonly lineLoadingDurationSeconds = 60;
+  private lineTaskTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
   constructor() {
     this.config = loadConfig();
@@ -137,6 +145,7 @@ export class HolographyGateway {
         mcpController: this.mcpController,
         tunnelService: this.tunnelService,
         config: this.config,
+        lineTaskTimers: this.lineTaskTimers,
       });
     });
 
@@ -201,7 +210,13 @@ export class HolographyGateway {
   // ── Verified Message Handling ───────────────────────────────
 
   private async handleVerifiedMessage(message: IncomingMessage): Promise<void> {
-    const { channel, userId, text, media } = message;
+    const { channel, userId, text, media, eventType, postback } = message;
+
+    // LINE postback (notify button click): should work even if VS Code is offline.
+    if (channel === 'line' && eventType === 'postback' && postback) {
+      await this.handleLinePostback(message);
+      return;
+    }
 
     logger.info(`📨 [${channel}] ${userId}: ${text?.substring(0, 100) || '(media)'}`);
 
@@ -241,6 +256,12 @@ export class HolographyGateway {
       }
     }
 
+    // LINE: show "typing..." (Loading API) + replyToken timeout + notify flow
+    if (channel === 'line' && (typeof text === 'string' || (Array.isArray(media) && media.length > 0))) {
+      await this.handleLineLongTask(message);
+      return;
+    }
+
     // Forward non-command messages to VS Code Extension
     this.holography.broadcastRawToExtensions({
       type: 'ufo_message',
@@ -253,6 +274,170 @@ export class HolographyGateway {
       timestamp: message.timestamp.toISOString(),
       replyToken: message.replyToken, // LINE reply token for faster response
     });
+  }
+
+  private splitTextIntoChunks(text: string, maxLen: number): string[] {
+    const s = String(text ?? '');
+    if (!s) return [''];
+    const out: string[] = [];
+    for (let i = 0; i < s.length; i += maxLen) {
+      out.push(s.slice(i, i + maxLen));
+    }
+    return out.length > 0 ? out : [''];
+  }
+
+  private async sendLineText(
+    targetId: string,
+    text: string,
+    options: { replyToken?: string; chatId?: string } = {}
+  ): Promise<void> {
+    if (!targetId) return;
+    const maxLen = 4500; // LINE text message limit is 5000; keep a safe margin.
+    const chunks = this.splitTextIntoChunks(text, maxLen);
+    for (let i = 0; i < chunks.length; i++) {
+      const replyToken = i === 0 ? options.replyToken : undefined;
+      try {
+        await withRetry(() => this.holography.sendMessage(
+          'line',
+          targetId,
+          { text: chunks[i], chatId: options.chatId, replyToken }
+        ));
+      } catch (err) {
+        logger.warn(`Failed to send LINE message (chunk ${i + 1}/${chunks.length}): ${String(err)}`);
+      }
+    }
+  }
+
+  private async handleLineLongTask(message: IncomingMessage): Promise<void> {
+    const { userId, chatId, text } = message;
+    const targetId = chatId || userId;
+
+    // 1) Create a gateway-side task to store metadata + final result for postback retrieval.
+    const task = this.taskManager.createTask({
+      channel: 'line',
+      userId,
+      instruction: typeof text === 'string' ? text : '',
+      media: message.media,
+    });
+    try {
+      this.taskManager.updateTask(task.id, 'running', 1);
+    } catch {}
+
+    // 2) Store LINE metadata so we can reply before replyToken expires.
+    this.taskManager.setLineMetadata(task.id, {
+      targetId,
+      chatId,
+      originalReplyToken: message.replyToken,
+      loadingStartedAt: new Date(),
+      timeoutHandled: false,
+    });
+
+    // 3) Show "typing..." via LINE Loading API.
+    const lineChannel = this.holography.getChannelManager().getChannel<LineChannel>('line');
+    try {
+      await lineChannel?.showLoadingAnimation(targetId, this.lineLoadingDurationSeconds);
+    } catch (err) {
+      logger.debug(`Failed to start LINE loading animation: ${String(err)}`);
+    }
+
+    // 4) Set timeout: send a reply notice before replyToken expires.
+    const timeoutTimer = setTimeout(() => {
+      this.handleLineTaskTimeout(task.id).catch(err => {
+        logger.warn(`LINE task timeout handler failed for ${task.id}: ${String(err)}`);
+      });
+    }, this.lineTaskTimeoutMs);
+    this.lineTaskTimers.set(task.id, timeoutTimer);
+
+    // 5) Forward to VS Code extension with taskId (extension should not consume replyToken).
+    this.holography.broadcastRawToExtensions({
+      type: 'ufo_message',
+      channel: 'line',
+      userId,
+      chatId,
+      text,
+      media: message.media,
+      messageId: message.messageId,
+      timestamp: message.timestamp.toISOString(),
+      replyToken: message.replyToken,
+      taskId: task.id,
+    });
+
+    logger.info(`LINE long task created: ${task.id} for ${targetId}`);
+  }
+
+  private async handleLineTaskTimeout(taskId: string): Promise<void> {
+    const timer = this.lineTaskTimers.get(taskId);
+    if (timer) {
+      clearTimeout(timer);
+      this.lineTaskTimers.delete(taskId);
+    }
+
+    // If result is already available, let the extension-message handler deliver it.
+    // (This is a best-effort safeguard for races.)
+    if (this.taskManager.hasLLMResult(taskId)) {
+      return;
+    }
+
+    const meta = this.taskManager.getLineMetadata(taskId);
+    const targetId = meta?.targetId || meta?.chatId;
+    if (!targetId) return;
+
+    // Mark as timed out so we will push a notify when the result arrives.
+    this.taskManager.setLineMetadata(taskId, { timeoutHandled: true });
+
+    const notice = [
+      'think...work...',
+      '這題需要更多時間思考，我完成後會推播通知你。',
+      '收到通知後點一下，我會用新的 replyToken 回覆答案。',
+    ].join('\n');
+
+    // Reply once before replyToken expires (fallback to push if already invalid).
+    await this.sendLineText(targetId, notice, { replyToken: meta?.originalReplyToken, chatId: meta?.chatId });
+  }
+
+  private async handleLinePostback(message: IncomingMessage): Promise<void> {
+    const { userId, chatId, replyToken, postback } = message;
+    if (!replyToken) return;
+    if (!postback?.data) return;
+
+    const targetId = chatId || userId;
+    const params = parsePostbackData(postback.data);
+    const action = params.action;
+    const taskId = params.taskId;
+
+    if (action !== 'check_result') return;
+    if (!taskId || !isValidTaskId(taskId)) return;
+
+    const meta = this.taskManager.getLineMetadata(taskId);
+    if (meta?.targetId && meta.targetId !== targetId) {
+      await this.sendLineText(targetId, '❌ 這個結果不屬於目前的聊天室。', { replyToken, chatId });
+      return;
+    }
+
+    const lineChannel = this.holography.getChannelManager().getChannel<LineChannel>('line');
+    if (!lineChannel) return;
+
+    if (this.taskManager.hasLLMResult(taskId)) {
+      const llmResult = this.taskManager.getLLMResult(taskId);
+      if (llmResult?.content) {
+        await this.sendLineText(targetId, llmResult.content, { replyToken, chatId });
+        try {
+          this.taskManager.updateTask(taskId, 'completed', 100);
+        } catch {}
+      }
+      return;
+    }
+
+    // Result not ready yet (should be rare with "notify when ready" flow, but handle it).
+    const bubble = createStillProcessingBubble(
+      taskId,
+      '任務還在處理中，請稍後再點擊通知查看答案。'
+    );
+    try {
+      await lineChannel.sendFlexMessage(targetId, '還在處理中...', bubble, replyToken);
+    } catch (err) {
+      logger.warn(`Failed to send LINE still-processing bubble: ${String(err)}`);
+    }
   }
 
   // ── Lifecycle ───────────────────────────────────────────────

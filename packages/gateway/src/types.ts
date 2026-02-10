@@ -32,10 +32,22 @@ export interface LLMResult {
  * LINE 特定元數據
  */
 export interface LineMetadata {
+  /**
+   * Target chat ID for LINE (userId for 1:1, groupId/roomId for group/room).
+   * Needed for push messages (replyToken replies don't require it).
+   */
+  targetId?: string;
+  /**
+   * Original chatId from IncomingMessage (if provided by Holography).
+   * Kept for debugging / downstream routing.
+   */
+  chatId?: string;
   originalReplyToken?: string;
   loadingStartedAt?: Date;
   timeoutHandled?: boolean;
   timeoutTimer?: ReturnType<typeof setTimeout>;
+  /** Whether we've already pushed a "result ready" notification. */
+  notifySentAt?: Date;
 }
 
 export interface Task {

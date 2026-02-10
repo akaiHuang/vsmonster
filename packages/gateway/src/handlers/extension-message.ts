@@ -8,6 +8,7 @@ import {
   HolographyServer,
   ChannelType,
   TelegramChannel,
+  LineChannel,
   OutgoingMessage,
 } from '@vsmonster/holography';
 import { TaskManager } from '../task/manager';
@@ -15,6 +16,7 @@ import { MCPController } from '../mcp/controller';
 import { TunnelService } from '../tunnel/service';
 import { logger } from '../utils/logger';
 import { withRetry } from '../utils/retry';
+import { createResultReadyBubble } from '../line/flex-templates';
 
 /**
  * Send message with retry logic for rate limiting (429 errors)
@@ -28,12 +30,38 @@ async function sendWithRetry(
   await withRetry(() => holography.sendMessage(channel, userId, message));
 }
 
+function splitTextIntoChunks(text: string, maxLen: number): string[] {
+  const s = String(text ?? '');
+  if (!s) return [''];
+  const out: string[] = [];
+  for (let i = 0; i < s.length; i += maxLen) {
+    out.push(s.slice(i, i + maxLen));
+  }
+  return out.length > 0 ? out : [''];
+}
+
+async function sendLineText(
+  holography: HolographyServer,
+  targetId: string,
+  text: string,
+  options: { replyToken?: string; chatId?: string } = {}
+): Promise<void> {
+  const maxLen = 4500; // LINE limit is 5000; keep a safe margin.
+  const chunks = splitTextIntoChunks(text, maxLen);
+  for (let i = 0; i < chunks.length; i++) {
+    const replyToken = i === 0 ? options.replyToken : undefined;
+    await sendWithRetry(holography, 'line', targetId, { text: chunks[i], chatId: options.chatId, replyToken });
+  }
+}
+
 export interface ExtensionHandlerDependencies {
   holography: HolographyServer;
   taskManager: TaskManager;
   mcpController: MCPController;
   tunnelService: TunnelService;
   config: { port?: number };
+  // server.ts maintains this map; we clear timers when a result arrives.
+  lineTaskTimers?: Map<string, ReturnType<typeof setTimeout>>;
 }
 
 /**
@@ -67,6 +95,72 @@ export async function handleExtensionMessage(
     case 'copilot_response': {
       const text = message.text || message.content;
       if (message.channel && message.userId && text) {
+        // LINE long-task flow: store result, reply if still within replyToken window,
+        // otherwise push a "result ready" notify and let the user click to fetch via postback.
+        if (message.channel === 'line' && typeof message.taskId === 'string' && message.taskId.trim()) {
+          const enabledChannels = holography.getChannelManager().getEnabledChannels();
+          const canNotify = enabledChannels.includes('line');
+          if (!canNotify) {
+            holography.broadcastRawToExtensions({
+              type: 'copilot_response',
+              channel: message.channel,
+              userId: message.userId,
+              chatId: message.chatId,
+              text,
+              source: 'extension',
+            });
+            break;
+          }
+
+          const taskId = message.taskId.trim();
+
+          // Cancel timeout (if still pending).
+          const timer = deps.lineTaskTimers?.get(taskId);
+          if (timer) {
+            clearTimeout(timer);
+            deps.lineTaskTimers?.delete(taskId);
+          }
+
+          // Persist final content for postback retrieval.
+          taskManager.setLLMResult(taskId, text, {
+            model: typeof message.model === 'string' ? message.model : undefined,
+            tokensUsed: typeof message.tokensUsed === 'number' ? message.tokensUsed : undefined,
+          });
+
+          const lineMeta = taskManager.getLineMetadata(taskId);
+          const targetId = lineMeta?.targetId || lineMeta?.chatId || String(message.chatId || message.userId || '');
+          if (!targetId) break;
+
+          const lineChannel = holography.getChannelManager().getChannel<LineChannel>('line');
+          if (!lineChannel) break;
+
+          if (lineMeta?.timeoutHandled) {
+            // Push notify when ready (only once).
+            if (!lineMeta.notifySentAt) {
+              const bubble = createResultReadyBubble(taskId);
+              try {
+                await lineChannel.sendFlexMessage(targetId, '✅ 已完成', bubble);
+                taskManager.setLineMetadata(taskId, { notifySentAt: new Date() });
+              } catch (err) {
+                logger.warn(`Failed to push LINE result-ready notify: ${String(err)}`);
+              }
+            }
+          } else {
+            // Reply the answer (before replyToken expires). Remaining chunks are pushed.
+            try {
+              await sendLineText(holography, targetId, text, { replyToken: lineMeta?.originalReplyToken, chatId: lineMeta?.chatId });
+            } catch (err) {
+              logger.warn(`Failed to send LINE copilot response: ${String(err)}`);
+            }
+          }
+
+          try {
+            taskManager.updateTask(taskId, 'completed', 100);
+          } catch {}
+
+          break;
+        }
+
         const enabledChannels = holography.getChannelManager().getEnabledChannels();
         const canNotify = enabledChannels.includes(message.channel as ChannelType);
         if (!canNotify) {

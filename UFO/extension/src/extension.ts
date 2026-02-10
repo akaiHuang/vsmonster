@@ -3174,18 +3174,27 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  const sendToUser = (channel: string, userId: string, content: string, chatId?: string, replyToken?: string) => {
+  const sendToUser = (channel: string, userId: string, content: string, chatId?: string, replyToken?: string, taskId?: string) => {
     // 在選項前加分隔線（偵測「方案」「選擇」「選項」等關鍵字）
     const formattedContent = content.replace(
       /(\n)(方案\s*[A-Z]|選項\s*[A-Z0-9]|[A-Z]\s*[—–-]\s*|[A-Z]\)\s*)/g,
       '\n\n──────────────\n$2'
     );
 
+    const isLineLongTask = channel === "line" && typeof taskId === "string" && taskId.trim();
+
+    // Gateway-managed LINE long-task flow: do not consume replyToken here.
+    // We send the full content once; the gateway will decide reply vs notify + postback.
+    if (isLineLongTask) {
+      gatewayClient.send({ type: "copilot_response", channel, userId, chatId, content: formattedContent, taskId });
+      return;
+    }
+
     const chunks = splitMessage(formattedContent, 800);
     for (let i = 0; i < chunks.length; i++) {
       // Only use replyToken for the first chunk (LINE reply API can only be used once)
       const tokenForChunk = i === 0 ? replyToken : undefined;
-      gatewayClient.send({ type: "copilot_response", channel, userId, chatId, content: chunks[i], replyToken: tokenForChunk });
+      gatewayClient.send({ type: "copilot_response", channel, userId, chatId, content: chunks[i], replyToken: tokenForChunk, taskId });
     }
   };
 
@@ -3198,6 +3207,7 @@ export function activate(context: vscode.ExtensionContext): void {
       messageId?: string;
       timestamp?: string;
       replyToken?: string; // LINE reply token for faster response
+      taskId?: string; // Gateway taskId (used for LINE long-task notify/postback flow)
     }
   ) => {
     const normalizedText = text.trim();
@@ -3718,6 +3728,11 @@ export function activate(context: vscode.ExtensionContext): void {
       typingInterval = setInterval(tick, 4000);
     }
 
+    const isLineLongTask =
+      meta.channel === "line" &&
+      typeof meta.taskId === "string" &&
+      meta.taskId.trim().length > 0;
+
     // Track if replyToken has been used (LINE replyToken can only be used once)
     let replyTokenUsed = false;
     const getReplyToken = () => {
@@ -3726,65 +3741,102 @@ export function activate(context: vscode.ExtensionContext): void {
       return meta.replyToken;
     };
 
-    // 發送初始思考訊息（保留舊體驗，可透過設定切換）
     let phaseIndex = 0;
-    if (!useTypingIndicator) {
+    let hasTimedOut = false;
+    let thinkingInterval: NodeJS.Timeout | null = null;
+    let timeoutWarning: ReturnType<typeof setTimeout> | null = null;
+
+    const shouldEmitThinkingMessages = !useTypingIndicator && !isLineLongTask;
+    const shouldWarnReplyTokenExpiry =
+      meta.channel === "line" &&
+      !isLineLongTask &&
+      typeof meta.replyToken === "string" &&
+      meta.replyToken.length > 0;
+
+    // Gateway-managed LINE long task: gateway will show Loading + handle replyToken timeout + notify.
+    if (isLineLongTask) {
+      dashboardProvider.log("thinking", "LINE: loading/timeout/notify handled by Gateway", "thinking");
+    }
+
+    // Legacy/other channels: emit "Thinking..." messages.
+    if (shouldEmitThinkingMessages) {
       sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} ${thinkingPhases[phaseIndex]} 👾`, meta.chatId, getReplyToken());
       dashboardProvider.log('thinking', thinkingPhases[phaseIndex], 'thinking');
-    }
-    let hasTimedOut = false;
 
-    // 每 10 秒發送下一階段訊息（不使用 replyToken，因為可能已被使用）
-    const thinkingInterval = setInterval(() => {
-      phaseIndex = (phaseIndex + 1) % thinkingPhases.length;
-      if (!useTypingIndicator) {
+      // Every 10s: phase update (no replyToken).
+      thinkingInterval = setInterval(() => {
+        phaseIndex = (phaseIndex + 1) % thinkingPhases.length;
         sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} ${thinkingPhases[phaseIndex]} 👾`, meta.chatId);
         dashboardProvider.log('thinking', thinkingPhases[phaseIndex], 'thinking');
-      }
-    }, 10000);
+      }, 10000);
+    }
 
-    // 在 58 秒時發送最後警告（LINE Reply Token 60 秒後失效）
-    const timeoutWarning = setTimeout(() => {
-      hasTimedOut = true;
-      clearInterval(thinkingInterval);
-      if (!useTypingIndicator) {
-        sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} 我可能還需要思考久一點，你等等問我進度 👾`, meta.chatId);
-      }
-    }, 58000);
+    // Reply token warning (legacy LINE path only).
+    if (shouldWarnReplyTokenExpiry) {
+      timeoutWarning = setTimeout(() => {
+        hasTimedOut = true;
+        if (thinkingInterval) {
+          clearInterval(thinkingInterval);
+          thinkingInterval = null;
+        }
+        if (!useTypingIndicator) {
+          sendToUser(meta.channel, meta.userId, `👾 ${getRandomEmoji()} 我可能還需要思考久一點，你等等問我進度 👾`, meta.chatId);
+        }
+      }, 58000);
+    }
 
     try {
       const response = await runSdkPrompt(sessionKey, chatModelId, fullPrompt, output);
 
       // 清理計時器
-      clearInterval(thinkingInterval);
-      clearTimeout(timeoutWarning);
+      if (thinkingInterval) {
+        clearInterval(thinkingInterval);
+        thinkingInterval = null;
+      }
+      if (timeoutWarning) {
+        clearTimeout(timeoutWarning);
+        timeoutWarning = null;
+      }
       if (typingInterval) {
         clearInterval(typingInterval);
         typingInterval = null;
       }
 
-      if (!hasTimedOut) {
-        recordHistory(session, "assistant", response);
+      recordHistory(session, "assistant", response);
+
+      if (isLineLongTask) {
+        // Do not consume replyToken in extension; gateway will deliver via reply or notify+postback.
+        sendToUser(meta.channel, meta.userId, response, meta.chatId, undefined, meta.taskId);
+        dashboardProvider.log('response', `Reply (LINE task): ${response.substring(0, 120)}`, 'response');
+      } else if (!hasTimedOut) {
         // Use replyToken if available (e.g., if useTypingIndicator was on and we haven't used it yet)
         sendToUser(meta.channel, meta.userId, response, meta.chatId, getReplyToken());
         dashboardProvider.log('response', `Reply: ${response.substring(0, 120)}`, 'response');
       } else {
         output.appendLine(`[UFO] ⚠️ Reply token likely expired, response may require push message`);
-        recordHistory(session, "assistant", response);
-        // Don't use replyToken - it's likely expired after 58 seconds
         sendToUser(meta.channel, meta.userId, response, meta.chatId);
         dashboardProvider.log('response', `Reply (late): ${response.substring(0, 120)}`, 'response');
       }
     } catch (error) {
-      clearInterval(thinkingInterval);
-      clearTimeout(timeoutWarning);
+      if (thinkingInterval) {
+        clearInterval(thinkingInterval);
+        thinkingInterval = null;
+      }
+      if (timeoutWarning) {
+        clearTimeout(timeoutWarning);
+        timeoutWarning = null;
+      }
       if (typingInterval) {
         clearInterval(typingInterval);
         typingInterval = null;
       }
       const errorMsg = `❌ 發生錯誤: ${String(error)}`;
-      // Use replyToken if available
-      sendToUser(meta.channel, meta.userId, errorMsg, meta.chatId, getReplyToken());
+      if (isLineLongTask) {
+        sendToUser(meta.channel, meta.userId, errorMsg, meta.chatId, undefined, meta.taskId);
+      } else {
+        // Use replyToken if available
+        sendToUser(meta.channel, meta.userId, errorMsg, meta.chatId, getReplyToken());
+      }
       dashboardProvider.log('error', String(error), 'error');
     }
   };
@@ -3906,7 +3958,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	          chatId: typeof message.chatId === "string" ? message.chatId : undefined,
 	          messageId: message.messageId,
 	          timestamp: message.timestamp,
-	          replyToken: typeof message.replyToken === "string" ? message.replyToken : undefined
+	          replyToken: typeof message.replyToken === "string" ? message.replyToken : undefined,
+	          taskId: typeof message.taskId === "string" ? message.taskId : undefined
 	        });
 	      }
 	      return;
